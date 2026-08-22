@@ -24,47 +24,44 @@ data class SkkRuleSetItem(
 object SkkRuleSetPresets {
 
     // 内置清单（顺序即匹配优先级）：domainset → non_ip → ip
-    // 完整清单已全部验证 200 OK（2026-08-23）
+    // 全部条目均经 ruleset.skk.moe 验证为 200 OK（2026-08 实测）
     val presets: List<Triple<String, String, String>> = listOf(
-        // domainset（仅域名，不触发 DNS）
+        // ── domainset（仅域名，不触发 DNS 解析）──
         Triple("domainset", "cdn", "CDN 加速域名"),
         Triple("domainset", "download", "下载域名"),
-        Triple("domainset", "reject", "广告/跟踪拦截（域名集）"),
-        Triple("domainset", "reject_extra", "额外拦截域名"),
+        Triple("domainset", "reject", "广告/跟踪拦截域名"),
+        Triple("domainset", "reject_extra", "广告/跟踪拦截（扩展）"),
         Triple("domainset", "game-download", "游戏下载域名"),
         Triple("domainset", "speedtest", "测速域名"),
-        // non_ip（不触发 DNS）
-        Triple("non_ip", "cdn", "CDN（含IP类）"),
-        Triple("non_ip", "download", "下载（含IP类）"),
+        // ── non_ip（不触发 DNS 解析的规则）──
+        Triple("non_ip", "cdn", "CDN（非IP）"),
+        Triple("non_ip", "download", "下载（非IP）"),
         Triple("non_ip", "reject", "广告/跟踪拦截（非IP）"),
-        Triple("non_ip", "apple_services", "Apple 服务"),
-        Triple("non_ip", "apple_cn", "Apple 国区"),
-        Triple("non_ip", "apple_intelligence", "Apple Intelligence"),
-        Triple("non_ip", "ai", "AI 服务"),
-        Triple("non_ip", "direct", "直连规则"),
-        Triple("non_ip", "domestic", "国内规则"),
-        Triple("non_ip", "global", "全球规则"),
-        Triple("non_ip", "microsoft", "Microsoft 服务"),
-        Triple("non_ip", "telegram", "Telegram"),
-        Triple("non_ip", "neteasemusic", "网易云音乐"),
-        Triple("non_ip", "lan", "局域网"),
-        // ip（触发 DNS）
+        Triple("non_ip", "apple_services", "Apple 服务（非IP）"),
+        Triple("non_ip", "apple_cn", "Apple 中国服务（非IP）"),
+        Triple("non_ip", "apple_intelligence", "Apple Intelligence（非IP）"),
+        Triple("non_ip", "ai", "AI 服务（非IP）"),
+        Triple("non_ip", "direct", "直连域名（非IP）"),
+        Triple("non_ip", "domestic", "国内域名（非IP）"),
+        Triple("non_ip", "global", "全球域名（非IP）"),
+        Triple("non_ip", "microsoft", "Microsoft（非IP）"),
+        Triple("non_ip", "telegram", "Telegram（非IP）"),
+        Triple("non_ip", "neteasemusic", "网易云音乐（非IP）"),
+        Triple("non_ip", "lan", "局域网（非IP）"),
+        // ── ip（会触发 DNS 解析的规则）──
         Triple("ip", "cdn", "CDN（IP）"),
         Triple("ip", "download", "下载（IP）"),
         Triple("ip", "reject", "广告/跟踪拦截（IP）"),
         Triple("ip", "apple_services", "Apple 服务（IP）"),
         Triple("ip", "ai", "AI 服务（IP）"),
-        Triple("ip", "domestic", "国内（IP）"),
+        Triple("ip", "domestic", "国内 IP"),
         Triple("ip", "telegram", "Telegram（IP）"),
         Triple("ip", "neteasemusic", "网易云音乐（IP）"),
-        Triple("ip", "lan", "局域网（IP）"),
+        Triple("ip", "lan", "局域网 IP"),
     )
 
-    fun baseUrl(): String =
-        DataStore.skkBaseUrl.trimEnd('/').ifBlank { "https://ruleset.skk.moe/sing-box" }
-
     fun urlOf(category: String, name: String): String =
-        "${baseUrl()}/$category/$name.json"
+        "https://ruleset.skk.moe/sing-box/$category/$name.json"
 
     fun tagOf(category: String, name: String): String = "skk-$category-$name"
 
