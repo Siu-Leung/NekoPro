@@ -89,6 +89,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var enableCacheFile by configurationStore.boolean(Key.ENABLE_CACHE_FILE) { true }
     /** JSON 序列化的 skk 规则集预设启用清单：[{category, name, enabled, outbound}]，语义见 moe.matsuri.nb4a.SkkRuleSetItem */
     var skkRuleSets by configurationStore.string(Key.SKK_RULE_SETS) { "[]" }
+    /** skk 规则集源前缀（默认官方 CDN，可改为自建源） */
+    var skkBaseUrl by configurationStore.string(Key.SKK_BASE_URL) { "https://ruleset.skk.moe/sing-box" }
     var showBottomBar by configurationStore.boolean(Key.SHOW_BOTTOM_BAR)
     var routeMode by configurationStore.int("routeMode") { 0 } // 0 = 智能分流 (Rule), 1 = 全局代理 (Global)
     var profileLayoutMode by configurationStore.int("profileLayoutMode") { 0 } // 0 = 单列, 1 = 双列

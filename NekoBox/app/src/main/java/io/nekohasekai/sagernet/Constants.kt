@@ -153,6 +153,7 @@ object Key {
     const val ENABLE_CLASH_API = "enableClashAPI"
     const val ENABLE_CACHE_FILE = "enableCacheFile"
     const val SKK_RULE_SETS = "skkRuleSets"
+    const val SKK_BASE_URL = "skkBaseUrl"
 }
 
 object TunImplementation {
