@@ -7,4 +7,9 @@
         android:icon="@drawable/ic_action_note_add"
         android:title="@string/action_import_file"
         app:showAsAction="always" />
+    <item
+        android:id="@+id/action_update_assets"
+        android:icon="@drawable/ic_baseline_refresh_24"
+        android:title="@string/action_update_assets"
+        app:showAsAction="always" />
 </menu>

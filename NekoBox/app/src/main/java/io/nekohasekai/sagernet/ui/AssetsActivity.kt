@@ -163,8 +163,29 @@ class AssetsActivity : ThemedActivity() {
                 startFilesForResult(importFile, "*/*")
                 return true
             }
+            R.id.action_update_assets -> {
+                updateOnlineAssets()
+                return true
+            }
         }
         return false
+    }
+
+    private fun updateOnlineAssets() {
+        runOnDefaultDispatcher {
+            snackbar(getString(R.string.updating_assets)).show()
+            val results = mutableListOf<String>()
+            runCatching { results.add(Libcore.updateGeoIP()) }
+                .onFailure { results.add("geoip: ${it.readableMessage}") }
+            runCatching { results.add(Libcore.updateGeoSite()) }
+                .onFailure { results.add("geosite: ${it.readableMessage}") }
+            val text = results.joinToString("\n")
+            snackbar(
+                getString(R.string.assets_updated, text) + "\n" +
+                    getString(R.string.assets_update_restart)
+            ).show()
+            adapter.reloadAssets()
+        }
     }
 
     inner class AssetAdapter : RecyclerView.Adapter<AssetHolder>(),
