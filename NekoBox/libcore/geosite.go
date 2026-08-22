@@ -31,6 +31,15 @@ func getCachedGeositeReader(path string) (*geosites.Reader, error) {
 	return r, nil
 }
 
+// ResetGeositeCache drops the cached geosite reader so that a newly updated
+// geosite.db takes effect without restarting the process.
+func ResetGeositeCache() {
+	geositeLock.Lock()
+	cachedGeositeReader = nil
+	cachedGeositePath = ""
+	geositeLock.Unlock()
+}
+
 func getGeoSiteRules(code string) ([]option.HeadlessRule, error) {
 	dbPath := filepath.Join(externalAssetsPath, "geosite.db")
 	reader, err := getCachedGeositeReader(dbPath)

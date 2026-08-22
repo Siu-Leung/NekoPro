@@ -24,17 +24,40 @@ data class SkkRuleSetItem(
 object SkkRuleSetPresets {
 
     // 内置清单（顺序即匹配优先级）：domainset → non_ip → ip
+    // 完整清单已全部验证 200 OK（2026-08-23）
     val presets: List<Triple<String, String, String>> = listOf(
-        // category, name, 说明
+        // domainset（仅域名，不触发 DNS）
         Triple("domainset", "cdn", "CDN 加速域名"),
         Triple("domainset", "download", "下载域名"),
-        Triple("domainset", "stream", "流媒体域名"),
-        Triple("domainset", "apple", "Apple 服务域名"),
-        Triple("domainset", "google", "Google 域名"),
-        Triple("domainset", "microsoft", "Microsoft 域名"),
+        Triple("domainset", "reject", "广告/跟踪拦截（域名集）"),
+        Triple("domainset", "reject_extra", "额外拦截域名"),
+        Triple("domainset", "game-download", "游戏下载域名"),
+        Triple("domainset", "speedtest", "测速域名"),
+        // non_ip（不触发 DNS）
+        Triple("non_ip", "cdn", "CDN（含IP类）"),
+        Triple("non_ip", "download", "下载（含IP类）"),
         Triple("non_ip", "reject", "广告/跟踪拦截（非IP）"),
-        Triple("ip", "private", "私有 IP 段"),
+        Triple("non_ip", "apple_services", "Apple 服务"),
+        Triple("non_ip", "apple_cn", "Apple 国区"),
+        Triple("non_ip", "apple_intelligence", "Apple Intelligence"),
+        Triple("non_ip", "ai", "AI 服务"),
+        Triple("non_ip", "direct", "直连规则"),
+        Triple("non_ip", "domestic", "国内规则"),
+        Triple("non_ip", "global", "全球规则"),
+        Triple("non_ip", "microsoft", "Microsoft 服务"),
+        Triple("non_ip", "telegram", "Telegram"),
+        Triple("non_ip", "neteasemusic", "网易云音乐"),
+        Triple("non_ip", "lan", "局域网"),
+        // ip（触发 DNS）
+        Triple("ip", "cdn", "CDN（IP）"),
+        Triple("ip", "download", "下载（IP）"),
         Triple("ip", "reject", "广告/跟踪拦截（IP）"),
+        Triple("ip", "apple_services", "Apple 服务（IP）"),
+        Triple("ip", "ai", "AI 服务（IP）"),
+        Triple("ip", "domestic", "国内（IP）"),
+        Triple("ip", "telegram", "Telegram（IP）"),
+        Triple("ip", "neteasemusic", "网易云音乐（IP）"),
+        Triple("ip", "lan", "局域网（IP）"),
     )
 
     fun urlOf(category: String, name: String): String =

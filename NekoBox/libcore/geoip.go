@@ -14,22 +14,43 @@ import (
 )
 
 var (
-	geoipOpenOnce sync.Once
-	geoipReader   *maxminddb.Reader
-	geoipOpenErr  error
+	geoipOpenMu  sync.Mutex
+	geoipReader  *maxminddb.Reader
+	geoipOpenErr error
 
 	geoipRulesMu    sync.Mutex
 	geoipRulesCache = make(map[string][]option.HeadlessRule)
 )
 
 func getGeoipReader() (*maxminddb.Reader, error) {
-	geoipOpenOnce.Do(func() {
+	geoipOpenMu.Lock()
+	defer geoipOpenMu.Unlock()
+	return getGeoipReaderLocked()
+}
+
+func getGeoipReaderLocked() (*maxminddb.Reader, error) {
+	if geoipReader == nil {
 		geoipReader, geoipOpenErr = maxminddb.Open(filepath.Join(externalAssetsPath, "geoip.db"))
-	})
+	}
 	if geoipOpenErr != nil {
 		return nil, geoipOpenErr
 	}
 	return geoipReader, nil
+}
+
+// ResetGeoipCache drops the cached geoip reader and rules so that a newly
+// updated geoip.db takes effect without restarting the process.
+func ResetGeoipCache() {
+	geoipOpenMu.Lock()
+	if geoipReader != nil {
+		_ = geoipReader.Close()
+		geoipReader = nil
+	}
+	geoipOpenErr = nil
+	geoipOpenMu.Unlock()
+	geoipRulesMu.Lock()
+	geoipRulesCache = make(map[string][]option.HeadlessRule)
+	geoipRulesMu.Unlock()
 }
 
 func getGeoIPRules(countryCode string) ([]option.HeadlessRule, error) {
