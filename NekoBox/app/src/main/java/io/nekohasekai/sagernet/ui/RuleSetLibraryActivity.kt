@@ -123,9 +123,12 @@ class RuleSetLibraryActivity : ThemedActivity() {
                 else -> category
             }
             binding.ruleSetDesc.text = desc
-            binding.ruleSetSwitch.isChecked = state.enabled
             binding.ruleSetOutbound.text = state.outbound
 
+            // 先移除监听器再设置 isChecked，避免 setChecked 触发回调 → notifyItemChanged
+            // 在 RecyclerView layout 过程中调用导致崩溃（IllegalStateException）
+            binding.ruleSetSwitch.setOnCheckedChangeListener(null)
+            binding.ruleSetSwitch.isChecked = state.enabled
             binding.ruleSetSwitch.setOnCheckedChangeListener { _, isChecked ->
                 updateState { it.copy(enabled = isChecked) }
             }
