@@ -60,8 +60,11 @@ object SkkRuleSetPresets {
         Triple("ip", "lan", "局域网 IP"),
     )
 
+    fun baseUrl(): String =
+        DataStore.skkBaseUrl.trimEnd('/').ifBlank { "https://ruleset.skk.moe/sing-box" }
+
     fun urlOf(category: String, name: String): String =
-        "https://ruleset.skk.moe/sing-box/$category/$name.json"
+        "${baseUrl()}/$category/$name.json"
 
     fun tagOf(category: String, name: String): String = "skk-$category-$name"
 
