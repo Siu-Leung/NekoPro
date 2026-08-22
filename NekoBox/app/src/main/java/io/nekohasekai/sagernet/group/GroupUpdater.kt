@@ -55,7 +55,8 @@ abstract class GroupUpdater {
                 is NaiveBean -> continue
             }
 
-            if (!profile.serverAddress.isNullOrEmpty() && profile.serverAddress.isIpAddress()) continue
+            val serverAddress = profile.serverAddress
+            if (!serverAddress.isNullOrEmpty() && serverAddress.isIpAddress()) continue
 
             lookupJobs.add(GlobalScope.launch(lookupPool) {
                 try {
