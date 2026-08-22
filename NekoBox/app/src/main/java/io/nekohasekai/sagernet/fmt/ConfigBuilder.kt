@@ -158,11 +158,15 @@ fun buildConfig(
     }
 
     return MyOptions().apply {
-        if (!forTest && DataStore.enableClashAPI) experimental = ExperimentalOptions().apply {
-            clash_api = ClashAPIOptions().apply {
+        if (!forTest && (DataStore.enableClashAPI || DataStore.enableCacheFile)) experimental = ExperimentalOptions().apply {
+            if (DataStore.enableClashAPI) clash_api = ClashAPIOptions().apply {
                 external_controller = "127.0.0.1:9090"
                 secret = ClashApiSecret.value
                 external_ui = java.io.File(SagerNet.application.filesDir, "yacd").absolutePath
+            }
+            if (DataStore.enableCacheFile) cache_file = CacheFile().apply {
+                enabled = true
+                path = "cache.db"
             }
         }
 
@@ -608,6 +612,21 @@ fun buildConfig(
         // 对 rule_set tag 去重
         if (route.rule_set != null) {
             route.rule_set = route.rule_set.distinctBy { it.tag }
+        }
+
+        // skk 远程规则集预设（domainset → non_ip → ip，插到规则列表最前）
+        SkkRuleSetPresets.buildEnabledRuleSets().let { skkPairs ->
+            if (skkPairs.isNotEmpty()) {
+                val skkRuleSetList = skkPairs.map { it.first }
+                val skkRules = skkPairs.map { (rs, item) ->
+                    Rule_DefaultOptions().apply {
+                        rule_set = mutableListOf(rs.tag)
+                        outbound = item.outbound.ifBlank { TAG_PROXY }
+                    }
+                }
+                route.rule_set = (skkRuleSetList + (route.rule_set ?: emptyList()))
+                route.rules = (skkRules + (route.rules ?: emptyList()))
+            }
         }
 
         for (freedom in arrayOf(TAG_DIRECT, TAG_BYPASS)) outbounds.add(Outbound().apply {

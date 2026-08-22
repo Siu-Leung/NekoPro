@@ -151,6 +151,8 @@ object Key {
 
     const val APP_TLS_VERSION = "appTLSVersion"
     const val ENABLE_CLASH_API = "enableClashAPI"
+    const val ENABLE_CACHE_FILE = "enableCacheFile"
+    const val SKK_RULE_SETS = "skkRuleSets"
 }
 
 object TunImplementation {
