@@ -1,0 +1,58 @@
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <EditTextPreference
+        app:icon="@drawable/ic_social_emoji_symbols"
+        app:key="name"
+        app:title="@string/profile_name"
+        app:useSimpleSummaryProvider="true" />
+
+    <PreferenceCategory app:title="@string/proxy_cat">
+        <EditTextPreference
+            app:icon="@drawable/ic_hardware_router"
+            app:key="serverAddress"
+            app:title="@string/server_address"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:icon="@drawable/ic_maps_directions_boat"
+            app:key="serverPort"
+            app:title="@string/server_port"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:icon="@drawable/ic_settings_password"
+            app:key="psk"
+            app:title="@string/password" />
+        <EditTextPreference
+            app:icon="@drawable/ic_baseline_layers_24"
+            app:key="version"
+            app:title="Snell Version (default 4)"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Obfuscation">
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue="none"
+            app:entries="@array/snell_obfs_entries"
+            app:entryValues="@array/snell_obfs_entries"
+            app:icon="@drawable/ic_baseline_layers_24"
+            app:key="obfsMode"
+            app:title="Obfs Mode"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:icon="@drawable/ic_hardware_router"
+            app:key="obfsHost"
+            app:title="Obfs Host"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="TLS Fingerprint">
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue=""
+            app:entries="@array/utls_fingerprint_entry"
+            app:entryValues="@array/utls_fingerprint_entry"
+            app:icon="@drawable/ic_baseline_fingerprint_24"
+            app:key="clientFingerprint"
+            app:title="Client Fingerprint (uTLS)"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

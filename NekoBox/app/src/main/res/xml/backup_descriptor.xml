@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content xmlns:tools="http://schemas.android.com/tools"
+                     tools:ignore="FullBackupContent">
+    <!-- Excludes sager_net.db, configuration.db, and their journal files. -->
+    <exclude domain="database" path="." />
+    <exclude domain="device_database" path="." />
+</full-backup-content>
