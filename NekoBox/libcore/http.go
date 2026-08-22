@@ -30,6 +30,17 @@ import (
 
 var errFailConnectSocks5 = errors.New("fail connect socks5")
 
+// h1TransportCloser adapts *http.Transport (which only has
+// CloseIdleConnections) to io.Closer for unified transport cleanup.
+type h1TransportCloser struct {
+	*http.Transport
+}
+
+func (c h1TransportCloser) Close() error {
+	c.Transport.CloseIdleConnections()
+	return nil
+}
+
 // DefaultHTTPResponseMaxSize is the hard cap used by the legacy gomobile
 // methods. Callers that need a different budget can use the *WithLimit
 // methods without changing the existing API.
@@ -273,7 +284,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 				TLSHandshakeTimeout:   r.timeout,
 				ResponseHeaderTimeout: r.timeout,
 			}
-			transport = echTransport
+			transport = h1TransportCloser{echTransport}
 			echClient := &http.Client{
 				Transport: echTransport,
 				Timeout:   r.timeout,

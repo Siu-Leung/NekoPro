@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"libcore/procfs"
 	"log"
+	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -127,11 +128,11 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformConnectionOwnerFinder() bool {
 }
 
 func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConnectionOwnerRequest) (*adapter.ConnectionOwner, error) {
-	source, err := netip.ParseAddrPort(netip.JoinHostPort(request.SourceAddress, strconv.Itoa(int(request.SourcePort))))
+	source, err := netip.ParseAddrPort(net.JoinHostPort(request.SourceAddress, strconv.Itoa(int(request.SourcePort))))
 	if err != nil {
 		return nil, err
 	}
-	destination, err := netip.ParseAddrPort(netip.JoinHostPort(request.DestinationAddress, strconv.Itoa(int(request.DestinationPort))))
+	destination, err := netip.ParseAddrPort(net.JoinHostPort(request.DestinationAddress, strconv.Itoa(int(request.DestinationPort))))
 	if err != nil {
 		return nil, err
 	}

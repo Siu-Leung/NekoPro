@@ -54,6 +54,11 @@ func (p *platformLocalDNSTransport) Close() error {
 	return nil
 }
 
+// Reset implements adapter.DNSTransport. The platform DNS transport has no
+// persistent connections to close, so reset is a no-op.
+func (p *platformLocalDNSTransport) Reset() {
+}
+
 func (p *platformLocalDNSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
 	if p.raw && rawQueryFunc != nil {
 		// Raw - Android 10 及以上才有

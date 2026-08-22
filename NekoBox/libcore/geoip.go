@@ -50,7 +50,6 @@ func getGeoIPRules(countryCode string) ([]option.HeadlessRule, error) {
 	var (
 		ipNet           *net.IPNet
 		nextCountryCode string
-		err             error
 	)
 	for networks.Next() {
 		ipNet, err = networks.Network(&nextCountryCode)
