@@ -90,3 +90,16 @@ dependencies {
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
 }
+
+// ── geoip/geosite assets 自动补齐 ──
+// libcore extractAssets 需要 app/src/main/assets/sing-box/{geoip,geosite}.db.xz + version.txt。
+// 该目录被 .gitignore 排除（产物大），构建时如缺失则自动执行 buildScript/lib/assets.sh 下载。
+tasks.register<Exec>("ensureGeoAssets") {
+    val assetsDir = file("src/main/assets/sing-box")
+    onlyIf { !assetsDir.resolve("geoip.db.xz").exists() || !assetsDir.resolve("geosite.db.xz").exists() }
+    workingDir = rootProject.projectDir
+    commandLine("bash", "buildScript/lib/assets.sh")
+}
+tasks.named("preBuild") {
+    dependsOn("ensureGeoAssets")
+}
