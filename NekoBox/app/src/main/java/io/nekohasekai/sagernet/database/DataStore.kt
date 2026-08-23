@@ -122,8 +122,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var enableFakeDns by configurationStore.boolean(Key.ENABLE_FAKEDNS) { true }
 
     var rulesProvider by configurationStore.stringToInt(Key.RULES_PROVIDER)
-    var logLevel by configurationStore.stringToInt(Key.LOG_LEVEL)
-    var logBufSize by configurationStore.int(Key.LOG_BUF_SIZE) { 0 }
+    var logLevel by configurationStore.stringToInt(Key.LOG_LEVEL) { 4 }
+    // Larger in-memory tail preserves the lead-up to startup/config failures.
+    var logBufSize by configurationStore.int(Key.LOG_BUF_SIZE) { 500 }
     var acquireWakeLock by configurationStore.boolean(Key.ACQUIRE_WAKE_LOCK)
 
     // hopefully hashCode = mHandle doesn't change, currently this is true from KitKat to Nougat

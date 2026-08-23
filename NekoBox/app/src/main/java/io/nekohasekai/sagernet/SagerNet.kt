@@ -58,6 +58,10 @@ class SagerNet : Application(),
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 
         if (isMainProcess || isBgProcess) {
+            // This release is intentionally diagnostic: force trace logging
+            // even across upgrades where an older preference stored "none".
+            DataStore.logLevel = 4
+            if (DataStore.logBufSize < 500) DataStore.logBufSize = 500
             externalAssets.mkdirs()
             Seq.setContext(this)
             Libcore.initCore(

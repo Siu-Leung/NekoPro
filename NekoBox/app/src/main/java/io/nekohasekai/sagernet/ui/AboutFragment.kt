@@ -96,7 +96,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                         .addItem(
                             MaterialAboutActionItem.Builder()
                                 .icon(R.drawable.ic_baseline_layers_24)
-                                .text(R.string.mihomo_version_note)
+                                .text(getString(R.string.version_x, "mihomo"))
                                 .subText(Libcore.mihomoVersion())
                                 .build())
                         .apply {
