@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_desc">适用于 Android 之通用代理工具, 使用 Kotlin 编写。</string>
+    <string name="app_desc">基于 sing-box 主内核与 mihomo 协议桥接的 Android 代理客户端，支持 VLESS-XHTTP、Snell v1-v6 与 IPv4/IPv6 双栈。</string>
     <string name="project">项目</string>
     <string name="github">源代码</string>
     <string name="telegram">Telegram 更新频道</string>

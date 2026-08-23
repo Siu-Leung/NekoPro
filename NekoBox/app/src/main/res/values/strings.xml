@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name" translatable="false">Neko Pro</string>
     <string name="app_name_long" translatable="false">Neko Pro</string>
-    <string name="app_desc">The universal proxy toolchain for Android, written in Kotlin.</string>
+    <string name="app_desc">基于 sing-box 主内核与 mihomo 协议桥接的 Android 代理客户端，支持 VLESS-XHTTP、Snell v1-v6 与 IPv4/IPv6 双栈。</string>
     <string name="project">Project</string>
     <string name="github">Source code</string>
     <string name="telegram">Telegram update channel</string>
@@ -583,9 +583,9 @@
     <string name="minimize">Minimize</string>
     <string name="app_list_permission_denied">Unable to read installed apps.\nThis is usually because the system has restricted app read permissions.\nPlease grant permissions in the system settings.</string>
     <string name="open_app_settings">Open System Settings</string>
-    <string name="branch_info">Version Branch</string>
-    <string name="branch_desc">Neko Pro</string>
-    <string name="branch_desc_detail">Personal learning fork based on MatsuriDayo/NekoBoxForAndroid, for personal study only. Not for commercial use.</string>
-    <string name="supported_protocols">Supported Protocols</string>
-    <string name="supported_protocols_detail">AnyTLS / VMess / VLESS / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Snell / Naive / SSH / HTTP / SOCKS / WireGuard / Tor / Tailscale</string>
+    <string name="branch_info">Neko Pro 版本信息</string>
+    <string name="branch_desc">Neko-Pro-1.0.0</string>
+    <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.13.19-siu 主内核，并通过内置 mihomo 与 sing-snell 扩展现代协议能力。</string>
+    <string name="supported_protocols">实际支持协议</string>
+    <string name="supported_protocols_detail">AnyTLS / VMess / VLESS / VLESS-XHTTP / REALITY / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Snell v1-v6 / Naive / SSH / HTTP / SOCKS / WireGuard / Tor / Tailscale</string>
 </resources>
