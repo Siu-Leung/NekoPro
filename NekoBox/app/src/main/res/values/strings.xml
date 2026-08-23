@@ -242,10 +242,6 @@
     <string name="action_export">Export</string>
     <string name="action_import">Import from Clipboard</string>
     <string name="action_import_file">Import from file</string>
-    <string name="action_update_assets">Update assets</string>
-    <string name="updating_assets">Updating geoip/geosite…</string>
-    <string name="assets_updated">geoip/geosite updated (%1$s)</string>
-    <string name="assets_update_restart">Restart the connection to take effect</string>
     <string name="action_export_msg">Successfully export!</string>
     <string name="action_export_err">Failed to export.</string>
     <string name="action_import_msg">Successfully import!</string>
