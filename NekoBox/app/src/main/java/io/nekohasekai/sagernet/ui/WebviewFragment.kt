@@ -14,7 +14,17 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.databinding.LayoutWebviewBinding
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.security.ClashApiSecret
 import moe.matsuri.nb4a.utils.WebViewUtil
+import java.net.URLEncoder
+
+internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
+    if (!configuredUrl.startsWith("http://127.0.0.1:9090/ui")) return configuredUrl
+    val base = "http://127.0.0.1:9090/ui/"
+    val controller = URLEncoder.encode("http://127.0.0.1:9090", "UTF-8")
+    val encodedSecret = URLEncoder.encode(secret, "UTF-8")
+    return "${base}?hostname=$controller&port=9090&secret=$encodedSecret"
+}
 
 // Fragment必须有一个无参public的构造函数，否则在数据恢复的时候，会报crash
 
@@ -67,12 +77,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             }
         }
         mWebView.clearCache(false)
-        val url = if (DataStore.yacdURL.startsWith("http://127.0.0.1:9090/ui") && !DataStore.yacdURL.contains("/ui/")) {
-            DataStore.yacdURL.replace("/ui", "/ui/")
-        } else {
-            DataStore.yacdURL
-        }
-        mWebView.loadUrl(url)
+        mWebView.loadUrl(buildDashboardUrl(DataStore.yacdURL, ClashApiSecret.value))
     }
 
     @SuppressLint("CheckResult")
@@ -87,7 +92,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                     .setView(view)
                     .setPositiveButton(android.R.string.ok) { _, _ ->
                         DataStore.yacdURL = view.text.toString()
-                        mWebView.loadUrl(DataStore.yacdURL)
+                        mWebView.loadUrl(buildDashboardUrl(DataStore.yacdURL, ClashApiSecret.value))
                     }
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()
