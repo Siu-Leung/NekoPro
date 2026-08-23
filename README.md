@@ -12,10 +12,10 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 主要特性
 
-- sing-box `1.13.19-siu` 主内核
-- mihomo 协议桥接
+- sing-box `1.13.19` 主内核
+- Mihomo 协议桥接
 - VLESS-XHTTP
-- Snell v1–v5（mihomo）与 Snell v6（sing-snell）
+- Snell v1–v5（Mihomo）与 Snell v6（sing-snell）
 - IPv4 / IPv6 双栈
 - AnyTLS、VMess、VLESS、Trojan、Shadowsocks、ShadowTLS
 - Hysteria 1/2、TUIC、SSH、SOCKS、WireGuard 等
