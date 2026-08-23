@@ -4662,6 +4662,7 @@ public class SingBoxOptions {
         public Integer server_port;
         public String psk;
         public Integer version;
+        public String mode;
         public Boolean reuse;
         public Boolean udp;
         public Map<String, String> obfs_opts;

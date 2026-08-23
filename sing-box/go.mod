@@ -236,6 +236,9 @@ require (
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
 
-require github.com/metacubex/mihomo v0.0.0
+require (
+	github.com/metacubex/mihomo v0.0.0
+	github.com/sagernet/sing-snell v0.0.0-20260705025709-f4a50434aa5e
+)
 
 replace github.com/metacubex/mihomo => ../mihomo

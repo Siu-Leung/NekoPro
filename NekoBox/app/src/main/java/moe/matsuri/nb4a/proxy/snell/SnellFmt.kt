@@ -13,6 +13,7 @@ fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_Snel
         server_port = bean.serverPort
         psk = bean.psk
         version = bean.version ?: 4
+        if (version == 6) mode = bean.mode ?: "default"
         reuse = true
         udp = true
         // obfs-opts: only set when obfs mode is not "none"
@@ -44,6 +45,7 @@ fun SnellBean.toUri(): String {
         builder.encodedFragment(beanName.urlSafe())
     }
     builder.addQueryParameter("version", (version ?: 4).toString())
+    if (version == 6) builder.addQueryParameter("mode", mode ?: "default")
     val obfsMode = this.obfsMode
     if (!obfsMode.isNullOrBlank() && obfsMode != "none") {
         builder.addQueryParameter("obfs", obfsMode)
@@ -69,6 +71,7 @@ fun parseSnell(url: String): SnellBean {
         name = link.fragment
         psk = link.username
         version = link.queryParameter("version")?.toIntOrNull() ?: 4
+        mode = link.queryParameter("mode") ?: "default"
         obfsMode = link.queryParameter("obfs") ?: "none"
         obfsHost = link.queryParameter("obfs-host") ?: ""
         clientFingerprint = link.queryParameter("fp") ?: ""

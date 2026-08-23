@@ -6,14 +6,17 @@ import (
 	"os"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
+	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/sagernet/sing-box/adapter"
 	outboundAdapter "github.com/sagernet/sing-box/adapter/outbound"
+	"github.com/sagernet/sing-box/common/dialer"
 	boxConstant "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/mihomo_adapter"
+	"github.com/sagernet/sing-snell/snellv6"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
@@ -28,6 +31,33 @@ type Outbound struct {
 	proxy     C.ProxyAdapter
 	uotClient *uot.Client
 	logger    log.ContextLogger
+	v6Client  *snellv6.Client
+}
+
+func setMihomoIPv6Enabled() {
+	resolver.DisableIPv6 = false
+}
+
+func newV6Client(ctx context.Context, options option.SnellOutboundOptions) (*snellv6.Client, error) {
+	mode, err := snellv6.ParseMode(options.Mode)
+	if err != nil {
+		return nil, err
+	}
+	var outboundDialer N.Dialer
+	if ctx != nil {
+		outboundDialer, err = dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
+		if err != nil {
+			return nil, err
+		}
+	}
+	server := options.ServerOptions.Build()
+	return snellv6.NewClient(snellv6.ClientOptions{
+		PSK:    []byte(options.PSK),
+		Mode:   mode,
+		Reuse:  options.Reuse == nil || *options.Reuse,
+		Dialer: outboundDialer,
+		Server: server,
+	})
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.SnellOutboundOptions) (adapter.Outbound, error) {
@@ -38,6 +68,17 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	reuse := true
 	if options.Reuse != nil {
 		reuse = *options.Reuse
+	}
+	if ver == 6 {
+		client, err := newV6Client(ctx, options)
+		if err != nil {
+			return nil, err
+		}
+		return &Outbound{
+			Adapter:  outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeSnell, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+			logger:   logger,
+			v6Client: client,
+		}, nil
 	}
 	snellOption := &outbound.SnellOption{
 		Name:              tag,
@@ -52,6 +93,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	mihomo_adapter.InstallProtectHook(ctx)
+	// Embedded mihomo defaults to IPv4-only unless its full Clash executor
+	// initializes global DNS state. The Android bridge embeds only outbounds,
+	// so allow literal/domain IPv6 servers here.
+	setMihomoIPv6Enabled()
 
 	proxy, err := outbound.NewSnell(*snellOption)
 	if err != nil {
@@ -83,6 +128,9 @@ func (d snellDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) 
 }
 
 func (h *Outbound) createProxy(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
+	if h.v6Client != nil {
+		return h.v6Client.DialContext(ctx, destination)
+	}
 	meta := &C.Metadata{
 		NetWork: C.TCP,
 		Host:    destination.AddrString(),
@@ -111,6 +159,9 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 }
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
+	if h.v6Client != nil {
+		return nil, os.ErrInvalid
+	}
 	meta := &C.Metadata{
 		NetWork: C.UDP,
 		Host:    destination.AddrString(),
@@ -128,5 +179,8 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 }
 
 func (h *Outbound) Close() error {
+	if h.v6Client != nil {
+		return h.v6Client.Close()
+	}
 	return h.proxy.Close()
 }

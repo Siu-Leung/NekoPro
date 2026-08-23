@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
+	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -29,6 +30,10 @@ type Outbound struct {
 	proxy     C.ProxyAdapter
 	uotClient *uot.Client
 	logger    log.ContextLogger
+}
+
+func setMihomoIPv6Enabled() {
+	resolver.DisableIPv6 = false
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VlessXHTTPOutboundOptions) (adapter.Outbound, error) {
@@ -63,6 +68,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	mihomo_adapter.InstallProtectHook(ctx)
+	// This library embedding bypasses mihomo's Clash executor, whose normal
+	// responsibility includes enabling IPv6 in the resolver.
+	setMihomoIPv6Enabled()
 
 	proxy, err := outbound.NewVless(*vlessOption)
 	if err != nil {
