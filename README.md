@@ -1,5 +1,9 @@
 # NekoPro
 
+[![CI](https://github.com/Siu-Leung/NekoPro/actions/workflows/ci.yml/badge.svg)](https://github.com/Siu-Leung/NekoPro/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Siu-Leung/NekoPro)](https://github.com/Siu-Leung/NekoPro/releases/latest)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+
 NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 [MatsuriDayo/NekoBoxForAndroid](https://github.com/MatsuriDayo/NekoBoxForAndroid)
 深度修改而来。
@@ -21,6 +25,34 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 ## 当前版本
 
 `Neko-Pro-1.0.0`
+
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.0.0)
+- 发布资产：`Neko-Pro-1.0.0-arm64-v8a.apk`
+
+## 主要改动
+
+相较上游，本项目不是仅修改名称或界面，主要结构性改动包括：
+
+- 将 sing-box 1.13 已移除的旧 TUN、sniff 与 DNS 字段迁移到新版配置模型。
+- 在 Android 专用 outbound registry 中注册自定义协议。
+- 通过 mihomo 桥接 VLESS-XHTTP 与 Snell v1–v5。
+- 接入 sing-snell 实现 Snell v6，并保留 Android VPN socket protect 链路。
+- 修复 mihomo 桥接协议的 IPv6 字面量解析。
+- Clash API 仅监听回环地址，使用安装级随机 Secret，并由仪表板自动认证。
+- 对导入、分享和日志路径做敏感字段收敛，避免记录完整 URI、密码、PSK 和 Token。
+
+## 已执行验证
+
+首个 Release 在本地执行并通过了以下验证：
+
+- sing-box：`go test ./...`
+- 重点协议：`go test -race` 与 `go vet`
+- Android libcore：gomobile 四 ABI bind
+- Android：Release 单元测试、Kotlin Release 编译、`assembleOssRelease`
+- APK：包名、版本、ABI、原生库内容与 v1/v2 签名检查
+- 真机：Snell v4/v5/v6、VLESS-XHTTP、AnyTLS，以及 IPv4/IPv6 双栈入口
+
+CI 提供可重复的 Go 测试；Android 原生核心与 APK 的完整构建结果以 Release 验证记录为准。协议可用性仍以真实网络与真机测试为准。
 
 ## 构建
 
@@ -54,6 +86,6 @@ Release 签名信息不在仓库中。请自行配置本地 keystore，切勿提
 
 ## License
 
-Android 应用沿用上游的 GPL-3.0 许可，详见 [`NekoBox/LICENSE`](NekoBox/LICENSE)。
+本项目根许可证见 [`LICENSE`](LICENSE)，Android 应用沿用上游的 GPL-3.0-or-later 许可，详见 [`NekoBox/LICENSE`](NekoBox/LICENSE)。
 仓库内 vendored/派生组件保留其各自许可证；相关文件包括
 [`sing-box/LICENSE`](sing-box/LICENSE) 与 [`mihomo/LICENSE`](mihomo/LICENSE)。

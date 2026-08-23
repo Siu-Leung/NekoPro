@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-tests:
+    name: Go tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.7'
+          cache-dependency-path: |
+            sing-box/go.sum
+            NekoBox/libcore/go.sum
+      - name: Test sing-box
+        working-directory: sing-box
+        run: go test ./...
+      - name: Test libcore
+        working-directory: NekoBox/libcore
+        run: go test ./...
