@@ -125,8 +125,8 @@ func (t *Outbound) start() error {
 	proxyUsername := t.proxy.Username()
 	proxyPassword := t.proxy.Password()
 	t.logger.Trace("created upstream proxy at ", proxyPort)
-	t.logger.Trace("upstream proxy username ", proxyUsername)
-	t.logger.Trace("upstream proxy password ", proxyPassword)
+	// Never write generated proxy credentials to diagnostic logs.
+	t.logger.Trace("configured authenticated upstream proxy")
 	confOptions := []*control.KeyVal{
 		control.NewKeyVal("Socks5Proxy", proxyPort),
 		control.NewKeyVal("Socks5ProxyUsername", proxyUsername),

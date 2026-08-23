@@ -245,12 +245,16 @@ fun buildConfig(
         // 移到 route rule actions (legacy inbound fields 在 1.13 已移除)
         if (needSniff) {
             route.rules.add(Rule_DefaultOptions().apply {
+                // Preserve the legacy inbound scope. Internal mapping
+                // inbounds carry proxy handshakes and must not be sniffed.
+                inbound = listOf("tun-in", TAG_MIXED)
                 action = "sniff"
                 sniff_override_destination = needSniffOverride
             })
         }
         if (DataStore.resolveDestination) {
             route.rules.add(Rule_DefaultOptions().apply {
+                inbound = listOf("tun-in", TAG_MIXED)
                 action = "resolve"
                 strategy = genDomainStrategy(true)
             })

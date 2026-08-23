@@ -35,7 +35,10 @@ func init() {
 	dialer.DoNotSelectInterface = true
 }
 
-var mainInstance *BoxInstance
+var (
+	mainInstance       *BoxInstance
+	mainInstanceAccess sync.RWMutex
+)
 
 func VersionBox() string {
 	version := []string{
@@ -67,10 +70,13 @@ func MihomoVersion() string {
 
 func ResetAllConnections(system bool) {
 	if system {
-		mainInstance.access.Lock()
-		defer mainInstance.access.Unlock()
-		if mainInstance != nil {
-			mainInstance.Box.Network().ResetNetwork()
+		mainInstanceAccess.RLock()
+		instance := mainInstance
+		mainInstanceAccess.RUnlock()
+		if instance != nil {
+			instance.access.Lock()
+			defer instance.access.Unlock()
+			instance.Box.Network().ResetNetwork()
 			log.Println("Reset all connections done")
 		} else {
 			log.Println("Reset all connections skipped (no instance)")
@@ -165,10 +171,12 @@ func (b *BoxInstance) Close() (err error) {
 	b.state = 2
 
 	// clear main instance
+	mainInstanceAccess.Lock()
 	if mainInstance == b {
 		mainInstance = nil
 		goServeProtect(false)
 	}
+	mainInstanceAccess.Unlock()
 
 	// close box
 	if b.cancel != nil {
@@ -195,7 +203,9 @@ func (b *BoxInstance) Wake() {
 }
 
 func (b *BoxInstance) SetAsMain() {
+	mainInstanceAccess.Lock()
 	mainInstance = b
+	mainInstanceAccess.Unlock()
 	goServeProtect(true)
 }
 
@@ -247,14 +257,17 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 		return speedtest.UrlTest(createProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
 	}
 	// test direct
-	if mainInstance == nil {
+	mainInstanceAccess.RLock()
+	instance := mainInstance
+	mainInstanceAccess.RUnlock()
+	if instance == nil {
 		return speedtest.UrlTest(createProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
 	}
 	// test mainInstance
-	if mainInstance.statsService != nil {
-		connectionTracker = mainInstance.statsService
+	if instance.statsService != nil {
+		connectionTracker = instance.statsService
 	}
-	return speedtest.UrlTest(createProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	return speedtest.UrlTest(createProxyHttpClient(instance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
 }
 
 func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker) *http.Client {

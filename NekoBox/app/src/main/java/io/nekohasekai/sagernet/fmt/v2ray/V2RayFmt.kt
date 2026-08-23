@@ -485,6 +485,18 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
                 builder.setQueryParameter("serviceName", path!!)
             }
         }
+
+        "xhttp" -> {
+            if (host!!.isNotBlank()) {
+                builder.addQueryParameter("host", host!!)
+            }
+            if (path!!.isNotBlank()) {
+                builder.addQueryParameter("path", path!!)
+            }
+            if (xhttpMode!!.isNotBlank()) {
+                builder.addQueryParameter("mode", xhttpMode!!)
+            }
+        }
     }
 
     if (security!!.isNotBlank() && security != "none") {
