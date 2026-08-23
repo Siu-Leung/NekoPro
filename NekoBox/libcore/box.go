@@ -17,6 +17,7 @@ import (
 
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
+	mihomoConstant "github.com/metacubex/mihomo/constant"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/experimental/v2rayapi"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -58,6 +59,10 @@ func VersionBox() string {
 	}
 
 	return strings.Join(version, "\n")
+}
+
+func MihomoVersion() string {
+	return mihomoConstant.Version
 }
 
 func ResetAllConnections(system bool) {

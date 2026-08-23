@@ -676,20 +676,21 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
                     }
                 }
                 return Outbound_VLESSOptions().apply {
-                type = "vless"
-                server = bean.serverAddress
-                server_port = bean.serverPort
-                uuid = bean.uuid
-                if (bean.encryption!!.isNotBlank() && bean.encryption != "auto") {
-                    flow = bean.encryption
+                    type = "vless"
+                    server = bean.serverAddress
+                    server_port = bean.serverPort
+                    uuid = bean.uuid
+                    if (bean.encryption!!.isNotBlank() && bean.encryption != "auto") {
+                        flow = bean.encryption
+                    }
+                    when (bean.packetEncoding) {
+                        0 -> packet_encoding = ""
+                        1 -> packet_encoding = "packetaddr"
+                        2 -> packet_encoding = "xudp"
+                    }
+                    tls = buildSingBoxOutboundTLS(bean)
+                    transport = buildSingBoxOutboundStreamSettings(bean)
                 }
-                when (bean.packetEncoding) {
-                    0 -> packet_encoding = ""
-                    1 -> packet_encoding = "packetaddr"
-                    2 -> packet_encoding = "xudp"
-                }
-                tls = buildSingBoxOutboundTLS(bean)
-                transport = buildSingBoxOutboundStreamSettings(bean)
             }
             return Outbound_VMessOptions().apply {
                 type = "vmess"

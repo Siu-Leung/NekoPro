@@ -92,7 +92,12 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .icon(R.drawable.ic_baseline_layers_24)
                                 .text(getString(R.string.version_x, "sing-box"))
                                 .subText(Libcore.versionBox())
-                                .setOnClickAction { }
+                                .build())
+                        .addItem(
+                            MaterialAboutActionItem.Builder()
+                                .icon(R.drawable.ic_baseline_layers_24)
+                                .text(R.string.mihomo_version_note)
+                                .subText(Libcore.mihomoVersion())
                                 .build())
                         .apply {
                             PackageCache.awaitLoadSync()
