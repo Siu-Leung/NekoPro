@@ -23,6 +23,7 @@ const (
 	TypeSnell        = "snell"
 	TypeShadowsocksR = "shadowsocksr"
 	TypeVLESS        = "vless"
+	TypeVlessXHTTP   = "vless_xhttp"
 	TypeTUIC         = "tuic"
 	TypeHysteria2    = "hysteria2"
 	TypeTailscale    = "tailscale"
@@ -81,6 +82,8 @@ func ProxyDisplayName(proxyType string) string {
 		return "ShadowsocksR"
 	case TypeVLESS:
 		return "VLESS"
+	case TypeVlessXHTTP:
+		return "VLESS-XHTTP"
 	case TypeTUIC:
 		return "TUIC"
 	case TypeHysteria2:
