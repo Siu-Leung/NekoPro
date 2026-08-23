@@ -59,12 +59,22 @@ CI 提供可重复的 Go 测试；Android 原生核心与 APK 的完整构建结
 完整 Android 工程位于 [`NekoBox/`](NekoBox/)。
 
 ```bash
+# 需要：JDK 21、Go 1.24.7+、Android SDK、NDK 25.0.8775105
+# 确保 ANDROID_HOME 与 ANDROID_NDK_HOME 指向有效目录
 cd NekoBox
+
+# 首次构建：安装固定版本的 gomobile/gobind 工具
+cd libcore
+bash ./init.sh
+bash ./build.sh
+cd ..
+
+# libcore.aar 会被安装到 app/libs；随后运行 Android 检查和打包
 bash ./gradlew :app:testOssReleaseUnitTest
 bash ./gradlew assembleOssRelease
 ```
 
-构建原生 `libcore.aar` 需要 Android SDK、NDK、Go、gomobile/gobind，以及仓库所引用的子模块源码。具体工具链版本以工程 Gradle 与 Go module 文件为准。
+`libcore/init.sh` 会从固定提交构建 `gomobile-matsuri` 与 `gobind-matsuri`；`libcore/build.sh` 会生成四 ABI 的 `libcore.aar` 并安装到 `app/libs/`。Gradle 的 `ensureGeoAssets` 任务会在需要时下载官方 GeoIP/GeoSite 资源。Release APK 输出于 `NekoBox/app/build/outputs/apk/oss/release/`。
 
 Release 签名信息不在仓库中。请自行配置本地 keystore，切勿提交私钥、密码、Token 或其他凭据。
 
@@ -75,6 +85,13 @@ Release 签名信息不在仓库中。请自行配置本地 keystore，切勿提
 - 内置 Clash API 仅监听本机回环地址，并使用安装级随机 Secret 认证。
 - 协议实现来自多个上游项目；请同时遵守对应目录中的许可证与第三方声明。
 - 使用代理工具时，请遵守所在地法律、服务条款和网络管理要求。
+
+## 使用与维护声明
+
+- 本项目仅用于学习、研究及个人网络工具开发，不提供商业服务、节点、订阅或付费支持。
+- 请勿将本项目用于违反当地法律法规、侵犯他人权益或绕过未经授权的访问控制。
+- 本项目按“现状”提供，不承诺可用性、兼容性、更新频率或 Issue 响应时间。
+- 这是个人维护并由 AI 辅助开发的项目；提交 Issue 时请附版本、复现步骤和已脱敏日志。
 
 ## 上游与致谢
 
