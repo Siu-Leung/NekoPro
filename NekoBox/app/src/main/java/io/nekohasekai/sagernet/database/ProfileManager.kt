@@ -193,48 +193,6 @@ object ProfileManager {
                     outbound = -2
                 )
             )
-            createRule(
-                RuleEntity(
-                    name = "Sukka: 广告与恶意拦截 (Reject)",
-                    domains = "geosite:category-ads-all",
-                    outbound = -2
-                ), false
-            )
-            createRule(
-                RuleEntity(
-                    name = "Sukka: AI 服务 (OpenAI / Claude)",
-                    domains = "geosite:openai",
-                    outbound = 0
-                ), false
-            )
-            createRule(
-                RuleEntity(
-                    name = "Sukka: 海外流媒体与通讯 (YouTube / Netflix / TG)",
-                    domains = "geosite:youtube\ngeosite:netflix\ngeosite:telegram\ngeosite:spotify\ngeosite:disney",
-                    outbound = 0
-                ), false
-            )
-            createRule(
-                RuleEntity(
-                    name = "Sukka: 游戏与直连 CDN (Steam / Epic / Apple / MS)",
-                    domains = "geosite:steam@cn\ngeosite:epicgames\ngeosite:apple@cn\ngeosite:microsoft@cn",
-                    outbound = -1
-                ), false
-            )
-            createRule(
-                RuleEntity(
-                    name = "Sukka: 国内直连域名 (Domestic)",
-                    domains = "geosite:cn",
-                    outbound = -1
-                ), false
-            )
-            createRule(
-                RuleEntity(
-                    name = "Sukka: 国内直连 IP (China IP)",
-                    ip = "geoip:cn\ngeoip:private",
-                    outbound = -1
-                ), false
-            )
             rules = SagerDatabase.rulesDao.allRules()
         }
         return rules
