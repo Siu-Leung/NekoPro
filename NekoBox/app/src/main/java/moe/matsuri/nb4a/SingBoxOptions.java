@@ -2808,6 +2808,8 @@ public class SingBoxOptions {
         public Integer mtu;
 
         // Generate note: Listable
+        public List<String> address;
+
         public List<String> inet4_address;
 
         // Generate note: Listable
