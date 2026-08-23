@@ -4,11 +4,8 @@ import (
 	"context"
 	"net"
 	"os"
-	"sync"
-	"syscall"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
-	"github.com/metacubex/mihomo/component/dialer"
 	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -16,38 +13,14 @@ import (
 	boxConstant "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/mihomo_adapter"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
-	"github.com/sagernet/sing/service"
 )
 
 func RegisterOutbound(registry *outboundAdapter.Registry) {
 	outboundAdapter.Register[option.SnellOutboundOptions](registry, boxConstant.TypeSnell, NewOutbound)
-}
-
-var installSocketHookOnce sync.Once
-
-func installAndroidProtectHook(ctx context.Context) {
-	installSocketHookOnce.Do(func() {
-		networkManager := service.FromContext[adapter.NetworkManager](ctx)
-		if networkManager == nil {
-			return
-		}
-		protectFunc := networkManager.ProtectFunc()
-		if protectFunc == nil {
-			return
-		}
-		previousHook := dialer.DefaultSocketHook
-		dialer.DefaultSocketHook = func(network, address string, conn syscall.RawConn) error {
-			if previousHook != nil {
-				if err := previousHook(network, address, conn); err != nil {
-					return err
-				}
-			}
-			return protectFunc(network, address, conn)
-		}
-	})
 }
 
 type Outbound struct {
@@ -78,7 +51,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		ClientFingerprint: options.ClientFingerprint,
 	}
 
-	installAndroidProtectHook(ctx)
+	mihomo_adapter.InstallProtectHook(ctx)
 
 	proxy, err := outbound.NewSnell(*snellOption)
 	if err != nil {

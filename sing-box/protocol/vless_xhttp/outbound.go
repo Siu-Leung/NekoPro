@@ -5,11 +5,8 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"sync"
-	"syscall"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
-	"github.com/metacubex/mihomo/component/dialer"
 	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -17,38 +14,14 @@ import (
 	boxConstant "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/mihomo_adapter"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
-	"github.com/sagernet/sing/service"
 )
 
 func RegisterOutbound(registry *outboundAdapter.Registry) {
 	outboundAdapter.Register[option.VlessXHTTPOutboundOptions](registry, boxConstant.TypeVlessXHTTP, NewOutbound)
-}
-
-var installSocketHookOnce sync.Once
-
-func installAndroidProtectHook(ctx context.Context) {
-	installSocketHookOnce.Do(func() {
-		networkManager := service.FromContext[adapter.NetworkManager](ctx)
-		if networkManager == nil {
-			return
-		}
-		protectFunc := networkManager.ProtectFunc()
-		if protectFunc == nil {
-			return
-		}
-		previousHook := dialer.DefaultSocketHook
-		dialer.DefaultSocketHook = func(network, address string, conn syscall.RawConn) error {
-			if previousHook != nil {
-				if err := previousHook(network, address, conn); err != nil {
-					return err
-				}
-			}
-			return protectFunc(network, address, conn)
-		}
-	})
 }
 
 type Outbound struct {
@@ -89,7 +62,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		}
 	}
 
-	installAndroidProtectHook(ctx)
+	mihomo_adapter.InstallProtectHook(ctx)
 
 	proxy, err := outbound.NewVless(*vlessOption)
 	if err != nil {
@@ -157,6 +130,11 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	pc, err := h.proxy.ListenPacketContext(ctx, meta)
 	if err == nil && pc != nil {
 		return pc, nil
+	}
+	if err != nil {
+		h.logger.DebugContext(ctx, "vless-xhttp native UDP unavailable, falling back to UoT: ", err)
+	} else {
+		h.logger.DebugContext(ctx, "vless-xhttp native UDP returned nil, falling back to UoT")
 	}
 	ctx, metadata := adapter.ExtendContext(ctx)
 	metadata.Outbound = h.Tag()
