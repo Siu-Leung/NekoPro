@@ -4460,6 +4460,12 @@ public class SingBoxOptions {
 
         public String outbound;
 
+        // rule action 参数 (sing-box 1.11+ 迁移):
+        // sniff action 的 override_destination / resolve action 的 strategy
+        public Boolean sniff_override_destination;
+
+        public String strategy;
+
     }
 
     public static class DNSRule_DefaultOptions extends DNSRule {

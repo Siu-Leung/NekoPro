@@ -304,6 +304,9 @@ func (r *RejectActionOptions) UnmarshalJSON(bytes []byte) error {
 type RouteActionSniff struct {
 	Sniffer badoption.Listable[string] `json:"sniffer,omitempty"`
 	Timeout badoption.Duration         `json:"timeout,omitempty"`
+	// OverrideDestination restores the pre-1.11 inbound-level
+	// sniff_override_destination behavior via rule action.
+	OverrideDestination bool `json:"sniff_override_destination,omitempty"`
 }
 
 type RouteActionResolve struct {

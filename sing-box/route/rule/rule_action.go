@@ -103,6 +103,8 @@ func NewRuleAction(ctx context.Context, logger logger.ContextLogger, action opti
 		sniffAction := &RuleActionSniff{
 			SnifferNames: action.SniffOptions.Sniffer,
 			Timeout:      time.Duration(action.SniffOptions.Timeout),
+			// restore legacy sniff_override_destination via rule action
+			OverrideDestination: action.SniffOptions.OverrideDestination,
 		}
 		return sniffAction, sniffAction.build()
 	case C.RuleActionTypeResolve:

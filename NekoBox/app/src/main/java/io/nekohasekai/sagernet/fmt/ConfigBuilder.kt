@@ -213,9 +213,6 @@ fun buildConfig(
                 }
                 endpoint_independent_nat = true
                 mtu = DataStore.mtu
-                domain_strategy = genDomainStrategy(DataStore.resolveDestination)
-                sniff = needSniff
-                sniff_override_destination = needSniffOverride
                 when (ipv6Mode) {
                     IPv6Mode.DISABLE -> {
                         inet4_address = listOf(VpnService.PRIVATE_VLAN4_CLIENT + "/28")
@@ -236,9 +233,6 @@ fun buildConfig(
                 tag = TAG_MIXED
                 listen = bind
                 listen_port = DataStore.mixedPort
-                domain_strategy = genDomainStrategy(DataStore.resolveDestination)
-                sniff = needSniff
-                sniff_override_destination = needSniffOverride
             })
         }
 
@@ -249,6 +243,21 @@ fun buildConfig(
             auto_detect_interface = true
             rules = mutableListOf()
             rule_set = mutableListOf()
+        }
+
+        // sing-box 1.11+ 迁移: sniff / domain_strategy 从 inbound 顶层
+        // 移到 route rule actions (legacy inbound fields 在 1.13 已移除)
+        if (needSniff) {
+            route.rules.add(Rule_DefaultOptions().apply {
+                action = "sniff"
+                sniff_override_destination = needSniffOverride
+            })
+        }
+        if (DataStore.resolveDestination) {
+            route.rules.add(Rule_DefaultOptions().apply {
+                action = "resolve"
+                strategy = genDomainStrategy(true)
+            })
         }
 
         // returns outbound tag
