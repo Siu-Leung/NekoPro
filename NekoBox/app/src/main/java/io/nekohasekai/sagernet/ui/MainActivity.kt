@@ -371,10 +371,6 @@ class MainActivity : ThemedActivity(),
 
             R.id.nav_group -> displayFragment(GroupFragment())
             R.id.nav_route -> displayFragment(RouteFragment())
-            R.id.nav_assets -> {
-                startActivity(Intent(this, AssetsActivity::class.java))
-                return false
-            }
             R.id.nav_settings -> displayFragment(SettingsFragment())
             R.id.nav_traffic -> displayFragment(WebviewFragment())
             R.id.nav_tools -> displayFragment(ToolsFragment())
