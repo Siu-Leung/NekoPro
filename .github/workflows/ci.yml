@@ -49,7 +49,11 @@ jobs:
           go-version: '1.26.7'
           cache-dependency-path: NekoBox/libcore/go.sum
       - name: Install Android NDK
-        run: sdkmanager 'ndk;25.0.8775105'
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'ndk;25.0.8775105'
       - name: Build libcore
         working-directory: NekoBox/libcore
         env:
