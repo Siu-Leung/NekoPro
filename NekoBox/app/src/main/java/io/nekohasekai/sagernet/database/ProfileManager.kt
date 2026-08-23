@@ -193,6 +193,44 @@ object ProfileManager {
                     outbound = -2
                 )
             )
+            createRule(
+                RuleEntity(
+                    name = app.getString(R.string.route_opt_block_ads),
+                    domains = "geosite:category-ads-all",
+                    outbound = -2
+                )
+            )
+            val fuckedCountry = mutableListOf("cn:中国")
+            if (Locale.getDefault().country != Locale.CHINA.country) {
+                // 非中文用户
+                fuckedCountry += "ir:Iran"
+                fuckedCountry += "ru:Russia"
+            }
+            for (c in fuckedCountry) {
+                val country = c.substringBefore(":")
+                val displayCountry = c.substringAfter(":")
+                //
+                if (country == "cn") createRule(
+                    RuleEntity(
+                        name = app.getString(R.string.route_play_store, displayCountry),
+                        domains = "googleapis.cn",
+                    ), false
+                )
+                createRule(
+                    RuleEntity(
+                        name = app.getString(R.string.route_bypass_domain, displayCountry),
+                        domains = "geosite:$country",
+                        outbound = -1
+                    ), false
+                )
+                createRule(
+                    RuleEntity(
+                        name = app.getString(R.string.route_bypass_ip, displayCountry),
+                        ip = "geoip:$country",
+                        outbound = -1
+                    ), false
+                )
+            }
             rules = SagerDatabase.rulesDao.allRules()
         }
         return rules
