@@ -171,9 +171,14 @@ fun buildConfig(
         }
 
         log = LogOptions().apply {
-            // Diagnostic release: force maximum core verbosity so a user
-            // report includes the first actionable failure.
-            level = "trace"
+            level = when (DataStore.logLevel) {
+                0 -> "panic"
+                1 -> "warn"
+                2 -> "info"
+                3 -> "debug"
+                4 -> "trace"
+                else -> "warn"
+            }
         }
 
         dns = DNSOptions().apply {

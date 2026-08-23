@@ -16,14 +16,14 @@ import io.nekohasekai.sagernet.databinding.LayoutWebviewBinding
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.security.ClashApiSecret
 import moe.matsuri.nb4a.utils.WebViewUtil
-import java.net.URLEncoder
 
 internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
     if (!configuredUrl.startsWith("http://127.0.0.1:9090/ui")) return configuredUrl
     val base = "http://127.0.0.1:9090/ui/"
-    val controller = URLEncoder.encode("http://127.0.0.1:9090", "UTF-8")
-    val encodedSecret = URLEncoder.encode(secret, "UTF-8")
-    return "${base}?hostname=$controller&port=9090&secret=$encodedSecret"
+    // Yacd expects hostname and port as separate bootstrap parameters.
+    // Passing a complete URL as hostname makes URL.hostname invalid and the
+    // SPA renders a blank dashboard despite a successful HTTP handshake.
+    return "${base}?hostname=127.0.0.1&port=9090&secret=$secret"
 }
 
 // Fragment必须有一个无参public的构造函数，否则在数据恢复的时候，会报crash
@@ -72,8 +72,33 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 WebViewUtil.onReceivedError(view, request, error)
             }
 
+            override fun onReceivedHttpError(
+                view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    Logs.e("Dashboard HTTP error ${errorResponse?.statusCode} ${request.url.path}")
+                }
+                super.onReceivedHttpError(view, request, errorResponse)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                if (url?.startsWith("http://127.0.0.1:9090/ui") == true) {
+                    // A previous Yacd session may have persisted an empty
+                    // secret in localStorage. Remove only that Yacd state once
+                    // per WebView session, then reload with our authenticated
+                    // bootstrap URL.
+                    view?.evaluateJavascript(
+                        """(() => {
+                            const marker = '__neko_dashboard_reset_v1';
+                            if (sessionStorage.getItem(marker) === '1') return;
+                            sessionStorage.setItem(marker, '1');
+                            localStorage.removeItem('yacd.metacubex.one');
+                            location.reload();
+                        })()""".trimIndent(),
+                        null,
+                    )
+                }
             }
         }
         mWebView.clearCache(false)

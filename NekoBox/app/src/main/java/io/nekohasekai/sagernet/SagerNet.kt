@@ -58,10 +58,13 @@ class SagerNet : Application(),
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 
         if (isMainProcess || isBgProcess) {
-            // This release is intentionally diagnostic: force trace logging
-            // even across upgrades where an older preference stored "none".
-            DataStore.logLevel = 4
-            if (DataStore.logBufSize < 500) DataStore.logBufSize = 500
+            // The previous diagnostic build forced trace on every launch and
+            // persisted it. Downgrade that inherited value once; afterwards
+            // the user's explicit log-level choice is respected.
+            if (!DataStore.diagnosticTraceMigrated) {
+                if (DataStore.logLevel == 4) DataStore.logLevel = 1
+                DataStore.diagnosticTraceMigrated = true
+            }
             externalAssets.mkdirs()
             Seq.setContext(this)
             Libcore.initCore(
