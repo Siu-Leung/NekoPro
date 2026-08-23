@@ -227,6 +227,18 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
                 path = it
             }
         }
+
+        "xhttp" -> {
+            url.queryParameter("host")?.let {
+                host = it
+            }
+            url.queryParameter("path")?.let {
+                path = it
+            }
+            url.queryParameter("mode")?.let {
+                xhttpMode = it
+            }
+        }
     }
 
     // maybe from matsuri vmess exoprt
@@ -637,7 +649,33 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
         }
 
         is VMessBean -> {
-            if (bean.isVLESS) return Outbound_VLESSOptions().apply {
+            if (bean.isVLESS) {
+                if (bean.type == "xhttp") {
+                    return Outbound_VLESSXHTTPOptions().apply {
+                        type = "vless_xhttp"
+                        server = bean.serverAddress
+                        server_port = bean.serverPort
+                        uuid = bean.uuid
+                        if (bean.encryption!!.isNotBlank() && bean.encryption != "auto") {
+                            flow = bean.encryption
+                        }
+                        when (bean.packetEncoding) {
+                            0 -> packet_encoding = ""
+                            1 -> packet_encoding = "packetaddr"
+                            2 -> packet_encoding = "xudp"
+                        }
+                        tls = bean.security == "tls"
+                        server_name = bean.sni
+                        fingerprint = bean.utlsFingerprint
+                        alpn = bean.alpn!!.split(",").filter { it.isNotBlank() }
+                        skip_cert_verify = bean.allowInsecure == true
+                        xhttp_path = bean.path
+                        xhttp_host = bean.host
+                        xhttp_mode = bean.xhttpMode
+                        udp = true
+                    }
+                }
+                return Outbound_VLESSOptions().apply {
                 type = "vless"
                 server = bean.serverAddress
                 server_port = bean.serverPort

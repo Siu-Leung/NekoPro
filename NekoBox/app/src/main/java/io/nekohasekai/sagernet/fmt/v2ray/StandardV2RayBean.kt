@@ -11,10 +11,12 @@ abstract class StandardV2RayBean : AbstractBean() {
     @JvmField var uuid: String? = null
     @JvmField var encryption: String? = null // or VLESS flow
 
-    // "V2Ray Transport" tcp/http/ws/quic/grpc/httpupgrade
+    // "V2Ray Transport" tcp/http/ws/quic/grpc/httpupgrade/xhttp
     @JvmField var type: String? = null
     @JvmField var host: String? = null
     @JvmField var path: String? = null
+    // xhttp 专用: mode = auto / packet-up / stream-up / stream-one
+    @JvmField var xhttpMode: String? = null
 
     // tls
     @JvmField var security: String? = null
@@ -59,6 +61,7 @@ abstract class StandardV2RayBean : AbstractBean() {
         if (JavaUtil.isNullOrBlank(certificates)) certificates = ""
         if (JavaUtil.isNullOrBlank(earlyDataHeaderName)) earlyDataHeaderName = ""
         if (JavaUtil.isNullOrBlank(utlsFingerprint)) utlsFingerprint = ""
+        if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = ""
         if (wsMaxEarlyData == null) wsMaxEarlyData = 0
         if (allowInsecure == null) allowInsecure = false
         if (packetEncoding == null) packetEncoding = 0
@@ -73,7 +76,7 @@ abstract class StandardV2RayBean : AbstractBean() {
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(5)
+        output.writeInt(6)
         super.serialize(output)
         output.writeString(uuid)
         output.writeString(encryption)
@@ -91,7 +94,7 @@ abstract class StandardV2RayBean : AbstractBean() {
                 output.writeInt(wsMaxEarlyData!!)
                 output.writeString(earlyDataHeaderName)
             }
-            "http", "httpupgrade" -> {
+            "http", "httpupgrade", "xhttp" -> {
                 output.writeString(host)
                 output.writeString(path)
             }
@@ -114,6 +117,7 @@ abstract class StandardV2RayBean : AbstractBean() {
         output.writeBoolean(muxPadding!!)
         output.writeInt(muxType!!)
         output.writeInt(muxConcurrency!!)
+        output.writeString(xhttpMode)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -134,7 +138,7 @@ abstract class StandardV2RayBean : AbstractBean() {
                     wsMaxEarlyData = input.readInt()
                     earlyDataHeaderName = input.readString()
                 }
-                "http", "httpupgrade" -> {
+                "http", "httpupgrade", "xhttp" -> {
                     host = input.readString()
                     path = input.readString()
                 }
@@ -188,6 +192,10 @@ abstract class StandardV2RayBean : AbstractBean() {
             muxPadding = input.readBoolean()
             muxType = input.readInt()
             muxConcurrency = input.readInt()
+        }
+        if (version >= 6) {
+            xhttpMode = input.readString()
+            if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = ""
         }
     }
 

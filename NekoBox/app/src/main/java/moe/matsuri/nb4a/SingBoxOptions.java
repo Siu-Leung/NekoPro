@@ -4660,4 +4660,27 @@ public class SingBoxOptions {
         public String client_fingerprint;
     }
 
+    public static class Outbound_VLESSXHTTPOptions extends Outbound {
+        public String server;
+        public Integer server_port;
+        public String uuid;
+        public String flow;
+        public String packet_encoding;
+
+        public Boolean tls;
+        public String server_name;
+        public String fingerprint;
+        public List<String> alpn;
+        public Boolean skip_cert_verify;
+
+        public String xhttp_path;
+        public String xhttp_host;
+        public String xhttp_mode;
+        public Map<String, String> xhttp_headers;
+        public Boolean xhttp_reuse;
+        public Integer xhttp_reuse_max_conns;
+
+        public Boolean udp;
+    }
+
 }

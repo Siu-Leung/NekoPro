@@ -264,6 +264,7 @@
         <item>quic</item>
         <item>grpc</item>
         <item>httpupgrade</item>
+        <item>xhttp</item>
     </string-array>
 
     <string-array name="trojan_go_networks_entry">
