@@ -14,9 +14,5 @@
         android:id="@+id/action_manage_assets"
         android:title="@string/route_manage_assets"
         app:showAsAction="always" />
-    <item
-        android:id="@+id/action_rule_set_library"
-        android:title="@string/ruleset_library"
-        app:showAsAction="always" />
 
 </menu>

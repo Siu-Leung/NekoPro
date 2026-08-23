@@ -121,9 +121,6 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             R.id.action_manage_assets -> {
                 startActivity(Intent(requireContext(), AssetsActivity::class.java))
             }
-            R.id.action_rule_set_library -> {
-                startActivity(Intent(requireContext(), RuleSetLibraryActivity::class.java))
-            }
         }
         return true
     }

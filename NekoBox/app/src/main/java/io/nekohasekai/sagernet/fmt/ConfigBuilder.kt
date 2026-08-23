@@ -614,21 +614,6 @@ fun buildConfig(
             route.rule_set = route.rule_set.distinctBy { it.tag }
         }
 
-        // skk 远程规则集预设（domainset → non_ip → ip，插到规则列表最前）
-        SkkRuleSetPresets.buildEnabledRuleSets().let { skkPairs ->
-            if (skkPairs.isNotEmpty()) {
-                val skkRuleSetList = skkPairs.map { it.first }
-                val skkRules = skkPairs.map { (rs, item) ->
-                    Rule_DefaultOptions().apply {
-                        rule_set = mutableListOf(rs.tag)
-                        outbound = item.outbound.ifBlank { TAG_PROXY }
-                    }
-                }
-                route.rule_set = (skkRuleSetList + (route.rule_set ?: emptyList()))
-                route.rules = (skkRules + (route.rules ?: emptyList()))
-            }
-        }
-
         for (freedom in arrayOf(TAG_DIRECT, TAG_BYPASS)) outbounds.add(Outbound().apply {
             tag = freedom
             type = "direct"

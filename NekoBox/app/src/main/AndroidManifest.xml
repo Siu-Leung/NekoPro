@@ -209,9 +209,6 @@
             android:name="io.nekohasekai.sagernet.ui.AssetsActivity"
             android:configChanges="uiMode" />
         <activity
-            android:name="io.nekohasekai.sagernet.ui.RuleSetLibraryActivity"
-            android:configChanges="uiMode" />
-        <activity
             android:name="io.nekohasekai.sagernet.ui.AppListActivity"
             android:configChanges="uiMode" />
         <activity

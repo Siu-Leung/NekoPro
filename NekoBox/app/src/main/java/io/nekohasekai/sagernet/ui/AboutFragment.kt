@@ -176,6 +176,23 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                 .addCard(
                     MaterialAboutCard.Builder()
                         .outline(false)
+                        .title(R.string.branch_info)
+                        .addItem(
+                            MaterialAboutActionItem.Builder()
+                                .icon(R.drawable.ic_action_dns)
+                                .text(R.string.branch_desc)
+                                .subText(R.string.branch_desc_detail)
+                                .build())
+                        .addItem(
+                            MaterialAboutActionItem.Builder()
+                                .icon(R.drawable.ic_baseline_layers_24)
+                                .text(R.string.supported_protocols)
+                                .subText(R.string.supported_protocols_detail)
+                                .build())
+                        .build())
+                .addCard(
+                    MaterialAboutCard.Builder()
+                        .outline(false)
                         .title(R.string.project)
                         .addItem(
                             MaterialAboutActionItem.Builder()

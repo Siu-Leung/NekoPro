@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.ui
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.text.format.DateFormat
-import android.util.AtomicFile
 import android.view.Menu
 import android.view.MenuItem
 import android.view.ViewGroup
@@ -17,14 +16,12 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.databinding.LayoutAssetItemBinding
 import io.nekohasekai.sagernet.databinding.LayoutAssetsBinding
 import io.nekohasekai.sagernet.ktx.*
-import io.nekohasekai.sagernet.security.AssetImportPolicy
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import libcore.Libcore
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONObject
 import java.io.File
-import java.io.IOException
-import java.io.InputStream
+import java.io.FileWriter
 import java.util.*
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -101,59 +98,36 @@ class AssetsActivity : ThemedActivity() {
     val importFile = registerForActivityResult(ActivityResultContracts.GetContent()) { file ->
         if (file != null) {
             val fileName = contentResolver.query(file, null, null, null, null)?.use { cursor ->
-                if (!cursor.moveToFirst()) return@use null
+                cursor.moveToFirst()
                 cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME).let(cursor::getString)
             }?.takeIf { it.isNotBlank() } ?: file.pathSegments.last()
                 .substringAfterLast('/')
                 .substringAfter(':')
 
-            val assetDirectory = getExternalFilesDir(null) ?: filesDir
-            val outFile = runCatching {
-                AssetImportPolicy.destination(assetDirectory, fileName)
-            }.getOrElse {
+            if (!fileName.endsWith(".db")) {
                 alert(getString(R.string.route_not_asset, fileName)).show()
                 return@registerForActivityResult
             }
+            val filesDir = getExternalFilesDir(null) ?: filesDir
 
             runOnDefaultDispatcher {
-                val input = contentResolver.openInputStream(file)
-                    ?: throw IOException("Unable to open selected asset")
-                input.use { atomicCopy(it, outFile) }
+                val outFile = File(filesDir, fileName).apply {
+                    parentFile?.mkdirs()
+                }
 
-                val versionFile = File(
-                    outFile.parentFile,
-                    outFile.nameWithoutExtension + ".version.txt",
-                )
-                atomicWriteText(versionFile, "Custom")
+                contentResolver.openInputStream(file)?.use(outFile.outputStream())
+
+                File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
+                    if (isFile) delete()
+                    createNewFile()
+                    val fw = FileWriter(this)
+                    fw.write("Custom")
+                    fw.close()
+                }
 
                 adapter.reloadAssets()
             }
-        }
-    }
 
-    private fun atomicCopy(input: InputStream, destination: File) {
-        val atomicFile = AtomicFile(destination)
-        val output = atomicFile.startWrite()
-        try {
-            input.copyTo(output)
-            output.fd.sync()
-            atomicFile.finishWrite(output)
-        } catch (error: Throwable) {
-            atomicFile.failWrite(output)
-            throw error
-        }
-    }
-
-    private fun atomicWriteText(destination: File, value: String) {
-        val atomicFile = AtomicFile(destination)
-        val output = atomicFile.startWrite()
-        try {
-            output.write(value.toByteArray(Charsets.UTF_8))
-            output.fd.sync()
-            atomicFile.finishWrite(output)
-        } catch (error: Throwable) {
-            atomicFile.failWrite(output)
-            throw error
         }
     }
 
@@ -163,29 +137,8 @@ class AssetsActivity : ThemedActivity() {
                 startFilesForResult(importFile, "*/*")
                 return true
             }
-            R.id.action_update_assets -> {
-                updateOnlineAssets()
-                return true
-            }
         }
         return false
-    }
-
-    private fun updateOnlineAssets() {
-        runOnDefaultDispatcher {
-            snackbar(getString(R.string.updating_assets)).show()
-            val results = mutableListOf<String>()
-            runCatching { results.add(Libcore.updateGeoIP()) }
-                .onFailure { results.add("geoip: ${it.readableMessage}") }
-            runCatching { results.add(Libcore.updateGeoSite()) }
-                .onFailure { results.add("geosite: ${it.readableMessage}") }
-            val text = results.joinToString("\n")
-            snackbar(
-                getString(R.string.assets_updated, text) + "\n" +
-                    getString(R.string.assets_update_restart)
-            ).show()
-            adapter.reloadAssets()
-        }
     }
 
     inner class AssetAdapter : RecyclerView.Adapter<AssetHolder>(),
