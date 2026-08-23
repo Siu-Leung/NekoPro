@@ -52,7 +52,13 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 - APK：包名、版本、ABI、原生库内容与 v1/v2 签名检查
 - 真机：Snell v4/v5/v6、VLESS-XHTTP、AnyTLS，以及 IPv4/IPv6 双栈入口
 
-CI 提供可重复的 Go 测试；Android 原生核心与 APK 的完整构建结果以 Release 验证记录为准。协议可用性仍以真实网络与真机测试为准。
+CI 提供可重复的 Go 测试；手动 Android 工作流使用 GitHub Actions 加密 Secrets 恢复发布 keystore，生成四 ABI 签名 APK，并同时输出 `MD5SUMS.txt` 与 `SHA256SUMS.txt`。私钥文件与密码不会进入仓库或构建 Artifact。协议可用性仍以真实网络与真机测试为准。
+
+正式 APK 的签名证书 SHA-256 指纹：
+
+```text
+CC:5B:75:9E:7E:8F:E9:2A:23:D2:18:D8:66:29:D4:30:85:9D:87:F1:4A:98:A9:BB:C1:5E:4D:39:BA:F5:F3:7C
+```
 
 ## 构建
 

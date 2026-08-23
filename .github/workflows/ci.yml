@@ -62,13 +62,35 @@ jobs:
         run: |
           bash ./init.sh
           bash ./build.sh
-      - name: Test and build unsigned APK
+      - name: Restore release keystore
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          test -n "$RELEASE_KEYSTORE_B64"
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/nekopro-release.keystore"
+          chmod 600 "$RUNNER_TEMP/nekopro-release.keystore"
+      - name: Test and build signed APKs
         working-directory: NekoBox
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/nekopro-release.keystore
+          KEYSTORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+          ALIAS_NAME: ${{ secrets.RELEASE_KEY_ALIAS }}
+          ALIAS_PASS: ${{ secrets.RELEASE_KEY_PASS }}
         run: |
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
           bash ./gradlew :app:testOssReleaseUnitTest assembleOssRelease --no-daemon
+          mkdir -p app/build/outputs/apk/oss/release/checksums
+          cd app/build/outputs/apk/oss/release
+          test "$(find . -maxdepth 1 -name '*.apk' | wc -l)" -eq 4
+          for apk in ./*.apk; do
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+          done
+          md5sum ./*.apk > checksums/MD5SUMS.txt
+          sha256sum ./*.apk > checksums/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: NekoPro-unsigned-apks
-          path: NekoBox/app/build/outputs/apk/oss/release/*.apk
+          name: NekoPro-signed-apks
+          path: |
+            NekoBox/app/build/outputs/apk/oss/release/*.apk
+            NekoBox/app/build/outputs/apk/oss/release/checksums/*.txt
           if-no-files-found: error
