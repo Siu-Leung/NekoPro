@@ -27,7 +27,18 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 `Neko-Pro-1.0.1`
 
 - [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.0.1)
-- 发布资产：`Neko-Pro-1.0.1-arm64-v8a.apk`
+- 核心 APK：`NekoBox-Neko-Pro-1.0.1-arm64-v8a.apk`
+
+### v1.0.1 改动日志 (2026-09-03)
+
+- **修复 VLESS-XHTTP 携带 uTLS 指纹时无法连接的问题**（Fixes [#1](https://github.com/Siu-Leung/NekoPro/issues/1)）
+  - **根因**：Mihomo 内核的 `Fingerprint` 字段专用于 TLS 证书固定（Certificate Pinning），而浏览器指纹对应 `ClientFingerprint`。此前桥接时直接将 `fingerprint` 传给证书 Pinning 字段，导致包含 `fp=chrome` 等指纹的节点握手时报错 `'fingerprint' is used for TLS certificate pinning. If you need to specify the browser fingerprint, use client-fingerprint`。
+  - **修复**：在 `sing-box/protocol/vless_xhttp` 中引入智能指纹分流逻辑，自动区分 64 位 SHA-256 证书哈希与浏览器伪装指纹（`chrome`、`firefox`、`safari`、`ios` 等），分别精准映射到 `Fingerprint`（证书 Pinning）与 `ClientFingerprint`（uTLS 指纹）。
+  - **配置对齐**：在 `SingBoxOptions.java` 与 `V2RayFmt.kt` 转换层同步支持 `client_fingerprint` 字段。
+  - **测试验证**：新增 `fingerprint_test.go` 单元测试，经 CI 验证全量测试通过。
+- **构建与发布流优化**
+  - 升级版本号至 `1.0.1`（Version Code: `48`）。
+  - CI 工作流支持 Git Tag 自动触发四 ABI 完整编译打包、签名校验与发布。
 
 ## 主要改动
 
