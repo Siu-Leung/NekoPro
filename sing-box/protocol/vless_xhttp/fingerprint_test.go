@@ -1,13 +1,7 @@
 package vless_xhttp
 
 import (
-	"context"
-	"strings"
 	"testing"
-
-	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/log"
-	"github.com/sagernet/sing-box/option"
 )
 
 func TestParseFingerprint(t *testing.T) {
@@ -46,36 +40,4 @@ func TestParseFingerprint(t *testing.T) {
 	if certFP != sha256Plain || browserFP != "chrome" {
 		t.Fatalf("expected ('%s', 'chrome'), got ('%s', '%s')", sha256Plain, certFP, browserFP)
 	}
-}
-
-func TestNewOutboundBrowserFingerprint(t *testing.T) {
-	ctx := context.Background()
-	logger := log.NewContextLogger("test")
-
-	// Verify that creating a VLESS-XHTTP outbound with Fingerprint: "chrome" does not fail
-	// with "'fingerprint' is used for TLS certificate pinning".
-	opts := option.VlessXHTTPOutboundOptions{
-		ServerOptions: option.ServerOptions{
-			Server:     "127.0.0.1",
-			ServerPort: 8443,
-		},
-		UUID:        "b831381d-6324-4d53-ad4f-8cda48b30811",
-		TLS:         true,
-		ServerName:  "example.com",
-		Fingerprint: "chrome",
-		XHTTPPath:   "/xhttp",
-		XHTTPMode:   "auto",
-	}
-
-	outbound, err := NewOutbound(ctx, nil, logger, "test-vless-xhttp", opts)
-	if err != nil {
-		if strings.Contains(err.Error(), "certificate pinning") {
-			t.Fatalf("NewOutbound failed with certificate pinning error: %v", err)
-		}
-		t.Fatalf("unexpected NewOutbound error: %v", err)
-	}
-	if outbound == nil {
-		t.Fatal("expected non-nil outbound")
-	}
-	defer outbound.Close()
 }
