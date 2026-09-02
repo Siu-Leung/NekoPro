@@ -2,9 +2,11 @@ package vless_xhttp
 
 import (
 	"context"
+	"encoding/hex"
 	"net"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/component/resolver"
@@ -36,22 +38,47 @@ func setMihomoIPv6Enabled() {
 	resolver.DisableIPv6 = false
 }
 
+func parseFingerprint(fp, clientFP string) (certFingerprint string, browserFingerprint string) {
+	browserFingerprint = clientFP
+	if fp == "" {
+		return
+	}
+	clean := strings.ReplaceAll(strings.TrimSpace(fp), ":", "")
+	if len(clean) == 64 {
+		if _, err := hex.DecodeString(clean); err == nil {
+			certFingerprint = fp
+			return
+		}
+	}
+	if browserFingerprint == "" {
+		browserFingerprint = fp
+	}
+	return
+}
+
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VlessXHTTPOutboundOptions) (adapter.Outbound, error) {
+	clientFP := options.ClientFingerprint
+	if clientFP == "" {
+		clientFP = options.ClientFingerprintAlt
+	}
+	certFP, browserFP := parseFingerprint(options.Fingerprint, clientFP)
+
 	// 构造 mihomo VLESS-XHTTP option
 	vlessOption := &outbound.VlessOption{
-		Name:           tag,
-		Server:         options.Server,
-		Port:           int(options.ServerPort),
-		UUID:           options.UUID,
-		Flow:           options.Flow,
-		TLS:            options.TLS,
-		ALPN:           options.ALPN,
-		UDP:            options.UDP,
-		Network:        "xhttp",
-		PacketEncoding: options.PacketEncoding,
-		ServerName:     options.ServerName,
-		Fingerprint:    options.Fingerprint,
-		SkipCertVerify: options.SkipCertVerify,
+		Name:              tag,
+		Server:            options.Server,
+		Port:              int(options.ServerPort),
+		UUID:              options.UUID,
+		Flow:              options.Flow,
+		TLS:               options.TLS,
+		ALPN:              options.ALPN,
+		UDP:               options.UDP,
+		Network:           "xhttp",
+		PacketEncoding:    options.PacketEncoding,
+		ServerName:        options.ServerName,
+		Fingerprint:       certFP,
+		ClientFingerprint: browserFP,
+		SkipCertVerify:    options.SkipCertVerify,
 		XHTTPOpts: outbound.XHTTPOptions{
 			Path:    options.XHTTPPath,
 			Host:    options.XHTTPHost,

@@ -24,10 +24,10 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.0.0`
+`Neko-Pro-1.0.1`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.0.0)
-- 发布资产：`Neko-Pro-1.0.0-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.0.1)
+- 发布资产：`Neko-Pro-1.0.1-arm64-v8a.apk`
 
 ## 主要改动
 

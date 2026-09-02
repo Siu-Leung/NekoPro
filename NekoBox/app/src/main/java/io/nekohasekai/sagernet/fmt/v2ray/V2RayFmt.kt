@@ -679,6 +679,7 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
                         tls = bean.security == "tls"
                         server_name = bean.sni
                         fingerprint = bean.utlsFingerprint
+                        client_fingerprint = bean.utlsFingerprint
                         alpn = bean.alpn!!.split(",").filter { it.isNotBlank() }
                         skip_cert_verify = bean.allowInsecure == true
                         xhttp_path = bean.path

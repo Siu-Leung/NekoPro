@@ -4679,6 +4679,7 @@ public class SingBoxOptions {
         public Boolean tls;
         public String server_name;
         public String fingerprint;
+        public String client_fingerprint;
         public List<String> alpn;
         public Boolean skip_cert_verify;
 

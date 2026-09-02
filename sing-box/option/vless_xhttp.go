@@ -13,11 +13,13 @@ type VlessXHTTPOutboundOptions struct {
 	PacketEncoding string `json:"packet_encoding,omitempty"`
 
 	// TLS
-	TLS               bool     `json:"tls,omitempty"`
-	ServerName        string   `json:"server_name,omitempty"`
-	ALPN              []string `json:"alpn,omitempty"`
-	Fingerprint       string   `json:"fingerprint,omitempty"`
-	SkipCertVerify    bool     `json:"skip_cert_verify,omitempty"`
+	TLS                  bool     `json:"tls,omitempty"`
+	ServerName           string   `json:"server_name,omitempty"`
+	ALPN                 []string `json:"alpn,omitempty"`
+	Fingerprint          string   `json:"fingerprint,omitempty"`
+	ClientFingerprint    string   `json:"client_fingerprint,omitempty"`
+	ClientFingerprintAlt string   `json:"client-fingerprint,omitempty"`
+	SkipCertVerify       bool     `json:"skip_cert_verify,omitempty"`
 
 	// XHTTP 参数
 	XHTTPPath      string            `json:"xhttp_path,omitempty"`
