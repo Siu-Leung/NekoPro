@@ -36,21 +36,26 @@ fun parseJuicity(url: String): JuicityBean {
 }
 
 fun JuicityBean.toUri(): String {
-    val builder = linkBuilder().username(uuid).password(password).host(serverAddress).port(serverPort)
+    val builder = linkBuilder()
+        .username(uuid ?: "")
+        .password(password ?: "")
+        .host(serverAddress ?: "")
+        .port(serverPort ?: 443)
 
-    if (sni.isNotBlank()) {
+    if (!sni.isNullOrBlank()) {
         builder.addQueryParameter("sni", sni)
     }
-    if (pinnedCertchainSha256.isNotBlank()) {
-        normalizePinnedCertChainHash(pinnedCertchainSha256.listByLineOrComma().firstOrNull())?.let {
+    val hash = pinnedCertchainSha256
+    if (!hash.isNullOrBlank()) {
+        normalizePinnedCertChainHash(hash.listByLineOrComma().firstOrNull())?.let {
             builder.addQueryParameter("pinned_certchain_sha256", it)
         }
     }
     if (allowInsecure) {
         builder.addQueryParameter("allow_insecure", "1")
     }
-    if (name.isNotBlank()) {
-        builder.encodedFragment(name.urlSafe())
+    if (!name.isNullOrBlank()) {
+        builder.encodedFragment(name!!.urlSafe())
     }
 
     return builder.toLink("juicity")
@@ -64,17 +69,18 @@ fun buildSingBoxOutboundJuicityBean(bean: JuicityBean): Outbound_JuicityOptions 
         uuid = bean.uuid
         password = bean.password
 
-        // Create TLS options object
         tls = SingBoxOptions.OutboundTLSOptions().apply {
             enabled = true
-            if (bean.sni.isNotBlank()) {
+            if (!bean.sni.isNullOrBlank()) {
                 server_name = bean.sni
             }
-            insecure = bean.allowInsecure || DataStore.globalAllowInsecure || bean.pinnedCertchainSha256.isNotBlank()
+            val hasHash = !bean.pinnedCertchainSha256.isNullOrBlank()
+            insecure = bean.allowInsecure || DataStore.globalAllowInsecure || hasHash
         }
 
-        if (bean.pinnedCertchainSha256.isNotBlank()) {
-            normalizePinnedCertChainHash(bean.pinnedCertchainSha256.listByLineOrComma().firstOrNull())?.let {
+        val hash = bean.pinnedCertchainSha256
+        if (!hash.isNullOrBlank()) {
+            normalizePinnedCertChainHash(hash.listByLineOrComma().firstOrNull())?.let {
                 pin_cert_sha256 = it
             }
         }
