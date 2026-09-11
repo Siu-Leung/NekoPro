@@ -744,12 +744,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                             }
                         }
                     } else if (sample.done && sample.error.isNotBlank()) {
-                        // 测速失败时也把错误提示通知到卡片
+                        // 测速失败时如果原本已有延迟（status==1），不要破坏其可用状态，仅在需要时刷新
                         runOnMainDispatcher {
                             adapter.groupFragments.values.forEach { fragment ->
                                 fragment.adapter?.configurationList?.get(sample.profileId)?.let { p ->
-                                    p.status = 2
-                                    p.error = sample.error
+                                    if (p.status != 1) {
+                                        p.status = 2
+                                        p.error = sample.error
+                                    }
                                     val idx = fragment.adapter?.configurationIdList?.indexOf(sample.profileId) ?: -1
                                     if (idx >= 0) fragment.adapter?.notifyItemChanged(idx)
                                 }

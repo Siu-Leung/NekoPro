@@ -719,6 +719,8 @@ func downloadSpeedTestPayload(
 	if err != nil {
 		return err
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Referer", "https://speed.cloudflare.com/")
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -776,6 +778,8 @@ func runSimpleDownload(
 	if err != nil {
 		return 0, 0, err
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Referer", "https://speed.cloudflare.com/")
 	started := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
