@@ -15,13 +15,13 @@ class JuicitySettingsActivity : ProfileSettingsActivity<JuicityBean>() {
     override fun createEntity() = JuicityBean().applyDefaultValues()
 
     override fun JuicityBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverUserId = uuid
-        DataStore.serverPassword = password
-        DataStore.serverSNI = sni
-        DataStore.serverPinnedCertChainSha256 = pinnedCertchainSha256
+        DataStore.profileName = name ?: ""
+        DataStore.serverAddress = serverAddress ?: ""
+        DataStore.serverPort = serverPort ?: 0
+        DataStore.serverUserId = uuid ?: ""
+        DataStore.serverPassword = password ?: ""
+        DataStore.serverSNI = sni ?: ""
+        DataStore.serverPinnedCertChainSha256 = pinnedCertchainSha256 ?: ""
         DataStore.serverAllowInsecure = allowInsecure
     }
 
