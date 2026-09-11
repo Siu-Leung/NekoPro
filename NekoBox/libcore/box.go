@@ -145,6 +145,49 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	return b, nil
 }
 
+// NewTestSingBoxInstance 供 URL 测速与 SpeedTest 实例使用：不注册全局 PlatformLogWriter
+func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
+	defer device.DeferPanicToError("NewTestSingBoxInstance", func(err_ error) { err = err_ })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = box.Context(ctx,
+		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+	)
+	ctx = service.ContextWithDefaultRegistry(ctx)
+	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
+
+	var options option.Options
+	err = options.UnmarshalJSONContext(ctx, []byte(config))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("decode config: %v", err)
+	}
+
+	instance, err := box.New(box.Options{
+		Options: options,
+		Context: ctx,
+	})
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create service: %v", err)
+	}
+
+	b = &BoxInstance{
+		Box:          instance,
+		cancel:       cancel,
+		pauseManager: service.FromContext[pause.Manager](ctx),
+	}
+
+	if proxy, ok := b.Outbound().Outbound("proxy"); ok {
+		if selector, ok := proxy.(*group.Selector); ok {
+			b.selector = selector
+		}
+	}
+
+	return b, nil
+}
+
 func (b *BoxInstance) Start() (err error) {
 	b.access.Lock()
 	defer b.access.Unlock()
