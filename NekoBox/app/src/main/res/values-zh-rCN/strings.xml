@@ -504,6 +504,7 @@
     <string name="app_list_permission_denied">无法读取已安装的应用。\n这通常是由于系统限制了应用的读取权限（例如某些中国厂商系统）。\n请在系统设置中授予权限。</string>
     <string name="open_app_settings">打开系统设置</string>
     <string name="speed_test_settings">速度测试</string>
+    <string name="pinned_certchain_sha256">固定证书链散列</string>
     <string name="speed_test_mode">速度测试模式</string>
     <string name="speed_test_mode_download_upload">下载 + 上传</string>
     <string name="speed_test_mode_download">仅下载</string>

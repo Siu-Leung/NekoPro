@@ -589,6 +589,7 @@
     <string name="supported_protocols">实际支持协议</string>
     <string name="supported_protocols_detail">AnyTLS / VMess / VLESS / VLESS-XHTTP / REALITY / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Snell v1-v6 / Naive / SSH / HTTP / SOCKS / WireGuard / Tor / Tailscale</string>
     <string name="action_juicity" translatable="false">Juicity</string>
+    <string name="pinned_certchain_sha256">Pinned Certificate SHA256</string>
     <string name="speed_test_settings">Speed test</string>
     <string name="speed_test_mode">Speed test mode</string>
     <string name="speed_test_mode_download_upload">Download + upload</string>
