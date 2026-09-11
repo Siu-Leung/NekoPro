@@ -584,8 +584,35 @@
     <string name="app_list_permission_denied">Unable to read installed apps.\nThis is usually because the system has restricted app read permissions.\nPlease grant permissions in the system settings.</string>
     <string name="open_app_settings">Open System Settings</string>
     <string name="branch_info">Neko Pro 版本信息</string>
-    <string name="branch_desc">Neko-Pro-1.0.0</string>
+    <string name="branch_desc">Neko-Pro-1.1.0</string>
     <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.13.19-siu 主内核，并通过内置 mihomo 与 sing-snell 扩展现代协议能力。</string>
     <string name="supported_protocols">实际支持协议</string>
     <string name="supported_protocols_detail">AnyTLS / VMess / VLESS / VLESS-XHTTP / REALITY / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Snell v1-v6 / Naive / SSH / HTTP / SOCKS / WireGuard / Tor / Tailscale</string>
+    <string name="action_juicity" translatable="false">Juicity</string>
+    <string name="speed_test_settings">Speed test</string>
+    <string name="speed_test_mode">Speed test mode</string>
+    <string name="speed_test_mode_download_upload">Download + upload</string>
+    <string name="speed_test_mode_download">Download only</string>
+    <string name="speed_test_mode_upload">Upload only</string>
+    <string name="speed_test_mode_simple_download">Simple download</string>
+    <string name="speed_test_timeout_ms">Speed test timeout (ms)</string>
+    <string name="speed_test_timeout_invalid">Enter a timeout greater than zero milliseconds</string>
+    <string name="speed_test_url_invalid">Enter a valid HTTP or HTTPS URL</string>
+    <string name="speed_test_group">Speed test this group</string>
+    <string name="speed_test_confirm_title">Run speed test?</string>
+    <string name="speed_test_confirm_message">Speed testing can use significant data. Profiles are tested one at a time through their own proxy.</string>
+    <string name="speed_test_stage_pending">Waiting</string>
+    <string name="speed_test_stage_discovery">Finding a test server</string>
+    <string name="speed_test_stage_latency">Measuring server latency</string>
+    <string name="speed_test_stage_download">Downloading</string>
+    <string name="speed_test_stage_upload">Uploading</string>
+    <string name="speed_test_stage_complete">Complete</string>
+    <string name="speed_test_stage_cancelled">Cancelled</string>
+    <string name="speed_test_stage_error">Failed</string>
+    <string name="speed_test_latency_format">Latency: %1$d ms</string>
+    <string name="speed_test_server_format">Server: %1$s</string>
+    <string name="speed_test_download_format">Download: %1$s (%2$s)</string>
+    <string name="speed_test_upload_format">Upload: %1$s (%2$s)</string>
+    <string name="speed_test_rate_mbps">%1$.2f Mbps</string>
+    <string name="speed_test_finished_summary">Finished: %1$d, failed: %2$d, cancelled: %3$d</string>
 </resources>

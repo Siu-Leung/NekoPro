@@ -45,6 +45,12 @@ object Key {
 
     const val CONNECTION_TEST_URL = "connectionTestURL"
 
+    const val SPEED_TEST_MODE = "speedTestMode"
+    const val SPEED_TEST_TIMEOUT_MS = "speedTestTimeoutMs"
+    const val SPEED_TEST_SERVER_LIST_URL = "speedTestServerListURL"
+    const val SPEED_TEST_FALLBACK_SERVER_LIST_URL = "speedTestFallbackServerListURL"
+    const val SIMPLE_DOWNLOAD_URL = "simpleDownloadURL"
+
     const val NETWORK_CHANGE_RESET_CONNECTIONS = "networkChangeResetConnections"
     const val WAKE_RESET_CONNECTIONS = "wakeResetConnections"
     const val RULES_PROVIDER = "rulesProvider"

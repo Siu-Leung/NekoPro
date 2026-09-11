@@ -64,6 +64,9 @@
                         android:id="@+id/action_new_tuic"
                         android:title="@string/action_tuic" />
                     <item
+                        android:id="@+id/action_new_juicity"
+                        android:title="@string/action_juicity" />
+                    <item
                         android:id="@+id/action_new_shadowtls"
                         android:title="@string/action_shadowtls" />
                     <item
@@ -104,6 +107,9 @@
             <item
                 android:id="@+id/action_connection_url_test"
                 android:title="@string/connection_test_url_test" />
+            <item
+                android:id="@+id/action_speed_test_group"
+                android:title="@string/speed_test_group" />
             <item
                 android:id="@+id/action_connection_test_clear_results"
                 android:title="@string/connection_test_clear_results" />

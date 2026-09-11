@@ -88,6 +88,17 @@ import io.nekohasekai.sagernet.ui.profile.SocksSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.TrojanGoSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.TrojanSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.TuicSettingsActivity
+import android.text.format.Formatter
+import androidx.appcompat.app.AlertDialog
+import androidx.core.view.isGone
+import androidx.core.view.isVisible
+import io.nekohasekai.sagernet.SpeedTestDirection
+import io.nekohasekai.sagernet.SpeedTestOutcome
+import io.nekohasekai.sagernet.bg.proto.AndroidSpeedTestSession
+import io.nekohasekai.sagernet.bg.proto.SpeedTestQueueRunner
+import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
+import io.nekohasekai.sagernet.bg.proto.completedSpeedTestCount
+import io.nekohasekai.sagernet.ui.profile.JuicitySettingsActivity
 import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
 import io.nekohasekai.sagernet.widget.QRCodeDialog
@@ -130,6 +141,12 @@ class ConfigurationFragment @JvmOverloads constructor(
     lateinit var adapter: GroupPagerAdapter
     lateinit var tabLayout: TabLayout
     lateinit var groupPager: ViewPager2
+
+    private var speedTestRunner: SpeedTestQueueRunner<ProxyEntity>? = null
+    private var speedTestJob: Job? = null
+    private var speedTestDialog: AlertDialog? = null
+    private var speedTestHidden = false
+    private var speedTestNotification: ConnectionTestNotification? = null
 
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
 
@@ -262,6 +279,18 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onDestroy() {
+        if (speedTestJob != null) {
+            speedTestRunner?.cancel()
+            speedTestJob?.cancel()
+            speedTestNotification?.updateNotification(0, 0, true)
+            speedTestNotification = null
+            speedTestDialog?.dismiss()
+            speedTestDialog = null
+            speedTestHidden = false
+            speedTestRunner = null
+            speedTestJob = null
+            DataStore.runningTest = false
+        }
         DataStore.profileCacheStore.unregisterChangeListener(this)
 
         if (::adapter.isInitialized) {
@@ -270,6 +299,16 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (speedTestHidden && speedTestJob != null) {
+            speedTestHidden = false
+            speedTestNotification?.updateNotification(0, 0, true)
+            speedTestNotification = null
+            speedTestDialog?.show()
+        }
     }
 
     override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
@@ -419,6 +458,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_new_tuic -> {
                 startActivity(Intent(requireActivity(), TuicSettingsActivity::class.java))
+            }
+
+            R.id.action_new_juicity -> {
+                startActivity(Intent(requireActivity(), JuicitySettingsActivity::class.java))
             }
 
             R.id.action_new_ssh -> {
@@ -593,8 +636,179 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_connection_url_test -> {
                 urlTest()
             }
+
+            R.id.action_speed_test_group -> {
+                confirmSpeedTest()
+            }
         }
         return true
+    }
+
+    private fun confirmSpeedTest() {
+        if (DataStore.runningTest) return
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.speed_test_confirm_title)
+            .setMessage(R.string.speed_test_confirm_message)
+            .setPositiveButton(R.string.speed_test_group) { _, _ -> speedTest() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun speedTest() {
+        if (DataStore.runningTest) return else DataStore.runningTest = true
+        val group = DataStore.currentGroup()
+        val binding = LayoutProgressListBinding.inflate(layoutInflater)
+        binding.progressCircular.isGone = true
+        binding.progressLinear.isVisible = true
+        binding.progressLinear.max = 1
+        binding.progressLinear.setProgressCompat(0, false)
+        val builder = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.speed_test_group)
+            .setView(binding.root)
+            .setPositiveButton(R.string.minimize, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setCancelable(false)
+        val dialog = builder.show()
+        speedTestDialog = dialog
+
+        val runner = SpeedTestQueueRunner(
+            sessionFactory = ::AndroidSpeedTestSession,
+            failureSnapshot = { profile, error ->
+                SpeedTestSnapshot(
+                    profileId = profile.id,
+                    profileName = profile.displayName(),
+                    mode = DataStore.speedTestMode,
+                    stage = SpeedTestQueueRunner.STAGE_ERROR,
+                    error = error.readableMessage,
+                    done = true,
+                )
+            },
+        )
+        speedTestRunner = runner
+
+        fun stop() {
+            runner.cancel()
+            speedTestJob?.cancel()
+        }
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            speedTestHidden = true
+            speedTestNotification = ConnectionTestNotification(
+                dialog.context,
+                "[${group.displayName()}] ${getString(R.string.speed_test_group)}",
+            )
+            dialog.hide()
+        }
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+            stop()
+            dialog.dismiss()
+        }
+
+        speedTestJob = runOnDefaultDispatcher {
+            try {
+                val profiles = SagerDatabase.proxyDao.getByGroup(group.id)
+                if (profiles.isEmpty()) {
+                    onMainDispatcher {
+                        dialog.dismiss()
+                    }
+                    return@runOnDefaultDispatcher
+                }
+                onMainDispatcher {
+                    binding.progressLinear.max = profiles.size
+                    binding.progressLinear.setProgressCompat(0, false)
+                    binding.progress.text = "0 / ${profiles.size}"
+                }
+                runner.run(profiles) { index, total, sample ->
+                    val outcome = SpeedTestOutcome.completedOrNull(
+                        mode = sample.mode,
+                        stage = sample.stage,
+                        done = sample.done,
+                        cancelled = sample.cancelled,
+                        error = sample.error,
+                        downloadBitsPerSecond = sample.downloadBitsPerSecond,
+                        uploadBitsPerSecond = sample.uploadBitsPerSecond,
+                    )
+                    if (outcome != null && SagerDatabase.proxyDao.updateSpeedTestResult(
+                            proxyId = sample.profileId,
+                            mode = outcome.mode,
+                            downloadBitsPerSecond = outcome.downloadBitsPerSecond,
+                            uploadBitsPerSecond = outcome.uploadBitsPerSecond,
+                        ) > 0
+                    ) {
+                        runOnMainDispatcher {
+                            adapter.groupFragments.values.forEach { fragment ->
+                                fragment.adapter?.updateSpeedTestResult(sample.profileId, outcome)
+                            }
+                        }
+                    }
+                    runOnMainDispatcher {
+                        val detail = formatSpeedTestSnapshot(sample)
+                        speedTestNotification?.updateNotification(index + 1, total, false, detail)
+                        if (!speedTestHidden && isAdded) {
+                            val completed = completedSpeedTestCount(index, total, sample.done)
+                            binding.nowTesting.text = detail
+                            binding.progress.text = "$completed / $total"
+                            binding.progressLinear.setProgressCompat(completed, true)
+                        }
+                    }
+                }
+                onMainDispatcher {
+                    dialog.dismiss()
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                runOnMainDispatcher {
+                    if (!speedTestHidden && isAdded) {
+                        binding.nowTesting.text = getString(R.string.speed_test_stage_cancelled)
+                    }
+                }
+            } finally {
+                speedTestNotification?.updateNotification(0, 0, true)
+                speedTestNotification = null
+                speedTestDialog = null
+                speedTestHidden = false
+                speedTestRunner = null
+                speedTestJob = null
+                DataStore.runningTest = false
+            }
+        }
+    }
+
+    private fun formatSpeedTestSnapshot(snapshot: SpeedTestSnapshot): String {
+        val stage = when (snapshot.stage) {
+            SpeedTestQueueRunner.STAGE_DISCOVERY -> getString(R.string.speed_test_stage_discovery)
+            SpeedTestQueueRunner.STAGE_LATENCY -> getString(R.string.speed_test_stage_latency)
+            SpeedTestQueueRunner.STAGE_DOWNLOAD -> getString(R.string.speed_test_stage_download)
+            SpeedTestQueueRunner.STAGE_UPLOAD -> getString(R.string.speed_test_stage_upload)
+            SpeedTestQueueRunner.STAGE_COMPLETE -> getString(R.string.speed_test_stage_complete)
+            SpeedTestQueueRunner.STAGE_CANCELLED -> getString(R.string.speed_test_stage_cancelled)
+            SpeedTestQueueRunner.STAGE_ERROR -> getString(R.string.speed_test_stage_error)
+            else -> getString(R.string.speed_test_stage_pending)
+        }
+        return buildString {
+            append(snapshot.profileName).append(" — ").append(stage)
+            if (snapshot.downloadBitsPerSecond > 0) append('\n').append(
+                getString(
+                    R.string.speed_test_download_format,
+                    getString(R.string.speed_test_rate_mbps, snapshot.downloadBitsPerSecond / 1_000_000.0),
+                    Formatter.formatFileSize(requireContext(), snapshot.downloadBytes),
+                )
+            )
+            if (snapshot.uploadBitsPerSecond > 0) append('\n').append(
+                getString(
+                    R.string.speed_test_upload_format,
+                    getString(R.string.speed_test_rate_mbps, snapshot.uploadBitsPerSecond / 1_000_000.0),
+                    Formatter.formatFileSize(requireContext(), snapshot.uploadBytes),
+                )
+            )
+            if (snapshot.latencyMs > 0) append('\n').append(
+                getString(R.string.speed_test_latency_format, snapshot.latencyMs)
+            )
+            val server = listOf(snapshot.serverName, snapshot.serverCountry)
+                .filter { it.isNotBlank() }
+                .joinToString(", ")
+            if (server.isNotBlank()) append('\n').append(getString(R.string.speed_test_server_format, server))
+            if (snapshot.error.isNotBlank()) append('\n').append(snapshot.error)
+        }
     }
 
     inner class TestDialog {
@@ -1276,6 +1490,15 @@ class ConfigurationFragment @JvmOverloads constructor(
             var configurationIdList: MutableList<Long> = mutableListOf()
             val configurationList = HashMap<Long, ProxyEntity>()
 
+            fun updateSpeedTestResult(profileId: Long, outcome: SpeedTestOutcome) {
+                val profile = configurationList[profileId] ?: return
+                profile.speedTestMode = outcome.mode
+                profile.speedTestDownloadBitsPerSecond = outcome.downloadBitsPerSecond
+                profile.speedTestUploadBitsPerSecond = outcome.uploadBitsPerSecond
+                val index = configurationIdList.indexOf(profileId)
+                if (index >= 0) notifyItemChanged(index)
+            }
+
             private fun getItem(profileId: Long): ProxyEntity {
                 var profile = configurationList[profileId]
                 if (profile == null) {
@@ -1527,6 +1750,23 @@ class ConfigurationFragment @JvmOverloads constructor(
             val shareButton: ImageView = view.findViewById(R.id.shareIcon)
             val removeButton: ImageView = view.findViewById(R.id.remove)
 
+            private fun speedTestResultText(proxyEntity: ProxyEntity): String? {
+                val outcome = SpeedTestOutcome(
+                    mode = proxyEntity.speedTestMode,
+                    downloadBitsPerSecond = proxyEntity.speedTestDownloadBitsPerSecond,
+                    uploadBitsPerSecond = proxyEntity.speedTestUploadBitsPerSecond,
+                )
+                val rates = outcome.rates()
+                if (rates.isEmpty()) return null
+                return rates.joinToString("  ") { rate ->
+                    val direction = when (rate.direction) {
+                        SpeedTestDirection.DOWNLOAD -> "↓"
+                        SpeedTestDirection.UPLOAD -> "↑"
+                    }
+                    "$direction ${getString(R.string.speed_test_rate_mbps, rate.bitsPerSecond / 1_000_000.0)}"
+                }
+            }
+
             fun bind(proxyEntity: ProxyEntity, trafficData: TrafficData? = null) {
                 val pf = parentFragment as? ConfigurationFragment ?: return
                 val isDualColumn = DataStore.profileLayoutMode == 1
@@ -1604,8 +1844,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 (trafficText.parent as View).isGone =
                     (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
 
+                val stText = speedTestResultText(proxyEntity)
+
                 if (proxyEntity.status <= 0) {
-                    if (showTraffic) {
+                    if (stText != null) {
+                        profileStatus.text = stText
+                        profileStatus.setTextColor(requireContext().getColorAttr(android.R.attr.textColorSecondary))
+                    } else if (showTraffic) {
                         profileStatus.text = trafficText.text
                         profileStatus.setTextColor(requireContext().getColorAttr(android.R.attr.textColorSecondary))
                         trafficText.text = ""
@@ -1613,12 +1858,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                         profileStatus.text = ""
                     }
                 } else if (proxyEntity.status == 1) {
-                    profileStatus.text = getString(R.string.available, proxyEntity.ping)
+                    val pingText = getString(R.string.available, proxyEntity.ping)
+                    profileStatus.text = if (stText != null) "$pingText\n$stText" else pingText
                     profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
                 } else {
                     profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
                     if (proxyEntity.status == 2) {
-                        profileStatus.text = proxyEntity.error
+                        profileStatus.text = if (stText != null) "${proxyEntity.error}\n$stText" else proxyEntity.error
                     }
                 }
 

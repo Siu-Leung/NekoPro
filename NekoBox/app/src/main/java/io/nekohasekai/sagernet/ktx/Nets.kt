@@ -63,4 +63,4 @@ fun mkPort(): Int {
     return port
 }
 
-const val USER_AGENT = "NekoBox"
+const val USER_AGENT = "NekoPro/Android/" + io.nekohasekai.sagernet.BuildConfig.VERSION_NAME

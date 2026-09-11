@@ -27,6 +27,8 @@ import io.nekohasekai.sagernet.fmt.trojan_go.buildTrojanGoConfig
 import io.nekohasekai.sagernet.fmt.trojan_go.toUri
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.tuic.toUri
+import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
+import io.nekohasekai.sagernet.fmt.juicity.toUri
 import io.nekohasekai.sagernet.fmt.v2ray.*
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.ktx.app
@@ -69,9 +71,13 @@ data class ProxyEntity(
     var shadowTLSBean: ShadowTLSBean? = null,
     var anyTLSBean: AnyTLSBean? = null,
     var snellBean: moe.matsuri.nb4a.proxy.snell.SnellBean? = null,
+    var juicityBean: JuicityBean? = null,
     var chainBean: ChainBean? = null,
     var nekoBean: NekoBean? = null,
     var configBean: ConfigBean? = null,
+    @ColumnInfo(defaultValue = "''") var speedTestMode: String = "",
+    @ColumnInfo(defaultValue = "0") var speedTestDownloadBitsPerSecond: Long = 0L,
+    @ColumnInfo(defaultValue = "0") var speedTestUploadBitsPerSecond: Long = 0L,
 ) : Serializable() {
 
     companion object {
@@ -92,6 +98,7 @@ data class ProxyEntity(
         const val TYPE_MIERU = 21
         const val TYPE_ANYTLS = 22
         const val TYPE_SNELL = 23
+        const val TYPE_JUICITY = 24
 
         const val TYPE_CONFIG = 998
         const val TYPE_NEKO = 999
@@ -121,7 +128,7 @@ data class ProxyEntity(
     }
 
     override fun serializeToBuffer(output: ByteBufferOutput) {
-        output.writeInt(0)
+        output.writeInt(1)
 
         output.writeLong(id)
         output.writeLong(groupId)
@@ -133,6 +140,9 @@ data class ProxyEntity(
         output.writeInt(ping)
         output.writeString(uuid)
         output.writeString(error)
+        output.writeString(speedTestMode)
+        output.writeLong(speedTestDownloadBitsPerSecond)
+        output.writeLong(speedTestUploadBitsPerSecond)
 
         val data = KryoConverters.serialize(requireBean())
         output.writeVarInt(data.size, true)
@@ -154,6 +164,11 @@ data class ProxyEntity(
         ping = input.readInt()
         uuid = input.readString()
         error = input.readString()
+        if (version >= 1) {
+            speedTestMode = input.readString() ?: ""
+            speedTestDownloadBitsPerSecond = input.readLong()
+            speedTestUploadBitsPerSecond = input.readLong()
+        }
         putByteArray(input.readBytes(input.readVarInt(true)))
 
         dirty = input.readBoolean()
@@ -177,6 +192,7 @@ data class ProxyEntity(
             TYPE_SHADOWTLS -> shadowTLSBean = KryoConverters.shadowTLSDeserialize(byteArray)
             TYPE_ANYTLS -> anyTLSBean = KryoConverters.anyTLSDeserialize(byteArray)
             TYPE_SNELL -> snellBean = KryoConverters.snellDeserialize(byteArray)
+            TYPE_JUICITY -> juicityBean = KryoConverters.juicityDeserialize(byteArray)
             TYPE_CHAIN -> chainBean = KryoConverters.chainDeserialize(byteArray)
             TYPE_NEKO -> nekoBean = KryoConverters.nekoDeserialize(byteArray)
             TYPE_CONFIG -> configBean = KryoConverters.configDeserialize(byteArray)
@@ -199,6 +215,7 @@ data class ProxyEntity(
         TYPE_SHADOWTLS -> "ShadowTLS"
         TYPE_ANYTLS -> "AnyTLS"
         TYPE_SNELL -> "Snell"
+        TYPE_JUICITY -> "Juicity"
         TYPE_CHAIN -> chainName
         TYPE_NEKO -> nekoBean!!.displayType()
         TYPE_CONFIG -> configBean!!.displayType()
@@ -225,6 +242,7 @@ data class ProxyEntity(
             TYPE_SHADOWTLS -> shadowTLSBean
             TYPE_ANYTLS -> anyTLSBean
             TYPE_SNELL -> snellBean
+            TYPE_JUICITY -> juicityBean
             TYPE_CHAIN -> chainBean
             TYPE_NEKO -> nekoBean
             TYPE_CONFIG -> configBean
@@ -262,6 +280,7 @@ data class ProxyEntity(
             is HysteriaBean -> toUri()
             is TuicBean -> toUri()
             is AnyTLSBean -> toUri()
+            is JuicityBean -> toUri()
             is NekoBean -> ""
             else -> toUniversalLink()
         }
@@ -443,6 +462,11 @@ data class ProxyEntity(
                 snellBean = bean
             }
 
+            is JuicityBean -> {
+                type = TYPE_JUICITY
+                juicityBean = bean
+            }
+
             is ChainBean -> {
                 type = TYPE_CHAIN
                 chainBean = bean
@@ -481,6 +505,7 @@ data class ProxyEntity(
                 TYPE_SHADOWTLS -> ShadowTLSSettingsActivity::class.java
                 TYPE_ANYTLS -> moe.matsuri.nb4a.proxy.anytls.AnyTLSSettingsActivity::class.java
                 TYPE_SNELL -> moe.matsuri.nb4a.proxy.snell.SnellSettingsActivity::class.java
+                TYPE_JUICITY -> JuicitySettingsActivity::class.java
                 TYPE_CHAIN -> ChainSettingsActivity::class.java
                 TYPE_CONFIG -> ConfigSettingActivity::class.java
                 else -> throw IllegalArgumentException()
@@ -511,6 +536,32 @@ data class ProxyEntity(
 
         @Query("SELECT  MAX(userOrder) + 1 FROM proxy_entities WHERE groupId = :groupId")
         fun nextOrder(groupId: Long): Long?
+
+        @Query(
+            """UPDATE proxy_entities SET
+                speedTestMode = :mode,
+                speedTestDownloadBitsPerSecond = :downloadBitsPerSecond,
+                speedTestUploadBitsPerSecond = :uploadBitsPerSecond
+                WHERE id = :proxyId"""
+        )
+        fun updateSpeedTestResult(
+            proxyId: Long,
+            mode: String,
+            downloadBitsPerSecond: Long,
+            uploadBitsPerSecond: Long,
+        ): Int
+
+        @Query(
+            """UPDATE proxy_entities SET
+                status = 0,
+                ping = 0,
+                error = NULL,
+                speedTestMode = '',
+                speedTestDownloadBitsPerSecond = 0,
+                speedTestUploadBitsPerSecond = 0
+                WHERE groupId = :groupId"""
+        )
+        fun clearTestResults(groupId: Long): Int
 
         @Query("SELECT * FROM proxy_entities WHERE id = :proxyId")
         fun getById(proxyId: Long): ProxyEntity?

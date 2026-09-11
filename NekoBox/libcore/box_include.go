@@ -42,6 +42,8 @@ import (
 
 	_ "github.com/sagernet/sing-box/experimental/clashapi"
 	_ "github.com/sagernet/sing-box/transport/v2rayquic"
+
+	"libcore/protocol/juicity"
 )
 
 func nekoboxAndroidInboundRegistry() *inbound.Registry {
@@ -86,6 +88,7 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	hysteria.RegisterOutbound(registry)
 	tuic.RegisterOutbound(registry)
 	hysteria2.RegisterOutbound(registry)
+	juicity.RegisterOutbound(registry)
 
 	return registry
 }

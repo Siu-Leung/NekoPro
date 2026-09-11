@@ -14,8 +14,11 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 - sing-box `1.13.19` 主内核
 - Mihomo 协议桥接
-- VLESS-XHTTP
+- VLESS-XHTTP（智能指纹分流）
 - Snell v1–v5（Mihomo 实现）与 Snell v6（sing-snell 实现；其上游亦支持 v4/v5）
+- **Juicity 协议原生集成**（基于 `sing-juicity`）
+- **真·速度测试模块**（基于 `speedtest-go` 高性能多流测速）
+- **候选 UA 智能轮询回退链**（解决复杂订阅源对未知 UA 的阻断与降级）
 - IPv4 / IPv6 双栈
 - AnyTLS、VMess、VLESS、Trojan、Shadowsocks、ShadowTLS
 - Hysteria 1/2、TUIC、SSH、SOCKS、WireGuard 等
@@ -24,52 +27,47 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.0.1`
+`Neko-Pro-1.1.0`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.0.1)
-- 核心 APK：`NekoBox-Neko-Pro-1.0.1-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.0)
+- 核心 APK：`NekoBox-Neko-Pro-1.1.0-arm64-v8a.apk`
+
+### v1.1.0 改动日志 (2026-09-11)
+
+- **新增 Juicity 代理协议支持**
+  - 在 `libcore` 引入 `github.com/exclavenetwork/sing-juicity v0.1.6` 与 `github.com/gofrs/uuid/v5`，在 outbound registry 中注册 `juicity`。
+  - 支持 TLS 证书哈希固定校验（`PinCertSha256`）与 ALPN（默认 `h3`）。
+  - Android 端完整支持 `juicity://` 节点链接导入、导出、编辑（`JuicitySettingsActivity`）与 UI 管理。
+- **集成真·速度测试（Speed Test）模块**
+  - 接入 `github.com/Mahdi-zarei/speedtest-go`，通过 Go 会话向应用层导出测速接口。
+  - 分组菜单提供“速度测试本组”功能，支持下载+上传、仅下载、仅上传、简单下载四种模式。
+  - 实时显示测速阶段、瞬时速率、服务器信息与最终吞吐量（`↓ / ↑ Mbps`），并直接呈现在节点卡片状态栏。
+  - 支持测速弹窗最小化至通知栏后台运行，切回前台自动恢复交互。
+- **订阅更新“多 UA 智能候选回退链”与标准 UA 规范**
+  - 标准化默认客户端 UA 为 `NekoPro/Android/[VERSION_NAME]`。
+  - 在订阅拉取时，按照 `用户自定义 UA` → `默认 UA` → `clash-meta` → `v2rayN/7.8.2` → `sing-box/1.14.0` 智能链式回退轮询，直至成功解析有效节点，大幅提升各类型机场与中转转换的兼容性。
+- **架构升级与版本递增**
+  - 遵循“加协议版本号 +0.1”规范，版本号升级至 `1.1.0`（Version Code: `49`）。
+  - 数据库 Room Schema 升级至版本 8（`AutoMigration(from = 7, to = 8)`），新增测速与协议字段，保持零丢失平滑升级。
 
 ### v1.0.1 改动日志 (2026-09-03)
 
 - **修复 VLESS-XHTTP 携带 uTLS 指纹时无法连接的问题**（Fixes [#1](https://github.com/Siu-Leung/NekoPro/issues/1)）
-  - **根因**：Mihomo 内核的 `Fingerprint` 字段专用于 TLS 证书固定（Certificate Pinning），而浏览器指纹对应 `ClientFingerprint`。此前桥接时直接将 `fingerprint` 传给证书 Pinning 字段，导致包含 `fp=chrome` 等指纹的节点握手时报错 `'fingerprint' is used for TLS certificate pinning. If you need to specify the browser fingerprint, use client-fingerprint`。
-  - **修复**：在 `sing-box/protocol/vless_xhttp` 中引入智能指纹分流逻辑，自动区分 64 位 SHA-256 证书哈希与浏览器伪装指纹（`chrome`、`firefox`、`safari`、`ios` 等），分别精准映射到 `Fingerprint`（证书 Pinning）与 `ClientFingerprint`（uTLS 指纹）。
-  - **配置对齐**：在 `SingBoxOptions.java` 与 `V2RayFmt.kt` 转换层同步支持 `client_fingerprint` 字段。
-  - **测试验证**：新增 `fingerprint_test.go` 单元测试，经 CI 验证全量测试通过。
+  - **修复**：在 `sing-box/protocol/vless_xhttp` 中引入智能指纹分流逻辑，自动区分 64 位 SHA-256 证书哈希与浏览器伪装指纹（`chrome`、`firefox` 等），分别映射到 `Fingerprint` 与 `ClientFingerprint`。
 - **构建与发布流优化**
-  - 升级版本号至 `1.0.1`（Version Code: `48`）。
   - CI 工作流支持 Git Tag 自动触发四 ABI 完整编译打包、签名校验与发布。
 
 ## 主要改动
 
-相较上游，本项目不是仅修改名称或界面，主要结构性改动包括：
+相较上游，本项目主要结构性改动包括：
 
 - 将 sing-box 1.13 已移除的旧 TUN、sniff 与 DNS 字段迁移到新版配置模型。
-- 在 Android 专用 outbound registry 中注册自定义协议。
+- 在 Android 专用 outbound registry 中注册自定义协议（XHTTP、Snell、Juicity 等）。
 - 通过 mihomo 桥接 VLESS-XHTTP 与 Snell v1–v5。
 - 接入 sing-snell 实现 Snell v6，并保留 Android VPN socket protect 链路。
 - 修复 mihomo 桥接协议的 IPv6 字面量解析。
 - Clash API 仅监听回环地址，使用安装级随机 Secret，并由仪表板自动认证。
 - 对导入、分享和日志路径做敏感字段收敛，避免记录完整 URI、密码、PSK 和 Token。
-
-## 已执行验证
-
-首个 Release 在本地执行并通过了以下验证：
-
-- sing-box：`go test ./...`
-- 重点协议：`go test -race` 与 `go vet`
-- Android libcore：gomobile 四 ABI bind
-- Android：Release 单元测试、Kotlin Release 编译、`assembleOssRelease`
-- APK：包名、版本、ABI、原生库内容与 v1/v2 签名检查
-- 真机：Snell v4/v5/v6、VLESS-XHTTP、AnyTLS，以及 IPv4/IPv6 双栈入口
-
-CI 提供可重复的 Go 测试；手动 Android 工作流使用 GitHub Actions 加密 Secrets 恢复发布 keystore，生成四 ABI 签名 APK，并同时输出 `MD5SUMS.txt` 与 `SHA256SUMS.txt`。私钥文件与密码不会进入仓库或构建 Artifact。协议可用性仍以真实网络与真机测试为准。
-
-正式 APK 的签名证书 SHA-256 指纹：
-
-```text
-CC:5B:75:9E:7E:8F:E9:2A:23:D2:18:D8:66:29:D4:30:85:9D:87:F1:4A:98:A9:BB:C1:5E:4D:39:BA:F5:F3:7C
-```
 
 ## 构建
 
@@ -91,10 +89,6 @@ bash ./gradlew :app:testOssReleaseUnitTest
 bash ./gradlew assembleOssRelease
 ```
 
-`libcore/init.sh` 会从固定提交构建 `gomobile-matsuri` 与 `gobind-matsuri`；`libcore/build.sh` 会生成四 ABI 的 `libcore.aar` 并安装到 `app/libs/`。Gradle 的 `ensureGeoAssets` 任务会在需要时下载官方 GeoIP/GeoSite 资源。Release APK 输出于 `NekoBox/app/build/outputs/apk/oss/release/`。
-
-Release 签名信息不在仓库中。请自行配置本地 keystore，切勿提交私钥、密码、Token 或其他凭据。
-
 ## 项目说明
 
 - 本项目不是 MatsuriDayo/NekoBoxForAndroid 的官方版本。
@@ -103,19 +97,15 @@ Release 签名信息不在仓库中。请自行配置本地 keystore，切勿提
 - 协议实现来自多个上游项目；请同时遵守对应目录中的许可证与第三方声明。
 - 使用代理工具时，请遵守所在地法律、服务条款和网络管理要求。
 
-## 使用与维护声明
-
-- 本项目仅用于学习、研究及个人网络工具开发，不提供商业服务、节点、订阅或付费支持。
-- 请勿将本项目用于违反当地法律法规、侵犯他人权益或绕过未经授权的访问控制。
-- 本项目按“现状”提供，不承诺可用性、兼容性、更新频率或 Issue 响应时间。
-- 这是个人维护并由 AI 辅助开发的项目；提交 Issue 时请附版本、复现步骤和已脱敏日志。
-
 ## 上游与致谢
 
 - [MatsuriDayo/NekoBoxForAndroid](https://github.com/MatsuriDayo/NekoBoxForAndroid)
 - [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
 - [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo)
 - [SagerNet/sing-snell](https://github.com/SagerNet/sing-snell)
+- [throneproj/ThroneForAndroid](https://github.com/throneproj/ThroneForAndroid)（感谢参考其测速交互、测试套件与多 UA 回退链设计）
+- [exclavenetwork/sing-juicity](https://github.com/exclavenetwork/sing-juicity)（感谢维护现代 sing-box Juicity 协议适配）
+- [Mahdi-zarei/speedtest-go](https://github.com/Mahdi-zarei/speedtest-go)（提供高性能 Go speedtest 驱动核心）
 - [MetaCubeX/Yacd-meta](https://github.com/MetaCubeX/Yacd-meta)
 
 ## License

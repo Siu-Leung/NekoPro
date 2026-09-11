@@ -4693,4 +4693,29 @@ public class SingBoxOptions {
         public Boolean udp;
     }
 
+    public static class Outbound_JuicityOptions extends Outbound {
+        public String detour;
+        public String bind_interface;
+        public String inet4_bind_address;
+        public String inet6_bind_address;
+        public String protect_path;
+        public Integer routing_mark;
+        public Boolean reuse_addr;
+        public Long connect_timeout;
+        public Boolean tcp_fast_open;
+        public Boolean tcp_multi_path;
+        public Boolean udp_fragment;
+        public String domain_strategy;
+        public Long fallback_delay;
+
+        public String server;
+        public Integer server_port;
+
+        public String uuid;
+        public String password;
+        public String network;
+        public String pin_cert_sha256;
+        public OutboundTLSOptions tls;
+    }
+
 }

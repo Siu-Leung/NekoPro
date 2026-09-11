@@ -59,33 +59,69 @@ object RawUpdater : GroupUpdater() {
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
         } else {
 
-            val response = Libcore.newHttpClient().apply {
-                trySocks5(DataStore.mixedPort)
-                tryH3Direct()
-                when (DataStore.appTLSVersion) {
-                    "1.3" -> restrictedTLS()
-                }
-            }.newRequest().apply {
-                if (DataStore.allowInsecureOnRequest) {
-                    allowInsecure()
-                }
-                setURL(subscription.link)
-                setUserAgent(subscription.customUserAgent!!.takeIf { it.isNotBlank() } ?: USER_AGENT)
-            }.execute()
-            proxies = parseRaw(Util.getStringBox(response.contentString))
-                ?: error(app.getString(R.string.no_proxies_found))
+            // 候选 UA 链：订阅自定义 UA 优先，其后依次尝试常见客户端 UA，直到成功解析出非空节点
+            val candidateUserAgents = buildList {
+                subscription.customUserAgent?.takeIf { it.isNotBlank() }?.let { add(it) }
+                add(USER_AGENT)
+                add("clash-meta")
+                add("v2rayN/7.8.2")
+                add("sing-box/1.14.0")
+            }
 
-            subscription.subscriptionUserinfo =
-                Util.getStringBox(response.getHeader("Subscription-Userinfo"))
+            var lastError: Throwable? = null
+            var lastUserinfo = ""
+            var lastDisposition = ""
+            proxies = emptyList()
+
+            for (candidate in candidateUserAgents) {
+                try {
+                    val response = Libcore.newHttpClient().apply {
+                        trySocks5(DataStore.mixedPort)
+                        tryH3Direct()
+                        when (DataStore.appTLSVersion) {
+                            "1.3" -> restrictedTLS()
+                        }
+                    }.newRequest().apply {
+                        if (DataStore.allowInsecureOnRequest) {
+                            allowInsecure()
+                        }
+                        setURL(subscription.link)
+                        setUserAgent(candidate)
+                    }.execute()
+                    val parsed = parseRaw(Util.getStringBox(response.contentString))
+                    if (parsed.isNullOrEmpty()) {
+                        throw IllegalStateException("no proxies found with UA: $candidate")
+                    }
+                    proxies = parsed
+
+                    Util.getStringBox(response.getHeader("Subscription-Userinfo"))
+                        .takeIf { it.isNotBlank() }?.let { lastUserinfo = it }
+                    if (proxyGroup.name?.startsWith("Subscription #") == true) {
+                        val remoteName = Util.getStringBox(response.getHeader("content-disposition"))
+                        if (remoteName.isNotBlank()) {
+                            lastDisposition = remoteName
+                        }
+                    }
+                    break
+                } catch (e: SubscriptionFoundException) {
+                    throw e
+                } catch (e: Throwable) {
+                    lastError = e
+                    Logs.d("Subscription download failed with UA $candidate: ${e.message}")
+                }
+            }
+
+            if (proxies.isEmpty()) {
+                throw (lastError ?: error(app.getString(R.string.no_proxies_found)))
+            }
+
+            subscription.subscriptionUserinfo = lastUserinfo
 
             // 修改默认名字
-            if (proxyGroup.name?.startsWith("Subscription #") == true) {
-                var remoteName = Util.getStringBox(response.getHeader("content-disposition"))
+            if (proxyGroup.name?.startsWith("Subscription #") == true && lastDisposition.isNotBlank()) {
+                val remoteName = Util.decodeFilename(lastDisposition)
                 if (remoteName.isNotBlank()) {
-                    remoteName = Util.decodeFilename(remoteName)
-                    if (remoteName.isNotBlank()) {
-                        proxyGroup.name = remoteName
-                    }
+                    proxyGroup.name = remoteName
                 }
             }
         }
