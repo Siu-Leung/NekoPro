@@ -653,16 +653,19 @@ class ConfigurationFragment @JvmOverloads constructor(
             .show()
     }
 
-    private fun speedTest() {
+    private fun speedTest(targetProfile: ProxyEntity? = null) {
         if (DataStore.runningTest) return else DataStore.runningTest = true
         val group = DataStore.currentGroup()
+        val isSingle = targetProfile != null
+        val titleText = if (isSingle) targetProfile!!.displayName() else getString(R.string.speed_test_group)
+
         val binding = LayoutProgressListBinding.inflate(layoutInflater)
         binding.progressCircular.isGone = true
         binding.progressLinear.isVisible = true
         binding.progressLinear.max = 1
         binding.progressLinear.setProgressCompat(0, false)
         val builder = MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.speed_test_group)
+            .setTitle(titleText)
             .setView(binding.root)
             .setPositiveButton(R.string.minimize, null)
             .setNegativeButton(android.R.string.cancel, null)
@@ -694,7 +697,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             speedTestHidden = true
             speedTestNotification = ConnectionTestNotification(
                 dialog.context,
-                "[${group.displayName()}] ${getString(R.string.speed_test_group)}",
+                "[$titleText] ${getString(R.string.speed_test_group)}",
             )
             dialog.hide()
         }
@@ -705,7 +708,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         speedTestJob = runOnDefaultDispatcher {
             try {
-                val profiles = SagerDatabase.proxyDao.getByGroup(group.id)
+                val profiles = if (targetProfile != null) listOf(targetProfile) else SagerDatabase.proxyDao.getByGroup(group.id)
                 if (profiles.isEmpty()) {
                     onMainDispatcher {
                         dialog.dismiss()
@@ -739,6 +742,18 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 fragment.adapter?.updateSpeedTestResult(sample.profileId, outcome)
                             }
                         }
+                    } else if (sample.done && sample.error.isNotBlank()) {
+                        // 测速失败时也把错误提示通知到卡片
+                        runOnMainDispatcher {
+                            adapter.groupFragments.values.forEach { fragment ->
+                                fragment.adapter?.configurationList?.get(sample.profileId)?.let { p ->
+                                    p.status = 2
+                                    p.error = sample.error
+                                    val idx = fragment.adapter?.configurationIdList?.indexOf(sample.profileId) ?: -1
+                                    if (idx >= 0) fragment.adapter?.notifyItemChanged(idx)
+                                }
+                            }
+                        }
                     }
                     runOnMainDispatcher {
                         val detail = formatSpeedTestSnapshot(sample)
@@ -751,6 +766,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
                 }
+                delay(800)
                 onMainDispatcher {
                     dialog.dismiss()
                 }
@@ -1804,7 +1820,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 }
                             }
                         }
+                    }
 
+                    view.setOnLongClickListener {
+                        if (!DataStore.runningTest) {
+                            speedTest(proxyEntity)
+                        }
+                        true
                     }
                 }
 

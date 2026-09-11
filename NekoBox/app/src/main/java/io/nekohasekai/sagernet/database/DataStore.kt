@@ -162,10 +162,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var connectionTestURL by configurationStore.string(Key.CONNECTION_TEST_URL) { CONNECTION_TEST_URL }
     var connectionTestConcurrent by configurationStore.int("connectionTestConcurrent") { 5 }
     var speedTestMode by configurationStore.string(Key.SPEED_TEST_MODE) { "download_upload" }
-    var speedTestTimeoutMs by configurationStore.stringToInt(Key.SPEED_TEST_TIMEOUT_MS) { 5000 }
+    var speedTestTimeoutMs by configurationStore.stringToInt(Key.SPEED_TEST_TIMEOUT_MS) { 10000 }
     var speedTestServerListURL by configurationStore.string(Key.SPEED_TEST_SERVER_LIST_URL) { "https://www.speedtest.net/api/js/servers" }
     var speedTestFallbackServerListURL by configurationStore.string(Key.SPEED_TEST_FALLBACK_SERVER_LIST_URL) { "https://www.speedtest.net/speedtest-servers-static.php" }
-    var simpleDownloadURL by configurationStore.string(Key.SIMPLE_DOWNLOAD_URL) { "http://cachefly.cachefly.net/1mb.test" }
+    var simpleDownloadURL by configurationStore.string(Key.SIMPLE_DOWNLOAD_URL) { "https://speed.cloudflare.com/__down?bytes=50000000" }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
 
     var tunImplementation by configurationStore.stringToInt(Key.TUN_IMPLEMENTATION) { TunImplementation.GVISOR }

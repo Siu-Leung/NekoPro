@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Mahdi-zarei/speedtest-go/speedtest"
+	"github.com/sagernet/sing-box/common/dialer"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -35,11 +36,11 @@ const (
 	SpeedTestStageCancelled  = "cancelled"
 	SpeedTestStageError      = "error"
 
-	DefaultSpeedTestTimeoutMs       = int32(5000)
+	DefaultSpeedTestTimeoutMs       = int32(10000)
 	DefaultSpeedTestConnections     = 8
 	DefaultSpeedTestServerListURL   = "https://www.speedtest.net/api/js/servers"
 	FallbackSpeedTestServerListURL  = "https://www.speedtest.net/speedtest-servers-static.php"
-	DefaultSimpleDownloadURL        = "http://cachefly.cachefly.net/1mb.test"
+	DefaultSimpleDownloadURL        = "https://speed.cloudflare.com/__down?bytes=50000000"
 	speedTestDownloadImageSize      = 1000
 	speedTestUploadPayloadBytes     = int64(999490)
 	speedTestSampleInterval         = 100 * time.Millisecond
@@ -253,10 +254,11 @@ func (s *SpeedTestSession) run() {
 		return
 	}
 
-	dialer := func(ctx context.Context, network string, address string) (net.Conn, error) {
-		return outbound.DialContext(ctx, network, M.ParseSocksaddr(address))
+	detour := dialer.NewDetour(s.box.Outbound(), outbound.Tag(), true)
+	dialerFunc := func(ctx context.Context, network string, address string) (net.Conn, error) {
+		return detour.DialContext(ctx, network, M.ParseSocksaddr(address))
 	}
-	outcome, err := executeSpeedTest(s.ctx, s.config, dialer, s.updateProgress)
+	outcome, err := executeSpeedTest(s.ctx, s.config, dialerFunc, s.updateProgress)
 	s.finish(outcome, err)
 }
 
