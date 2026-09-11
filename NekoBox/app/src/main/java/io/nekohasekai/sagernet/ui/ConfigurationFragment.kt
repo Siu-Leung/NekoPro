@@ -653,7 +653,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             .show()
     }
 
-    private fun speedTest(targetProfile: ProxyEntity? = null) {
+    fun speedTest(targetProfile: ProxyEntity? = null) {
         if (DataStore.runningTest) return else DataStore.runningTest = true
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
@@ -1824,7 +1824,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                     view.setOnLongClickListener {
                         if (!DataStore.runningTest) {
-                            speedTest(proxyEntity)
+                            pf.speedTest(proxyEntity)
                         }
                         true
                     }
