@@ -108,7 +108,7 @@ class AndroidSpeedTestSession(profile: ProxyEntity) : BoxInstance(profile), Spee
             nativeSession?.cancel()
         }
         init()
-        launch()
+        launchExternal()
         if (processes.processCount > 0) delay(500)
         if (BuildConfig.DEBUG) Logs.d(config.config)
 
