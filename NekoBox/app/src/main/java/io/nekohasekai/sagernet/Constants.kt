@@ -108,6 +108,8 @@ object Key {
     const val SERVER_SS_CATEGORY = "serverSsCategory"
     const val SERVER_HEADERS = "serverHeaders"
     const val SERVER_ALLOW_INSECURE = "serverAllowInsecure"
+    const val SERVER_USER_ID = "serverUserId"
+    const val SERVER_PINNED_CERT_CHAIN_SHA256 = "serverPinnedCertChainSha256"
 
     const val SERVER_AUTH_TYPE = "serverAuthType"
     const val SERVER_UPLOAD_SPEED = "serverUploadSpeed"
