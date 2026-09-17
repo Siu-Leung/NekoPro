@@ -351,8 +351,11 @@ class MainActivity : ThemedActivity(),
     fun displayFragment(fragment: ToolbarFragment) {
         if (fragment is ConfigurationFragment) {
             binding.stats.allowShow = true
+            if (DataStore.serviceState == BaseService.State.Connected) {
+                binding.stats.performShow()
+            }
             binding.fab.show()
-        } else if (!DataStore.showBottomBar) {
+        } else if (fragment is AboutFragment || !DataStore.showBottomBar) {
             binding.stats.allowShow = false
             binding.stats.performHide()
             binding.fab.hide()

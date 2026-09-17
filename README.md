@@ -27,10 +27,20 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.1.2`
+`Neko-Pro-1.1.3`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.2)
-- 核心 APK：`NekoBox-Neko-Pro-1.1.2-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.3)
+- 核心 APK：`NekoBox-Neko-Pro-1.1.3-arm64-v8a.apk`
+
+### v1.1.3 改动日志 (2026-09-17)
+
+- **关于界面遮挡修复与沉浸式优化**
+  - 进入“关于”页面时自动隐藏底部连接状态栏与悬浮飞机（ServiceButton）按钮，切回配置列表时无缝自动恢复，彻底解决底部悬浮遮挡文字问题。
+  - 为关于页面增加底部 48dp 滚动安全留白，优化长文本列表阅读体验。
+- **关于界面版本点击与更新链路收敛**
+  - 版本卡片点击直接跳转至 `Siu-Leung/NekoPro/releases`，不再回跳原项目。
+  - 在线检查更新 API 对齐 NekoPro 官方最新 Release。
+  - 彻底移除关于说明文字中的 `-siu` 私人后缀。
 
 ### v1.1.2 改动日志 (2026-09-17)
 
