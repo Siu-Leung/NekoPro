@@ -165,7 +165,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var speedTestTimeoutMs by configurationStore.stringToInt(Key.SPEED_TEST_TIMEOUT_MS) { 10000 }
     var speedTestServerListURL by configurationStore.string(Key.SPEED_TEST_SERVER_LIST_URL) { "https://www.speedtest.net/api/js/servers" }
     var speedTestFallbackServerListURL by configurationStore.string(Key.SPEED_TEST_FALLBACK_SERVER_LIST_URL) { "https://www.speedtest.net/speedtest-servers-static.php" }
-    var simpleDownloadURL by configurationStore.string(Key.SIMPLE_DOWNLOAD_URL) { "https://speed.cloudflare.com/__down?bytes=50000000" }
+    var simpleDownloadURL by configurationStore.string(Key.SIMPLE_DOWNLOAD_URL) { "https://speed.cloudflare.com/__down?bytes=200000000" }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
 
     var tunImplementation by configurationStore.stringToInt(Key.TUN_IMPLEMENTATION) { TunImplementation.GVISOR }

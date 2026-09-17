@@ -27,10 +27,21 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.1.1`
+`Neko-Pro-1.1.2`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.1)
-- 核心 APK：`NekoBox-Neko-Pro-1.1.1-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.2)
+- 核心 APK：`NekoBox-Neko-Pro-1.1.2-arm64-v8a.apk`
+
+### v1.1.2 改动日志 (2026-09-17)
+
+- **Snell 协议全面去胶水化：接入官方原生 `sing-snell` 引擎**
+  - 彻底拔除借道 mihomo 桥接 Snell 的过渡胶水代码，采用 sing-box 1.14 官方原生 `protocol/snell` 与 `sing-snell`（v4/v5/v6）。
+  - 直接复用 sing-box 核心原生 Dialer，支持 VpnService 保护、原生双栈/纯 IPv6 拨号与低延迟连接复用。
+- **集成 Cloudflare 官方 200M 极速测速端点**
+  - 默认简单测速端点升级为 Cloudflare 官方 200MB 测试文件（`https://speed.cloudflare.com/__down?bytes=200000000`），充分激发 TCP 拥塞控制（BBR/Cubic）峰值带宽。
+  - 自动化注入 Cloudflare WAF 鉴权头（`Referer` 与桌面浏览器 `User-Agent`）。
+- **根除测速收尾 EOF 伪错误**
+  - 过滤测试连接关闭时的 `EOF` 与 `context canceled` 伪错误，只要成功传输数据并测出速率，卡片状态仅呈现纯净的速率信息（`↓ / ↑ Mbps`），不再产生红字报错干扰。
 
 ### v1.1.1 改动日志 (2026-09-17)
 

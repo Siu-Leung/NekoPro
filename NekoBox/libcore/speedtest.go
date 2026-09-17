@@ -40,7 +40,7 @@ const (
 	DefaultSpeedTestConnections     = 8
 	DefaultSpeedTestServerListURL   = "https://www.speedtest.net/api/js/servers"
 	FallbackSpeedTestServerListURL  = "https://www.speedtest.net/speedtest-servers-static.php"
-	DefaultSimpleDownloadURL        = "https://speed.cloudflare.com/__down?bytes=50000000"
+	DefaultSimpleDownloadURL        = "https://speed.cloudflare.com/__down?bytes=200000000"
 	speedTestDownloadImageSize      = 1000
 	speedTestUploadPayloadBytes     = int64(999490)
 	speedTestSampleInterval         = 100 * time.Millisecond
@@ -633,6 +633,17 @@ func deriveSpeedTestDownloadURL(uploadURL string, imageSize int) (string, error)
 	return parsed.JoinPath(fmt.Sprintf("random%dx%d.jpg", imageSize, imageSize)).String(), nil
 }
 
+func isBenignTransferError(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "EOF") || strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded")
+}
+
 func runTransferPhase(
 	ctx context.Context,
 	client *http.Client,
@@ -658,7 +669,7 @@ func runTransferPhase(
 			defer waitGroup.Done()
 			for phaseCtx.Err() == nil {
 				if err := request(phaseCtx, &transferred); err != nil {
-					if phaseCtx.Err() != nil {
+					if phaseCtx.Err() != nil || isBenignTransferError(err) {
 						return
 					}
 					select {
@@ -683,7 +694,12 @@ func runTransferPhase(
 		select {
 		case err := <-errorChannel:
 			<-done
-			return calculateSpeedTestRate(transferred.Load(), time.Since(started)), transferred.Load(), err
+			total := transferred.Load()
+			rate := calculateSpeedTestRate(total, time.Since(started))
+			if total > 0 && isBenignTransferError(err) {
+				return rate, total, nil
+			}
+			return rate, total, err
 		case <-ticker.C:
 			progress(calculateSpeedTestRate(transferred.Load(), time.Since(started)), transferred.Load())
 		case <-done:
@@ -692,6 +708,9 @@ func runTransferPhase(
 			progress(rate, total)
 			select {
 			case err := <-errorChannel:
+				if total > 0 && isBenignTransferError(err) {
+					return rate, total, nil
+				}
 				return rate, total, err
 			default:
 			}
