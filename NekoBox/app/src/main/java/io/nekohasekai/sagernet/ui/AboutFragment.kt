@@ -74,7 +74,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .subText(SagerNet.appVersionNameForDisplay)
                                 .setOnClickAction {
                                     requireContext().launchCustomTab(
-                                        "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases"
+                                        "https://github.com/Siu-Leung/NekoPro/releases"
                                     )
                                 }
                                 .build())
@@ -182,9 +182,9 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                     }
                     val response = client.newRequest().apply {
                         if (checkPreview) {
-                            setURL("https://api.github.com/repos/MatsuriDayo/NekoBoxForAndroid/releases/tags/preview")
+                            setURL("https://api.github.com/repos/Siu-Leung/NekoPro/releases/tags/preview")
                         } else {
-                            setURL("https://api.github.com/repos/MatsuriDayo/NekoBoxForAndroid/releases/latest")
+                            setURL("https://api.github.com/repos/Siu-Leung/NekoPro/releases/latest")
                         }
                     }.execute()
                     val release = JSONObject(Util.getStringBox(response.contentString))
