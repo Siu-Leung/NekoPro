@@ -27,10 +27,16 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.1.3`
+`Neko-Pro-1.1.4`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.3)
-- 核心 APK：`NekoBox-Neko-Pro-1.1.3-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.4)
+- 核心 APK：`NekoBox-Neko-Pro-1.1.4-arm64-v8a.apk`
+
+### v1.1.4 改动日志 (2026-09-17)
+
+- **直连更新订阅 malformed HTTP response 彻底修复**
+  - **根因修复**：在不挂代理（直连）拉取订阅时，底层的 ECH TLS 拨号由于未约束 ALPN，对端 Nginx/OpenResty 服务端优先协商了 `h2`（HTTP/2），并向客户端发送了 HTTP/2 SETTINGS 初始二进制帧（`\x00\x00\x12\x04...`）；而外部的 `http.Transport` 属于纯 HTTP/1.x 传输器，无 HTTP/2 帧解码器，进而抛出 `net/http: HTTP/1.x transport connection broken: malformed HTTP response` 错误。
+  - **解决方案**：在 `libcore/http.go` 的直接传输器中明确限制 ALPN 仅协商 `http/1.1`，确保服务端以标准的纯文本 HTTP/1.1 协议响应，彻底解决直连更新订阅失败的问题。
 
 ### v1.1.3 改动日志 (2026-09-17)
 

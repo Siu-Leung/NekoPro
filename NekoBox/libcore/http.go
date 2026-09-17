@@ -299,7 +299,12 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 				if host, _, _ := net.SplitHostPort(addr); host != "" {
 					domain = host
 				}
-				echTls := ech.NewECHClientConfig(domain, &r.tls, gLocalDNSTransport)
+				tlsConfig := r.tls.Clone()
+				// Restrict ALPN to HTTP/1.1 because echTransport is an H1 transport
+				// without H2 frame decoding. Allowing H2 ALPN causes servers to send
+				// HTTP/2 SETTINGS frames, which triggers 'malformed HTTP response'.
+				tlsConfig.NextProtos = []string{"http/1.1"}
+				echTls := ech.NewECHClientConfig(domain, tlsConfig, gLocalDNSTransport)
 				return echTls.Client(ctx, c)
 			}
 			response, err = echClient.Do(request)
