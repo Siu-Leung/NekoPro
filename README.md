@@ -12,10 +12,10 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 主要特性
 
-- sing-box `1.13.19` 主内核
-- Mihomo 协议桥接
+- sing-box `1.14.1` 主内核
+- Mihomo `1.19.31` 协议桥接
 - VLESS-XHTTP（智能指纹分流）
-- Snell v1–v5（Mihomo 实现）与 Snell v6（sing-snell 实现；其上游亦支持 v4/v5）
+- Snell 原生集成（基于 `sing-snell`，全面支持 v4/v5/v6）
 - **Juicity 协议原生集成**（基于 `sing-juicity`）
 - **真·速度测试模块**（基于 `speedtest-go` 高性能多流测速）
 - **候选 UA 智能轮询回退链**（解决复杂订阅源对未知 UA 的阻断与降级）
