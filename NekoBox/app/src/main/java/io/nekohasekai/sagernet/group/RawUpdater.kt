@@ -546,10 +546,16 @@ object RawUpdater : GroupUpdater() {
                                 if (opt.value == null) continue
                                 when (opt.key.replace("_", "-")) {
                                     "name" -> bean.name = opt.value.toString()
-                                    "server" -> bean.serverAddress = opt.value as String
+                                    "server" -> bean.serverAddress = opt.value.toString().trim().removeSurrounding("[", "]")
                                     "port" -> bean.serverPort = opt.value.toString().toInt()
                                     "psk" -> bean.psk = opt.value.toString()
                                     "version" -> bean.version = opt.value.toString().toIntOrNull() ?: 4
+                                    "obfs-opts" -> {
+                                        (opt.value as? Map<String, Any?>)?.let { obfs ->
+                                            bean.obfsMode = obfs["mode"]?.toString() ?: "none"
+                                            bean.obfsHost = obfs["host"]?.toString() ?: ""
+                                        }
+                                    }
                                 }
                             }
                             proxies.add(bean)
@@ -766,11 +772,40 @@ object RawUpdater : GroupUpdater() {
         } catch (ignored: Exception) {
         }
 
+        val trimmed = text.trim()
+        val isExplicitPlainText = trimmed.startsWith("snell://") ||
+                trimmed.startsWith("vmess://") ||
+                trimmed.startsWith("vless://") ||
+                trimmed.startsWith("ss://") ||
+                trimmed.startsWith("ssr://") ||
+                trimmed.startsWith("trojan://") ||
+                trimmed.startsWith("trojan-go://") ||
+                trimmed.startsWith("hysteria://") ||
+                trimmed.startsWith("hysteria2://") ||
+                trimmed.startsWith("hy2://") ||
+                trimmed.startsWith("tuic://") ||
+                trimmed.startsWith("juicity://") ||
+                trimmed.startsWith("anytls://") ||
+                trimmed.startsWith("socks://") ||
+                trimmed.startsWith("socks5://") ||
+                trimmed.startsWith("http://") ||
+                trimmed.startsWith("https://") ||
+                trimmed.startsWith("sn://")
+
+        if (isExplicitPlainText) {
+            try {
+                return parseProxies(text).takeIf { it.isNotEmpty() } ?: error("Not found")
+            } catch (e: SubscriptionFoundException) {
+                throw e
+            } catch (ignored: Exception) {
+            }
+        }
+
         try {
             return parseProxies(text.decodeBase64UrlSafe()).takeIf { it.isNotEmpty() }
                 ?: error("Not found")
         } catch (e: Exception) {
-            Logs.w(e)
+            Logs.d(e)
         }
 
         try {

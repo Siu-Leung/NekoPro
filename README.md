@@ -27,10 +27,19 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.1.0`
+`Neko-Pro-1.1.1`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.0)
-- 核心 APK：`NekoBox-Neko-Pro-1.1.0-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.1)
+- 核心 APK：`NekoBox-Neko-Pro-1.1.1-arm64-v8a.apk`
+
+### v1.1.1 改动日志 (2026-09-17)
+
+- **Snell IPv6 与节点导入全链路修复**
+  - **剪贴板导入防错与告警消除**：在 `RawUpdater.kt` 中加入明文协议头预检（`snell://`、`vmess://`、`vless://`、`ss://`、`trojan://`、`hysteria2://` 等），识别到明文 URI 时优先走明文解析，跳过 Base64 尝试，消除 `Cannot decode base64` 警告提示。
+  - **Snell URI 健壮化与解码增强**：`SnellFmt.kt` 增加 URI 预处理与 safe fragment 解码，完美支持包含 emoji（如国旗）、空格或未转义中文字符的节点名称，避免 OkHttp 抛出解析异常导致导入失败。
+  - **IPv6 双重方括号 Bug 彻底根除**：在 UI 转换层与底层 Core（`protocol/snell`）中对 `server` 统一执行 `removeSurrounding("[", "]")` 规整化，彻底解决底层拨号拼接出的 `[[...]]` 双重方括号问题，打通纯 IPv6 与双栈节点。
+  - **Snell v5 服务端向下兼容**：底层出站对 Snell v5 自动平滑对齐 v4 协议栈，并确保 `resolver.DisableIPv6` 放行 IPv6 路由解析。
+  - **Clash YAML 导入补全**：在 Clash 配置解析中补全 Snell 的 `obfs-opts`（`mode`、`host`）字段支持。
 
 ### v1.1.0 改动日志 (2026-09-11)
 

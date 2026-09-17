@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
 	"github.com/metacubex/mihomo/component/resolver"
@@ -39,6 +40,7 @@ func setMihomoIPv6Enabled() {
 }
 
 func newV6Client(ctx context.Context, options option.SnellOutboundOptions) (*snellv6.Client, error) {
+	options.Server = strings.Trim(strings.TrimSpace(options.Server), "[]")
 	mode, err := snellv6.ParseMode(options.Mode)
 	if err != nil {
 		return nil, err
@@ -65,10 +67,16 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if ver <= 0 {
 		ver = 4
 	}
+	// Snell v5 servers are backward-compatible with v4 client logic
+	if ver == 5 {
+		ver = 4
+	}
 	reuse := true
 	if options.Reuse != nil {
 		reuse = *options.Reuse
 	}
+	cleanServer := strings.Trim(strings.TrimSpace(options.Server), "[]")
+	options.Server = cleanServer
 	if ver == 6 {
 		client, err := newV6Client(ctx, options)
 		if err != nil {
@@ -82,7 +90,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 	snellOption := &outbound.SnellOption{
 		Name:              tag,
-		Server:            options.Server,
+		Server:            cleanServer,
 		Port:              int(options.ServerPort),
 		Psk:               options.PSK,
 		Version:           ver,

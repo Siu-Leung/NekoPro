@@ -5,11 +5,12 @@ import io.nekohasekai.sagernet.ktx.toLink
 import io.nekohasekai.sagernet.ktx.urlSafe
 import moe.matsuri.nb4a.SingBoxOptions
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.net.URLDecoder
 
 fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_SnellOptions {
     return SingBoxOptions.Outbound_SnellOptions().apply {
         type = "snell"
-        server = bean.serverAddress
+        server = bean.serverAddress?.trim()?.removeSurrounding("[", "]")
         server_port = bean.serverPort
         psk = bean.psk
         version = bean.version ?: 4
@@ -36,10 +37,11 @@ fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_Snel
 }
 
 fun SnellBean.toUri(): String {
+    val cleanHost = (serverAddress ?: "").trim().removeSurrounding("[", "]")
     val builder = linkBuilder()
-        .host(serverAddress!!)
-        .port(serverPort!!)
-        .username(psk!!)
+        .host(cleanHost)
+        .port(serverPort ?: 443)
+        .username(psk ?: "")
     val beanName = name
     if (!beanName.isNullOrBlank()) {
         builder.encodedFragment(beanName.urlSafe())
@@ -62,18 +64,51 @@ fun SnellBean.toUri(): String {
 }
 
 fun parseSnell(url: String): SnellBean {
-    val link = url.replace("snell://", "https://").toHttpUrlOrNull() ?: error(
-        "invalid snell link $url"
-    )
+    val trimmedUrl = url.trim()
+    val mainPart = trimmedUrl.substringBefore('#').trim()
+    val rawFragment = if (trimmedUrl.contains('#')) trimmedUrl.substringAfter('#').trim() else ""
+    val decodedName = if (rawFragment.isNotBlank()) {
+        runCatching { URLDecoder.decode(rawFragment, "UTF-8") }.getOrDefault(rawFragment)
+    } else ""
+
+    val link = mainPart.replace("snell://", "https://").toHttpUrlOrNull()
+    if (link != null) {
+        return SnellBean().apply {
+            serverAddress = link.host.trim().removeSurrounding("[", "]")
+            serverPort = link.port
+            name = decodedName.ifBlank { link.fragment ?: "" }
+            psk = link.username
+            version = link.queryParameter("version")?.toIntOrNull() ?: 4
+            mode = link.queryParameter("mode") ?: "default"
+            obfsMode = link.queryParameter("obfs") ?: "none"
+            obfsHost = link.queryParameter("obfs-host") ?: ""
+            clientFingerprint = link.queryParameter("fp") ?: ""
+        }
+    }
+
+    // Fallback regex parser for non-standard URIs (supports IPv6 with [] and IPv4/domain)
+    val regex = Regex("""^snell://([^@]+)@(?:\[([a-fA-F0-9:]+)\]|([^:]+)):(\d+)(?:\?(.*))?$""")
+    val match = regex.find(mainPart) ?: error("invalid snell link $url")
+    val psk = match.groupValues[1]
+    val host = if (match.groupValues[2].isNotEmpty()) match.groupValues[2] else match.groupValues[3]
+    val portStr = match.groupValues[4]
+    val queryStr = match.groupValues[5]
+    val queryParams = if (queryStr.isNotEmpty()) {
+        queryStr.split('&').filter { it.contains('=') }.associate {
+            val parts = it.split('=', limit = 2)
+            parts[0] to parts.getOrElse(1) { "" }
+        }
+    } else emptyMap()
+
     return SnellBean().apply {
-        serverAddress = link.host
-        serverPort = link.port
-        name = link.fragment
-        psk = link.username
-        version = link.queryParameter("version")?.toIntOrNull() ?: 4
-        mode = link.queryParameter("mode") ?: "default"
-        obfsMode = link.queryParameter("obfs") ?: "none"
-        obfsHost = link.queryParameter("obfs-host") ?: ""
-        clientFingerprint = link.queryParameter("fp") ?: ""
+        serverAddress = host.trim().removeSurrounding("[", "]")
+        serverPort = portStr.toIntOrNull() ?: 443
+        name = decodedName
+        this.psk = psk
+        version = queryParams["version"]?.toIntOrNull() ?: 4
+        mode = queryParams["mode"] ?: "default"
+        obfsMode = queryParams["obfs"] ?: "none"
+        obfsHost = queryParams["obfs-host"] ?: ""
+        clientFingerprint = queryParams["fp"] ?: ""
     }
 }
