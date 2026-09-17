@@ -3,7 +3,6 @@ package snell
 import (
 	"context"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -25,22 +24,14 @@ func RegisterOutbound(registry *outboundAdapter.Registry) {
 	outboundAdapter.Register[option.SnellOutboundOptions](registry, boxConstant.TypeSnell, NewOutbound)
 }
 
-type snellClient interface {
-	snellprotocol.Method
-	DialContext(ctx context.Context, destination M.Socksaddr) (net.Conn, error)
-	Reset()
-	Close() error
-}
-
 type Outbound struct {
 	outboundAdapter.Adapter
 	logger     log.ContextLogger
 	dialer     N.Dialer
-	client     snellClient
+	v4Client   *snellv4.Client
+	v6Client   *snellv6.Client
 	serverAddr M.Socksaddr
 }
-
-var _ adapter.InterfaceUpdateListener = (*Outbound)(nil)
 
 func parseObfs(opts map[string]any) (snellprotocol.ObfsMode, string, error) {
 	if len(opts) == 0 {
@@ -77,7 +68,13 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		reuse = *options.Reuse
 	}
 
-	var client snellClient
+	out := &Outbound{
+		Adapter:    outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeSnell, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+		logger:     logger,
+		dialer:     outboundDialer,
+		serverAddr: serverAddr,
+	}
+
 	switch ver {
 	case 4:
 		obfsMode, obfsHost, err := parseObfs(options.ObfsOpts)
@@ -95,7 +92,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		if err != nil {
 			return nil, err
 		}
-		client = c
+		out.v4Client = c
 	case 6:
 		mode, err := snellv6.ParseMode(options.Mode)
 		if err != nil {
@@ -111,18 +108,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		if err != nil {
 			return nil, err
 		}
-		client = c
+		out.v6Client = c
 	default:
 		return nil, E.New("snell: unsupported version: ", ver)
 	}
 
-	return &Outbound{
-		Adapter:    outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeSnell, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
-		logger:     logger,
-		dialer:     outboundDialer,
-		client:     client,
-		serverAddr: serverAddr,
-	}, nil
+	return out, nil
 }
 
 func (h *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
@@ -133,14 +124,33 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	switch networkName {
 	case N.NetworkTCP:
 		h.logger.InfoContext(ctx, "snell outbound connection to ", destination)
-		return h.client.DialContext(ctx, destination)
+		conn, err := h.dialer.DialContext(ctx, N.NetworkTCP, h.serverAddr)
+		if err != nil {
+			return nil, err
+		}
+		if h.v4Client != nil {
+			return h.v4Client.DialConn(conn, destination)
+		}
+		if h.v6Client != nil {
+			return h.v6Client.DialConn(conn, destination)
+		}
+		conn.Close()
+		return nil, E.New("snell: client not initialized")
 	case N.NetworkUDP:
 		h.logger.InfoContext(ctx, "snell outbound packet connection to ", destination)
 		conn, err := h.dialer.DialContext(ctx, N.NetworkTCP, h.serverAddr)
 		if err != nil {
 			return nil, err
 		}
-		packetConn, err := h.client.DialPacketConn(conn)
+		var packetConn N.NetPacketConn
+		if h.v4Client != nil {
+			packetConn, err = h.v4Client.DialPacketConn(conn)
+		} else if h.v6Client != nil {
+			packetConn, err = h.v6Client.DialPacketConn(conn)
+		} else {
+			conn.Close()
+			return nil, E.New("snell: client not initialized")
+		}
 		if err != nil {
 			conn.Close()
 			return nil, err
@@ -160,21 +170,18 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	if err != nil {
 		return nil, err
 	}
-	packetConn, err := h.client.DialPacketConn(conn)
+	var packetConn N.NetPacketConn
+	if h.v4Client != nil {
+		packetConn, err = h.v4Client.DialPacketConn(conn)
+	} else if h.v6Client != nil {
+		packetConn, err = h.v6Client.DialPacketConn(conn)
+	} else {
+		conn.Close()
+		return nil, E.New("snell: client not initialized")
+	}
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 	return packetConn, nil
-}
-
-func (h *Outbound) InterfaceUpdated(ctx context.Context) {
-	h.client.Reset()
-}
-
-func (h *Outbound) Close() error {
-	if h.client != nil {
-		return h.client.Close()
-	}
-	return nil
 }
