@@ -805,7 +805,7 @@ object RawUpdater : GroupUpdater() {
             return parseProxies(text.decodeBase64UrlSafe()).takeIf { it.isNotEmpty() }
                 ?: error("Not found")
         } catch (e: Exception) {
-            Logs.d(e)
+            Logs.d(e.message ?: "Base64 decode fallback")
         }
 
         try {
