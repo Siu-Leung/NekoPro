@@ -3,7 +3,6 @@ package masque
 import (
 	"context"
 	"net"
-	"net/netip"
 	"os"
 	"strings"
 
@@ -95,7 +94,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}, nil
 }
 
-func buildMetadata(network uint8, destination M.Socksaddr) *C.Metadata {
+func buildMetadata(network C.NetWork, destination M.Socksaddr) *C.Metadata {
 	meta := &C.Metadata{
 		NetWork: network,
 		DstPort: destination.Port,
@@ -136,24 +135,9 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	if err != nil {
 		return nil, err
 	}
-	return &masquePacketConn{PacketConn: pc}, nil
+	return pc, nil
 }
 
 func (h *Outbound) Close() error {
 	return h.proxy.Close()
-}
-
-type masquePacketConn struct {
-	C.PacketConn
-}
-
-func (c *masquePacketConn) WritePacket(buffer *bufio.Buffer, destination M.Socksaddr) error {
-	var addr net.Addr
-	if destination.IsIP() {
-		addr = net.UDPAddrFromAddrPort(netip.AddrPortFrom(destination.Addr, destination.Port))
-	} else {
-		addr = destination.UDPAddr()
-	}
-	_, err := c.PacketConn.WriteTo(buffer.Bytes(), addr)
-	return err
 }
