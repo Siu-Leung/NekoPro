@@ -18,13 +18,25 @@
             app:title="@string/server_port"
             app:useSimpleSummaryProvider="true" />
         <EditTextPreference
+            app:dialogLayout="@layout/layout_password_dialog"
             app:icon="@drawable/ic_settings_password"
             app:key="psk"
             app:title="@string/password" />
-        <EditTextPreference
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue="4"
+            app:entries="@array/snell_version_entries"
+            app:entryValues="@array/snell_version_entries"
             app:icon="@drawable/ic_baseline_layers_24"
             app:key="version"
-            app:title="Snell Version (default 4)"
+            app:title="Snell Version"
+            app:useSimpleSummaryProvider="true" />
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue="default"
+            app:entries="@array/snell_mode_entries"
+            app:entryValues="@array/snell_mode_entries"
+            app:icon="@drawable/ic_baseline_stream_24"
+            app:key="mode"
+            app:title="Snell v6 Mode"
             app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 

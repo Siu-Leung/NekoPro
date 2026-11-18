@@ -54,6 +54,9 @@ type WireGuard struct {
 	tunDevice wireguardDevice
 	resolver  resolver.Resolver
 
+	runCtx        context.Context
+	runCancel     context.CancelFunc
+	deviceMutex   sync.Mutex
 	initOk        atomic.Bool
 	initMutex     sync.Mutex
 	initErr       error
@@ -163,7 +166,7 @@ func (o IPStackOption) validate() error {
 	default:
 		return fmt.Errorf("invalid IP stack mode %q; expected auto, gvisor, or mips", o.Mode)
 	}
-	switch mipstack.CongestionControl(o.CongestionController) {
+	switch o.CongestionController {
 	case "", mipstack.CongestionControlCUBIC, mipstack.CongestionControlReno, mipstack.CongestionControlBBR, mipstack.CongestionControlBBR3:
 		return nil
 	default:
@@ -177,7 +180,10 @@ type ipStack interface {
 	Start() error
 	DialTCP(ctx context.Context, network string, source, destination netip.AddrPort) (net.Conn, error)
 	DialUDP(ctx context.Context, network string, source, destination netip.AddrPort) (net.Conn, error)
+	DialIP(ctx context.Context, network string, source, destination netip.Addr) (net.Conn, error)
+	ListenTCP(ctx context.Context, network string, local netip.AddrPort) (net.Listener, error)
 	ListenUDP(ctx context.Context, network string, local netip.AddrPort) (net.PacketConn, error)
+	ListenIP(ctx context.Context, network string, local netip.Addr) (net.PacketConn, error)
 	Read(buffers [][]byte, sizes []int, offset int) (int, error)
 	Write(buffers [][]byte, offset int) (int, error)
 	MTU() (int, error)
@@ -190,11 +196,7 @@ type ipStack interface {
 func newIPStack(option IPStackOption, localAddresses []netip.Prefix, mtu uint32) (ipStack, error) {
 	mode := option.Mode
 	if mode == ipStackAuto {
-		if features.WithGVisor {
-			mode = ipStackGVisor
-		} else {
-			mode = ipStackMips
-		}
+		mode = ipStackMips
 	}
 	switch mode {
 	case ipStackGVisor:
@@ -204,13 +206,18 @@ func newIPStack(option IPStackOption, localAddresses []netip.Prefix, mtu uint32)
 			LocalAddresses: localAddresses,
 			MTU:            mtu,
 			TCP: mipstack.TCPSocketDefaults{
-				CongestionControl: mipstack.CongestionControl(option.CongestionController),
+				CongestionControl: option.CongestionController,
 				// Align with sing-wireguard: enable keepalive with 15-second
 				// idle/interval timing and gVisor's default probe count.
 				KeepAlive: true,
 				KeepAliveConfig: mipstack.KeepAliveConfig{
 					Idle: 15 * time.Second, Interval: 15 * time.Second, Count: 9,
 				},
+			},
+			IP: mipstack.IPSocketDefaults{
+				// Align with sing-wireguard: fellow its IP socket semantics
+				IPHeaderIncludedOnRead:  true,
+				IPHeaderIncludedOnWrite: true,
 			},
 		})
 	default:
@@ -376,7 +383,12 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 			outbound.connectAddr = option.Addr()
 		}
 	}
-	outbound.bind = wireguard.NewClientBind(context.Background(), wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
+	outbound.runCtx, outbound.runCancel = context.WithCancel(context.Background())
+	outbound.bind = wireguard.NewClientBind(outbound.runCtx, wgSingErrorHandler{outbound.Name()}, singDialer, isConnect, outbound.connectAddr.AddrPort(), reserved)
+
+	if outbound.bind == nil {
+		return nil, E.New("failed to create wireguard client bind")
+	}
 
 	var err error
 	outbound.localPrefixes, err = option.Prefixes()
@@ -442,11 +454,8 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		}
 		option.AmneziaWGOption.HeaderProtectionKey = hex.EncodeToString(bytes)
 	}
-	outbound.option = option
-
-	mtu := option.MTU
-	if mtu == 0 {
-		mtu = 1408
+	if option.MTU == 0 {
+		option.MTU = 1408
 	}
 	option.IPStack.normalize()
 	if err = option.IPStack.validate(); err != nil {
@@ -456,33 +465,9 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 		return nil, E.New("missing local address")
 	}
 
-	stack, err := newIPStack(option.IPStack, outbound.localPrefixes, uint32(mtu))
-	if err != nil {
-		return nil, E.Cause(err, "create WireGuard stack")
-	}
-	outbound.tunDevice, err = newWireguardDevice(stack)
-	if err != nil {
-		_ = stack.Close()
-		return nil, E.Cause(err, "create WireGuard device")
-	}
-
-	logger := &device.Logger{
-		Verbosef: func(format string, args ...interface{}) {
-			log.SingLogger.Debug(fmt.Sprintf("[WG](%s) %s", option.Name, fmt.Sprintf(format, args...)))
-		},
-		Errorf: func(format string, args ...interface{}) {
-			log.SingLogger.Error(fmt.Sprintf("[WG](%s) %s", option.Name, fmt.Sprintf(format, args...)))
-		},
-	}
+	outbound.option = option
 	if option.AmneziaWGOption != nil {
 		outbound.bind.SetParseReserved(false) // AmneziaWG don't need parse reserved
-		if option.AmneziaWGOption.Version == 3 {
-			outbound.device = amneziav3.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		} else {
-			outbound.device = amnezia.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
-		}
-	} else {
-		outbound.device = device.NewDevice(outbound.tunDevice, outbound.bind, logger, option.Workers)
 	}
 
 	var has6 bool
@@ -532,7 +517,7 @@ func (w *WireGuard) init(ctx context.Context) error {
 	return nil
 }
 
-func (w *WireGuard) init0(ctx context.Context) error {
+func (w *WireGuard) init0(ctx context.Context) (err error) {
 	if w.initOk.Load() {
 		return nil
 	}
@@ -554,23 +539,69 @@ func (w *WireGuard) init0(ctx context.Context) error {
 		// let us can retry domain resolve in next time
 		return err
 	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+
+	stack, err := newIPStack(w.option.IPStack, w.localPrefixes, uint32(w.option.MTU))
+	if err != nil {
+		w.initErr = E.Cause(err, "create WireGuard stack")
+		return w.initErr
+	}
+	tunDevice, err := newWireguardDevice(stack)
+	if err != nil {
+		_ = stack.Close()
+		w.initErr = E.Cause(err, "create WireGuard device")
+		return w.initErr
+	}
+
+	logger := &device.Logger{
+		Verbosef: func(format string, args ...interface{}) {
+			log.SingLogger.Debug(fmt.Sprintf("[WG](%s) %s", w.option.Name, fmt.Sprintf(format, args...)))
+		},
+		Errorf: func(format string, args ...interface{}) {
+			log.SingLogger.Error(fmt.Sprintf("[WG](%s) %s", w.option.Name, fmt.Sprintf(format, args...)))
+		},
+	}
+	var wgDevice wireguardGoDevice
+	if w.option.AmneziaWGOption != nil {
+		if w.option.AmneziaWGOption.Version == 3 {
+			wgDevice = amneziav3.NewDevice(tunDevice, w.bind, logger, w.option.Workers)
+		} else {
+			wgDevice = amnezia.NewDevice(tunDevice, w.bind, logger, w.option.Workers)
+		}
+	} else {
+		wgDevice = device.NewDevice(tunDevice, w.bind, logger, w.option.Workers)
+	}
+	defer func() {
+		if err != nil {
+			wgDevice.Close()
+		}
+	}()
 
 	if debug.Enabled {
 		log.SingLogger.Trace(fmt.Sprintf("[WG](%s) created wireguard ipc conf: \n %s", w.option.Name, ipcConf))
 	}
-	err = w.device.IpcSet(ipcConf)
+	err = wgDevice.IpcSet(ipcConf)
 	if err != nil {
 		w.initErr = E.Cause(err, "setup wireguard")
 		return w.initErr
 	}
 	w.serverAddrTime.Store(time.Now())
 
-	err = w.tunDevice.Start()
+	err = tunDevice.Start()
 	if err != nil {
 		w.initErr = err
 		return w.initErr
 	}
 
+	w.deviceMutex.Lock()
+	defer w.deviceMutex.Unlock()
+	err = w.runCtx.Err()
+	if err != nil {
+		return err
+	}
+	w.device, w.tunDevice = wgDevice, tunDevice
 	w.initOk.Store(true)
 	return nil
 }
@@ -773,8 +804,12 @@ func (w *WireGuard) genIpcConf(ctx context.Context, updateOnly bool) (string, er
 
 // Close implements C.ProxyAdapter
 func (w *WireGuard) Close() error {
-	if w.device != nil {
-		w.device.Close()
+	w.runCancel()
+	w.deviceMutex.Lock()
+	wgDevice := w.device
+	w.deviceMutex.Unlock()
+	if wgDevice != nil {
+		wgDevice.Close()
 	}
 	return nil
 }

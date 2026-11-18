@@ -15,12 +15,13 @@ class SnellBean : AbstractBean() {
     @JvmField var clientFingerprint: String? = null
 
     override fun initializeDefaultValues() {
-        super.initializeDefaultValues()
         if (serverPort == null) serverPort = 443
-        if (version == null) version = 4
-        if (mode == null) mode = "default"
+        super.initializeDefaultValues()
+        if (psk == null) psk = ""
+        version = (version ?: 4).coerceIn(4, 6)
+        if (mode.isNullOrBlank()) mode = "default"
         if (obfsHost == null) obfsHost = ""
-        if (obfsMode == null) obfsMode = "none"
+        if (obfsMode.isNullOrBlank()) obfsMode = "none"
         if (clientFingerprint == null) clientFingerprint = ""
     }
 

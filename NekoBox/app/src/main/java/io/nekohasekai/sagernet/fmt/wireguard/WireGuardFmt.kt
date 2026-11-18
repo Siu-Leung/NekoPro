@@ -4,39 +4,62 @@ import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.utils.Util
 import moe.matsuri.nb4a.utils.listByLineOrComma
 
-fun genReserved(anyStr: String): String {
-    try {
-        val list = anyStr.listByLineOrComma()
-        val ba = ByteArray(3)
-        if (list.size == 3) {
-            list.forEachIndexed { index, s ->
-                val i = s
-                    .replace("[", "")
-                    .replace("]", "")
-                    .replace(" ", "")
-                    .toIntOrNull() ?: return anyStr
-                ba[index] = i.toByte()
+fun parseReservedBytes(anyStr: String): List<Int>? {
+    val trimmed = anyStr.trim()
+    if (trimmed.isEmpty()) return null
+    val list = trimmed.listByLineOrComma()
+    if (list.size == 3) {
+        val parsed = ArrayList<Int>(3)
+        var valid = true
+        for (s in list) {
+            val v = s.replace("[", "").replace("]", "").trim().toIntOrNull()
+            if (v == null || v !in 0..255) {
+                valid = false
+                break
             }
-            return Util.b64EncodeOneLine(ba)
-        } else {
-            return anyStr
+            parsed.add(v)
         }
-    } catch (e: Exception) {
-        return anyStr
+        if (valid) return parsed
+    }
+    return runCatching {
+        val bytes = Util.b64Decode(trimmed)
+        if (bytes.size == 3) bytes.map { it.toInt() and 0xFF } else null
+    }.getOrNull()
+}
+
+fun normalizeWireGuardAddresses(raw: String?): List<String> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return raw.listByLineOrComma().mapNotNull { item ->
+        val addr = item.trim()
+        when {
+            addr.isEmpty() -> null
+            addr.contains("/") -> addr
+            addr.contains(":") -> "$addr/128"
+            else -> "$addr/32"
+        }
     }
 }
 
-fun buildSingBoxOutboundWireguardBean(bean: WireGuardBean): SingBoxOptions.Outbound_WireGuardOptions {
-    return SingBoxOptions.Outbound_WireGuardOptions().apply {
+fun buildSingBoxEndpointWireGuardBean(bean: WireGuardBean): SingBoxOptions.Endpoint_WireGuardOptions {
+    return SingBoxOptions.Endpoint_WireGuardOptions().apply {
         type = "wireguard"
-        server = bean.serverAddress
-        server_port = bean.serverPort
-        local_address = bean.localAddress!!.listByLineOrComma()
+        address = normalizeWireGuardAddresses(bean.localAddress)
         private_key = bean.privateKey
-        peer_public_key = bean.peerPublicKey
-        pre_shared_key = bean.peerPreSharedKey
         mtu = bean.mtu
-        val reserved = bean.reserved ?: ""
-        if (reserved.isNotBlank()) reserved.let { this.reserved = genReserved(it) }
+        peers = listOf(
+            SingBoxOptions.WireGuardEndpointPeer().apply {
+                address = bean.serverAddress
+                port = bean.serverPort
+                public_key = bean.peerPublicKey
+                if (!bean.peerPreSharedKey.isNullOrBlank()) {
+                    pre_shared_key = bean.peerPreSharedKey
+                }
+                allowed_ips = listOf("0.0.0.0/0", "::/0")
+                val rawReserved = bean.reserved ?: ""
+                if (rawReserved.isNotBlank()) {
+                    reserved = parseReservedBytes(rawReserved)
+                }
+            }
+        )
     }
 }

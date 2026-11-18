@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -23,8 +24,6 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 
-	// dyhkwong/sing-juicity 已停更且与 quic-go v0.59 不兼容，
-	// 换用活跃维护的 exclavenetwork fork（与官方 sing-box v1.13.15 依赖树一致，husi 同款）。
 	"github.com/exclavenetwork/sing-juicity"
 	"github.com/gofrs/uuid/v5"
 )
@@ -34,8 +33,9 @@ const TypeJuicity = "juicity"
 type JuicityOutboundOptions struct {
 	option.DialerOptions
 	option.ServerOptions
-	UUID     string `json:"uuid,omitempty"`
-	Password string `json:"password,omitempty"`
+	UUID              string `json:"uuid,omitempty"`
+	Password          string `json:"password,omitempty"`
+	CongestionControl string `json:"congestion_control,omitempty"`
 	option.OutboundTLSOptionsContainer
 	PinCertSha256 string `json:"pin_cert_sha256,omitempty"`
 }
@@ -53,6 +53,7 @@ type Outbound struct {
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options JuicityOutboundOptions) (adapter.Outbound, error) {
+	options.Server = strings.Trim(strings.TrimSpace(options.Server), "[]")
 	if options.TLS == nil || !options.TLS.Enabled {
 		return nil, C.ErrTLSRequired
 	}
@@ -64,16 +65,15 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
-	if options.TLS.ALPN == nil { // not len(options.TLS.ALPN) > 0
+	if len(options.TLS.ALPN) == 0 {
 		options.TLS.ALPN = []string{"h3"}
 	}
-	// 官方 v1.13 签名：NewSTDClient(ctx, logger, serverAddress, options)
 	tlsConfig, err := tls.NewSTDClient(ctx, logger, options.Server, *options.TLS)
 	if err != nil {
 		return nil, err
 	}
-	if options.PinCertSha256 != "" {
-		pinCertSha256, err := tryDecodeBase64(options.PinCertSha256)
+	if strings.TrimSpace(options.PinCertSha256) != "" {
+		pinCertSha256, err := decodeCertSha256(options.PinCertSha256)
 		if err != nil {
 			return nil, E.Cause(err, "decode pin cert sha256")
 		}
@@ -87,7 +87,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		}
 		stdTLSConfig.InsecureSkipVerify = true
 	}
-	uuidInstance, err := uuid.FromString(options.UUID)
+	uuidInstance, err := uuid.FromString(strings.TrimSpace(options.UUID))
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (o *Outbound) Close() error {
 }
 
 func (o *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	switch network {
+	switch N.NetworkName(network) {
 	case N.NetworkTCP:
 		ctx, metadata := adapter.ExtendContext(ctx)
 		metadata.Outbound = o.Tag()
@@ -140,23 +140,34 @@ func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return o.client.ListenPacket(ctx, destination)
 }
 
-// https://github.com/juicity/juicity/blob/412dbe43e091788c5464eb2d6e9c169bdf39f19c/cmd/client/run.go#L86-L96
-func tryDecodeBase64(raw string) ([]byte, error) {
-	var errors []error
-	decoders := []*base64.Encoding{base64.URLEncoding, base64.StdEncoding}
-	for _, decoder := range decoders {
-		decoded, err := decoder.DecodeString(raw)
-		if err == nil {
+// decodeCertSha256 strictly validates 32-byte SHA-256 digests in hex (with or
+// without colons) BEFORE trying Base64, preventing 64-char hex strings from
+// falsely decoding as 48-byte Base64 payloads.
+func decodeCertSha256(raw string) ([]byte, error) {
+	trimmed := strings.TrimSpace(raw)
+	cleanHex := strings.ReplaceAll(trimmed, ":", "")
+	if len(cleanHex) == sha256.Size*2 {
+		if decoded, err := hex.DecodeString(cleanHex); err == nil && len(decoded) == sha256.Size {
 			return decoded, nil
 		}
-		errors = append(errors, err)
 	}
-	decoded, err := hex.DecodeString(raw)
-	if err == nil {
-		return decoded, nil
+	decoders := []*base64.Encoding{
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+		base64.StdEncoding,
+		base64.RawStdEncoding,
 	}
-	errors = append(errors, err)
-	return nil, E.Cause(E.Errors(errors...), "try decoding base64")
+	var errs []error
+	for _, dec := range decoders {
+		decoded, err := dec.DecodeString(trimmed)
+		if err == nil && len(decoded) == sha256.Size {
+			return decoded, nil
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return nil, E.Cause(E.Errors(errs...), "invalid 32-byte sha256 fingerprint")
 }
 
 func certChainHash(rawCerts [][]byte) []byte {

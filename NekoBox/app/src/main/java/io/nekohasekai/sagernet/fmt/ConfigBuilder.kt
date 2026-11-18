@@ -21,6 +21,8 @@ import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.tuic.buildSingBoxOutboundTuicBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
 import io.nekohasekai.sagernet.fmt.juicity.buildSingBoxOutboundJuicityBean
+import io.nekohasekai.sagernet.fmt.masque.MASQUEBean
+import io.nekohasekai.sagernet.fmt.masque.buildSingBoxOutboundMasqueBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.buildSingBoxOutboundStandardV2RayBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
@@ -375,6 +377,9 @@ fun buildConfig(
 
                         is JuicityBean ->
                             buildSingBoxOutboundJuicityBean(bean)
+
+                        is MASQUEBean ->
+                            buildSingBoxOutboundMasqueBean(bean)
 
                         is SOCKSBean ->
                             buildSingBoxOutboundSocksBean(bean)

@@ -18,6 +18,8 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/anytls"
+	"github.com/sagernet/sing-box/protocol/masque"
+	"github.com/sagernet/sing-box/protocol/mieru"
 	"github.com/sagernet/sing-box/protocol/snell"
 	"github.com/sagernet/sing-box/protocol/block"
 	"github.com/sagernet/sing-box/protocol/direct"
@@ -94,6 +96,8 @@ func OutboundRegistry() *outbound.Registry {
 	vless_xhttp.RegisterOutbound(registry)
 	anytls.RegisterOutbound(registry)
 	snell.RegisterOutbound(registry)
+	masque.RegisterOutbound(registry)
+	mieru.RegisterOutbound(registry)
 
 	registerQUICOutbounds(registry)
 	registerStubForRemovedOutbounds(registry)

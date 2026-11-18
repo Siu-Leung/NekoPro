@@ -24,13 +24,19 @@ func RegisterOutbound(registry *outboundAdapter.Registry) {
 	outboundAdapter.Register[option.SnellOutboundOptions](registry, boxConstant.TypeSnell, NewOutbound)
 }
 
+type snellClient interface {
+	snellprotocol.Method
+	DialContext(ctx context.Context, destination M.Socksaddr) (net.Conn, error)
+	Close() error
+}
+
 type Outbound struct {
 	outboundAdapter.Adapter
 	logger     log.ContextLogger
 	dialer     N.Dialer
-	v4Client   *snellv4.Client
-	v6Client   *snellv6.Client
+	client     snellClient
 	serverAddr M.Socksaddr
+	reuse      bool
 }
 
 func parseObfs(opts map[string]any) (snellprotocol.ObfsMode, string, error) {
@@ -59,7 +65,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 
 	ver := options.Version
 	if ver <= 0 || ver == 5 {
-		// Snell v5 servers are backward-compatible with v4 client logic
+		// Snell v5 servers are backward-compatible with v4 client protocol
 		ver = 4
 	}
 
@@ -68,20 +74,14 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		reuse = *options.Reuse
 	}
 
-	out := &Outbound{
-		Adapter:    outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeSnell, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
-		logger:     logger,
-		dialer:     outboundDialer,
-		serverAddr: serverAddr,
-	}
-
+	var client snellClient
 	switch ver {
 	case 4:
 		obfsMode, obfsHost, err := parseObfs(options.ObfsOpts)
 		if err != nil {
 			return nil, err
 		}
-		c, err := snellv4.NewClient(snellv4.ClientOptions{
+		client, err = snellv4.NewClient(snellv4.ClientOptions{
 			PSK:      []byte(options.PSK),
 			Reuse:    reuse,
 			ObfsMode: obfsMode,
@@ -92,13 +92,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		if err != nil {
 			return nil, err
 		}
-		out.v4Client = c
 	case 6:
 		mode, err := snellv6.ParseMode(options.Mode)
 		if err != nil {
 			return nil, err
 		}
-		c, err := snellv6.NewClient(snellv6.ClientOptions{
+		client, err = snellv6.NewClient(snellv6.ClientOptions{
 			PSK:    []byte(options.PSK),
 			Mode:   mode,
 			Reuse:  reuse,
@@ -108,12 +107,18 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		if err != nil {
 			return nil, err
 		}
-		out.v6Client = c
 	default:
 		return nil, E.New("snell: unsupported version: ", ver)
 	}
 
-	return out, nil
+	return &Outbound{
+		Adapter:    outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeSnell, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+		logger:     logger,
+		dialer:     outboundDialer,
+		client:     client,
+		serverAddr: serverAddr,
+		reuse:      reuse,
+	}, nil
 }
 
 func (h *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
@@ -124,33 +129,14 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	switch networkName {
 	case N.NetworkTCP:
 		h.logger.InfoContext(ctx, "snell outbound connection to ", destination)
-		conn, err := h.dialer.DialContext(ctx, N.NetworkTCP, h.serverAddr)
-		if err != nil {
-			return nil, err
-		}
-		if h.v4Client != nil {
-			return h.v4Client.DialConn(conn, destination)
-		}
-		if h.v6Client != nil {
-			return h.v6Client.DialConn(conn, destination)
-		}
-		conn.Close()
-		return nil, E.New("snell: client not initialized")
+		return h.client.DialContext(ctx, destination)
 	case N.NetworkUDP:
 		h.logger.InfoContext(ctx, "snell outbound packet connection to ", destination)
 		conn, err := h.dialer.DialContext(ctx, N.NetworkTCP, h.serverAddr)
 		if err != nil {
 			return nil, err
 		}
-		var packetConn N.NetPacketConn
-		if h.v4Client != nil {
-			packetConn, err = h.v4Client.DialPacketConn(conn)
-		} else if h.v6Client != nil {
-			packetConn, err = h.v6Client.DialPacketConn(conn)
-		} else {
-			conn.Close()
-			return nil, E.New("snell: client not initialized")
-		}
+		packetConn, err := h.client.DialPacketConn(conn)
 		if err != nil {
 			conn.Close()
 			return nil, err
@@ -170,18 +156,17 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	if err != nil {
 		return nil, err
 	}
-	var packetConn N.NetPacketConn
-	if h.v4Client != nil {
-		packetConn, err = h.v4Client.DialPacketConn(conn)
-	} else if h.v6Client != nil {
-		packetConn, err = h.v6Client.DialPacketConn(conn)
-	} else {
-		conn.Close()
-		return nil, E.New("snell: client not initialized")
-	}
+	packetConn, err := h.client.DialPacketConn(conn)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 	return packetConn, nil
+}
+
+func (h *Outbound) Close() error {
+	if h.client != nil {
+		return h.client.Close()
+	}
+	return nil
 }

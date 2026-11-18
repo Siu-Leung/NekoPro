@@ -75,6 +75,20 @@ func TestNewMieru(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid TCP idle timeout",
+			args: args{
+				option: &inbound.MieruOption{
+					BaseOption: inbound.BaseOption{
+						Port: "8080",
+					},
+					Transport:            "TCP",
+					Users:                map[string]string{"user": "pass"},
+					TCPIdleTimeoutSecond: 60,
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "invalid - no port",
 			args: args{
 				option: &inbound.MieruOption{
@@ -162,6 +176,20 @@ func TestNewMieru(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "invalid TCP idle timeout",
+			args: args{
+				option: &inbound.MieruOption{
+					BaseOption: inbound.BaseOption{
+						Port: "8080",
+					},
+					Transport:            "TCP",
+					Users:                map[string]string{"user": "pass"},
+					TCPIdleTimeoutSecond: 10,
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,6 +231,7 @@ func testInboundMieruTCP(t *testing.T, handshakeMode string) {
 	defer l.Close()
 	lc := mieruTestInboundListenConfig{
 		ListenFn: func(ctx context.Context, network, address string) (net.Listener, error) {
+			assert.Equal(t, l.Addr().String(), address)
 			return l, nil
 		},
 		ListenPacketFn: func(ctx context.Context, network, address string) (net.PacketConn, error) {
@@ -273,6 +302,7 @@ func testInboundMieruUDP(t *testing.T, handshakeMode string) {
 			panic("should not be called")
 		},
 		ListenPacketFn: func(ctx context.Context, network, address string) (net.PacketConn, error) {
+			assert.Equal(t, l.LocalAddr().String(), address)
 			return l, nil
 		},
 	}

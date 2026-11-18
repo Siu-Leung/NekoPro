@@ -17,6 +17,7 @@ abstract class StandardV2RayBean : AbstractBean() {
     @JvmField var path: String? = null
     // xhttp 专用: mode = auto / packet-up / stream-up / stream-one
     @JvmField var xhttpMode: String? = null
+    @JvmField var xhttpExtra: String? = null
 
     // tls
     @JvmField var security: String? = null
@@ -51,6 +52,7 @@ abstract class StandardV2RayBean : AbstractBean() {
         if (JavaUtil.isNullOrBlank(type)) type = "tcp"
         else if (type == "h2") type = "http"
         type = type!!.lowercase()
+        if (type == "splithttp") type = "xhttp"
         if (JavaUtil.isNullOrBlank(host)) host = ""
         if (JavaUtil.isNullOrBlank(path)) path = ""
         if (JavaUtil.isNullOrBlank(security)) {
@@ -62,6 +64,7 @@ abstract class StandardV2RayBean : AbstractBean() {
         if (JavaUtil.isNullOrBlank(earlyDataHeaderName)) earlyDataHeaderName = ""
         if (JavaUtil.isNullOrBlank(utlsFingerprint)) utlsFingerprint = ""
         if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = ""
+        if (JavaUtil.isNullOrBlank(xhttpExtra)) xhttpExtra = ""
         if (wsMaxEarlyData == null) wsMaxEarlyData = 0
         if (allowInsecure == null) allowInsecure = false
         if (packetEncoding == null) packetEncoding = 0
@@ -76,14 +79,15 @@ abstract class StandardV2RayBean : AbstractBean() {
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(6)
+        output.writeInt(7)
         super.serialize(output)
         output.writeString(uuid)
         output.writeString(encryption)
         if (this is VMessBean) {
             output.writeInt((this as VMessBean).alterId!!)
         }
-        val t = type ?: "tcp"
+        val rawType = type ?: "tcp"
+        val t = if (rawType == "splithttp") "xhttp" else rawType
         val s = security ?: ""
         output.writeString(t)
         when (t) {
@@ -118,6 +122,7 @@ abstract class StandardV2RayBean : AbstractBean() {
         output.writeInt(muxType!!)
         output.writeInt(muxConcurrency!!)
         output.writeString(xhttpMode)
+        output.writeString(xhttpExtra)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -129,6 +134,7 @@ abstract class StandardV2RayBean : AbstractBean() {
             (this as VMessBean).alterId = input.readInt()
         }
         type = input.readString()
+        if (type == "splithttp") type = "xhttp"
         if (type != null) {
             when (type) {
                 "tcp", "quic" -> {}
@@ -197,6 +203,25 @@ abstract class StandardV2RayBean : AbstractBean() {
             xhttpMode = input.readString()
             if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = ""
         }
+        if (version >= 7) {
+            xhttpExtra = input.readString()
+            if (JavaUtil.isNullOrBlank(xhttpExtra)) xhttpExtra = ""
+        }
+    }
+
+    open fun applyFeatureSettings(other: StandardV2RayBean) {
+        allowInsecure = other.allowInsecure
+        enableMux = other.enableMux
+        muxPadding = other.muxPadding
+        muxType = other.muxType
+        muxConcurrency = other.muxConcurrency
+        enableECH = other.enableECH
+        echConfig = other.echConfig
+        certificates = other.certificates
+        utlsFingerprint = other.utlsFingerprint
+        packetEncoding = other.packetEncoding
+        xhttpMode = other.xhttpMode
+        xhttpExtra = other.xhttpExtra
     }
 
     val isVLESS: Boolean

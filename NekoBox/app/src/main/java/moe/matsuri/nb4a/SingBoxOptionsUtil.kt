@@ -28,11 +28,11 @@ object SingBoxOptionsUtil {
 }
 
 fun SingBoxOptions.DNSRule_DefaultOptions.makeSingBoxRule(list: List<String>) {
-    rule_set = mutableListOf<String>()
-    domain = mutableListOf<String>()
-    domain_suffix = mutableListOf<String>()
-    domain_regex = mutableListOf<String>()
-    domain_keyword = mutableListOf<String>()
+    if (rule_set == null) rule_set = mutableListOf<String>()
+    if (domain == null) domain = mutableListOf<String>()
+    if (domain_suffix == null) domain_suffix = mutableListOf<String>()
+    if (domain_regex == null) domain_regex = mutableListOf<String>()
+    if (domain_keyword == null) domain_keyword = mutableListOf<String>()
     list.forEach {
         if (it.startsWith("geosite:")) {
             rule_set.plusAssign(it)
@@ -41,7 +41,7 @@ fun SingBoxOptions.DNSRule_DefaultOptions.makeSingBoxRule(list: List<String>) {
         } else if (it.startsWith("domain:")) {
             domain_suffix.plusAssign(it.removePrefix("domain:").lowercase())
         } else if (it.startsWith("regexp:")) {
-            domain_regex.plusAssign(it.removePrefix("regexp:").lowercase())
+            domain_regex.plusAssign(it.removePrefix("regexp:"))
         } else if (it.startsWith("keyword:")) {
             domain_keyword.plusAssign(it.removePrefix("keyword:").lowercase())
         } else {
@@ -95,15 +95,14 @@ fun generateRuleSet(ruleSetString: List<String>, ruleSet: MutableList<RuleSet>) 
 }
 
 fun SingBoxOptions.Rule_DefaultOptions.makeSingBoxRule(list: List<String>, isIP: Boolean) {
+    if (rule_set == null) rule_set = mutableListOf<String>()
     if (isIP) {
-        ip_cidr = mutableListOf<String>()
-        rule_set = mutableListOf<String>()
+        if (ip_cidr == null) ip_cidr = mutableListOf<String>()
     } else {
-        rule_set = mutableListOf<String>()
-        domain = mutableListOf<String>()
-        domain_suffix = mutableListOf<String>()
-        domain_regex = mutableListOf<String>()
-        domain_keyword = mutableListOf<String>()
+        if (domain == null) domain = mutableListOf<String>()
+        if (domain_suffix == null) domain_suffix = mutableListOf<String>()
+        if (domain_regex == null) domain_regex = mutableListOf<String>()
+        if (domain_keyword == null) domain_keyword = mutableListOf<String>()
     }
     list.forEach {
         if (isIP) {
@@ -125,7 +124,7 @@ fun SingBoxOptions.Rule_DefaultOptions.makeSingBoxRule(list: List<String>, isIP:
         } else if (it.startsWith("domain:")) {
             domain_suffix.plusAssign(it.removePrefix("domain:").lowercase())
         } else if (it.startsWith("regexp:")) {
-            domain_regex.plusAssign(it.removePrefix("regexp:").lowercase())
+            domain_regex.plusAssign(it.removePrefix("regexp:"))
         } else if (it.startsWith("keyword:")) {
             domain_keyword.plusAssign(it.removePrefix("keyword:").lowercase())
         } else {
@@ -139,6 +138,7 @@ fun SingBoxOptions.Rule_DefaultOptions.makeSingBoxRule(list: List<String>, isIP:
     domain_regex?.removeIf { it.isNullOrBlank() }
     domain_keyword?.removeIf { it.isNullOrBlank() }
     if (ip_cidr?.isEmpty() == true) ip_cidr = null
+    if (rule_set?.isEmpty() == true) rule_set = null
     if (domain?.isEmpty() == true) domain = null
     if (domain_suffix?.isEmpty() == true) domain_suffix = null
     if (domain_regex?.isEmpty() == true) domain_regex = null

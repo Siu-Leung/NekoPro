@@ -32,6 +32,8 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
     private val type = pbm.add(PreferenceBinding(Type.Text, "type"))
     private val host = pbm.add(PreferenceBinding(Type.Text, "host"))
     private val path = pbm.add(PreferenceBinding(Type.Text, "path"))
+    private val xhttpMode = pbm.add(PreferenceBinding(Type.Text, "xhttpMode"))
+    private val xhttpExtra = pbm.add(PreferenceBinding(Type.Text, "xhttpExtra"))
     private val packetEncoding = pbm.add(PreferenceBinding(Type.TextToInt, "packetEncoding"))
     private val wsMaxEarlyData = pbm.add(PreferenceBinding(Type.TextToInt, "wsMaxEarlyData"))
     private val earlyDataHeaderName = pbm.add(PreferenceBinding(Type.Text, "earlyDataHeaderName"))
@@ -69,6 +71,8 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
     private lateinit var securityCategory: PreferenceCategory
     private lateinit var tlsCamouflageCategory: PreferenceCategory
     private lateinit var wsCategory: PreferenceCategory
+    private lateinit var xhttpCategory: PreferenceCategory
+    private lateinit var muxCategory: PreferenceCategory
     private lateinit var echCategory: PreferenceCategory
 
     override fun PreferenceFragmentCompat.createPreferences(
@@ -81,6 +85,8 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
         tlsCamouflageCategory = findPreference(Key.SERVER_TLS_CAMOUFLAGE_CATEGORY)!!
         echCategory = findPreference(Key.SERVER_ECH_CATEORY)!!
         wsCategory = findPreference(Key.SERVER_WS_CATEGORY)!!
+        xhttpCategory = findPreference(Key.SERVER_XHTTP_CATEGORY)!!
+        muxCategory = findPreference(Key.SERVER_MUX_CATEGORY)!!
 
 
         // vmess/vless/http/trojan
@@ -128,8 +134,18 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
         // menu with listener
 
         type.preference.apply {
-            updateView(type.readStringFromCache())
             this as SimpleMenuPreference
+            if (isVless) {
+                setEntries(R.array.networks_vless_value)
+                setEntryValues(R.array.networks_vless_value)
+            } else {
+                setEntries(R.array.networks_value)
+                setEntryValues(R.array.networks_value)
+                if (type.readStringFromCache() == "xhttp") {
+                    value = "tcp"
+                }
+            }
+            updateView(type.readStringFromCache())
             setOnPreferenceChangeListener { _, newValue ->
                 updateView(newValue as String)
                 true
@@ -150,6 +166,8 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
         host.preference.isVisible = false
         path.preference.isVisible = false
         wsCategory.isVisible = false
+        xhttpCategory.isVisible = false
+        muxCategory.isVisible = (tmpBean !is HttpBean) && (network != "xhttp")
 
         when (network) {
             "tcp" -> {
@@ -185,10 +203,11 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
             }
 
             "xhttp" -> {
-                host.preference.setTitle(R.string.http_upgrade_host)
-                path.preference.setTitle(R.string.http_upgrade_path)
+                host.preference.setTitle(R.string.xhttp_host)
+                path.preference.setTitle(R.string.xhttp_path)
                 host.preference.isVisible = true
                 path.preference.isVisible = true
+                xhttpCategory.isVisible = tmpBean?.isVLESS == true
             }
         }
     }

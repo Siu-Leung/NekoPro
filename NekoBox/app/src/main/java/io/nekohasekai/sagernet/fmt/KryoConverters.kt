@@ -17,6 +17,7 @@ import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
 import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
+import io.nekohasekai.sagernet.fmt.masque.MASQUEBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.ktx.Logs
@@ -118,4 +119,7 @@ object KryoConverters {
 
     @TypeConverter @JvmStatic fun juicityDeserialize(bytes: ByteArray?): JuicityBean? =
         if (JavaUtil.isEmpty(bytes)) null else deserialize(JuicityBean(), bytes)
+
+    @TypeConverter @JvmStatic fun masqueDeserialize(bytes: ByteArray?): MASQUEBean? =
+        if (JavaUtil.isEmpty(bytes)) null else deserialize(MASQUEBean(), bytes)
 }

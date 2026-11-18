@@ -42,7 +42,23 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     // main
 
-    var runningTest = false
+    private val runningTestGeneration = java.util.concurrent.atomic.AtomicInteger(0)
+    private val activeTestToken = java.util.concurrent.atomic.AtomicInteger(0)
+
+    val runningTest: Boolean
+        get() = activeTestToken.get() != 0
+
+    fun acquireTestToken(): Int {
+        var next = runningTestGeneration.incrementAndGet()
+        if (next == 0) next = runningTestGeneration.incrementAndGet()
+        return if (activeTestToken.compareAndSet(0, next)) next else 0
+    }
+
+    fun releaseTestToken(token: Int) {
+        if (token != 0) {
+            activeTestToken.compareAndSet(token, 0)
+        }
+    }
 
     fun currentGroupId(): Long {
         val currentSelected = configurationStore.getLong(Key.PROFILE_GROUP, -1)

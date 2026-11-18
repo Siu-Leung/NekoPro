@@ -404,6 +404,8 @@
     <string name="group_order_origin">Origin</string>
     <string name="group_order_by_name">By Name</string>
     <string name="group_order_by_delay">By Delay</string>
+    <string name="group_order_by_download_speed">By Download Speed</string>
+    <string name="group_order_by_upload_speed">By Upload Speed</string>
     <string name="sort_and_layout">Sort &amp; Layout</string>
     <string name="layout_mode">Layout</string>
     <string name="layout_single">Single Column</string>
@@ -584,11 +586,18 @@
     <string name="app_list_permission_denied">Unable to read installed apps.\nThis is usually because the system has restricted app read permissions.\nPlease grant permissions in the system settings.</string>
     <string name="open_app_settings">Open System Settings</string>
     <string name="branch_info">Neko Pro 版本信息</string>
-    <string name="branch_desc">Neko-Pro-1.1.4</string>
-    <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.14.1 主内核，并通过内置 mihomo 1.19.31 与 sing-snell 扩展现代协议能力。</string>
+    <string name="branch_desc">Neko-Pro-1.2.0</string>
+    <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.13.19 加固版主内核，并通过内置 mihomo 1.19.34 与 sing-snell 扩展现代协议能力。</string>
     <string name="supported_protocols">实际支持协议</string>
-    <string name="supported_protocols_detail">AnyTLS / VMess / VLESS / VLESS-XHTTP / REALITY / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Snell v1-v6 / Naive / SSH / HTTP / SOCKS / WireGuard / Tor / Tailscale</string>
+    <string name="supported_protocols_detail">AnyTLS / VMess / VLESS / VLESS-XHTTP / REALITY / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Juicity / MASQUE / Snell v4-v6 / Naive / SSH / HTTP / SOCKS / WireGuard / Tor / Tailscale</string>
     <string name="action_juicity" translatable="false">Juicity</string>
+    <string name="action_masque" translatable="false">MASQUE (WARP)</string>
+    <string name="masque_local_address_v6">Local Address (IPv6)</string>
+    <string name="masque_uri">CONNECT-IP URI Template</string>
+    <string name="masque_remote_dns_resolve">Resolve DNS Remotely</string>
+    <string name="xhttp_settings">XHTTP Settings</string>
+    <string name="xhttp_mode">XHTTP Mode</string>
+    <string name="xhttp_extra">XHTTP Extra (JSON)</string>
     <string name="pinned_certchain_sha256">Pinned Certificate SHA256</string>
     <string name="speed_test_settings">Speed test</string>
     <string name="speed_test_mode">Speed test mode</string>

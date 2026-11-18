@@ -29,6 +29,9 @@ import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.tuic.toUri
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
 import io.nekohasekai.sagernet.fmt.juicity.toUri
+import io.nekohasekai.sagernet.fmt.masque.MASQUEBean
+import io.nekohasekai.sagernet.fmt.masque.toUri
+import moe.matsuri.nb4a.proxy.snell.toUri
 import io.nekohasekai.sagernet.fmt.v2ray.*
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.ktx.app
@@ -72,6 +75,7 @@ data class ProxyEntity(
     var anyTLSBean: AnyTLSBean? = null,
     var snellBean: moe.matsuri.nb4a.proxy.snell.SnellBean? = null,
     var juicityBean: JuicityBean? = null,
+    var masqueBean: MASQUEBean? = null,
     var chainBean: ChainBean? = null,
     var nekoBean: NekoBean? = null,
     var configBean: ConfigBean? = null,
@@ -99,6 +103,7 @@ data class ProxyEntity(
         const val TYPE_ANYTLS = 22
         const val TYPE_SNELL = 23
         const val TYPE_JUICITY = 24
+        const val TYPE_MASQUE = 25
 
         const val TYPE_CONFIG = 998
         const val TYPE_NEKO = 999
@@ -193,6 +198,7 @@ data class ProxyEntity(
             TYPE_ANYTLS -> anyTLSBean = KryoConverters.anyTLSDeserialize(byteArray)
             TYPE_SNELL -> snellBean = KryoConverters.snellDeserialize(byteArray)
             TYPE_JUICITY -> juicityBean = KryoConverters.juicityDeserialize(byteArray)
+            TYPE_MASQUE -> masqueBean = KryoConverters.masqueDeserialize(byteArray)
             TYPE_CHAIN -> chainBean = KryoConverters.chainDeserialize(byteArray)
             TYPE_NEKO -> nekoBean = KryoConverters.nekoDeserialize(byteArray)
             TYPE_CONFIG -> configBean = KryoConverters.configDeserialize(byteArray)
@@ -216,6 +222,7 @@ data class ProxyEntity(
         TYPE_ANYTLS -> "AnyTLS"
         TYPE_SNELL -> "Snell"
         TYPE_JUICITY -> "Juicity"
+        TYPE_MASQUE -> "MASQUE"
         TYPE_CHAIN -> chainName
         TYPE_NEKO -> nekoBean!!.displayType()
         TYPE_CONFIG -> configBean!!.displayType()
@@ -243,6 +250,7 @@ data class ProxyEntity(
             TYPE_ANYTLS -> anyTLSBean
             TYPE_SNELL -> snellBean
             TYPE_JUICITY -> juicityBean
+            TYPE_MASQUE -> masqueBean
             TYPE_CHAIN -> chainBean
             TYPE_NEKO -> nekoBean
             TYPE_CONFIG -> configBean
@@ -281,6 +289,8 @@ data class ProxyEntity(
             is TuicBean -> toUri()
             is AnyTLSBean -> toUri()
             is JuicityBean -> toUri()
+            is MASQUEBean -> toUri()
+            is moe.matsuri.nb4a.proxy.snell.SnellBean -> toUri()
             is NekoBean -> ""
             else -> toUniversalLink()
         }
@@ -382,6 +392,8 @@ data class ProxyEntity(
         shadowTLSBean = null
         anyTLSBean = null
         snellBean = null
+        juicityBean = null
+        masqueBean = null
         chainBean = null
         configBean = null
         nekoBean = null
@@ -467,6 +479,11 @@ data class ProxyEntity(
                 juicityBean = bean
             }
 
+            is MASQUEBean -> {
+                type = TYPE_MASQUE
+                masqueBean = bean
+            }
+
             is ChainBean -> {
                 type = TYPE_CHAIN
                 chainBean = bean
@@ -506,6 +523,7 @@ data class ProxyEntity(
                 TYPE_ANYTLS -> moe.matsuri.nb4a.proxy.anytls.AnyTLSSettingsActivity::class.java
                 TYPE_SNELL -> moe.matsuri.nb4a.proxy.snell.SnellSettingsActivity::class.java
                 TYPE_JUICITY -> JuicitySettingsActivity::class.java
+                TYPE_MASQUE -> io.nekohasekai.sagernet.ui.profile.MASQUESettingsActivity::class.java
                 TYPE_CHAIN -> ChainSettingsActivity::class.java
                 TYPE_CONFIG -> ConfigSettingActivity::class.java
                 else -> throw IllegalArgumentException()

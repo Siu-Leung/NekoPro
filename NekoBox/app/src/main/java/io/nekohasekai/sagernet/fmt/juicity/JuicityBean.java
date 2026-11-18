@@ -17,26 +17,35 @@ public class JuicityBean extends AbstractBean {
     public String sni;
     public String pinnedCertchainSha256;
     public Boolean allowInsecure;
+    public String congestionControl;
+
+    @Override
+    public boolean canTCPing() {
+        return false;
+    }
 
     @Override
     public void initializeDefaultValues() {
+        if (serverPort == null) serverPort = 443;
+        if (allowInsecure == null) allowInsecure = false;
         super.initializeDefaultValues();
         if (uuid == null) uuid = "";
         if (password == null) password = "";
         if (sni == null) sni = "";
         if (pinnedCertchainSha256 == null) pinnedCertchainSha256 = "";
-        if (allowInsecure == null) allowInsecure = false;
+        if (congestionControl == null) congestionControl = "bbr";
     }
 
     @Override
     public void serialize(ByteBufferOutput output) {
-        output.writeInt(1);
+        output.writeInt(2);
         super.serialize(output);
         output.writeString(uuid);
         output.writeString(password);
         output.writeString(sni);
         output.writeString(pinnedCertchainSha256);
-        output.writeBoolean(allowInsecure);
+        output.writeBoolean(Boolean.TRUE.equals(allowInsecure));
+        output.writeString(congestionControl);
     }
 
     @Override
@@ -48,6 +57,9 @@ public class JuicityBean extends AbstractBean {
         sni = input.readString();
         pinnedCertchainSha256 = input.readString();
         allowInsecure = input.readBoolean();
+        if (version >= 2) {
+            congestionControl = input.readString();
+        }
     }
 
     @NotNull

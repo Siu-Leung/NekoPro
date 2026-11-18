@@ -109,6 +109,8 @@ public class SingBoxOptions {
 
         public NTPOptions ntp;
 
+        public List<SingBoxOption> endpoints;
+
         public List<Inbound> inbounds;
 
         public List<SingBoxOption> outbounds;
@@ -4657,6 +4659,47 @@ public class SingBoxOptions {
 
     }
 
+    public static class Endpoint extends SingBoxOption {
+        public String type;
+        public String tag;
+    }
+
+    public static class WireGuardEndpointPeer extends SingBoxOption {
+        public String address;
+        public Integer port;
+        public String public_key;
+        public String pre_shared_key;
+        public List<String> allowed_ips;
+        public Integer persistent_keepalive_interval;
+        public List<Integer> reserved;
+    }
+
+    public static class Endpoint_WireGuardOptions extends Endpoint {
+        public String detour;
+        public String bind_interface;
+        public String inet4_bind_address;
+        public String inet6_bind_address;
+        public String protect_path;
+        public Integer routing_mark;
+        public Boolean reuse_addr;
+        public Long connect_timeout;
+        public Boolean tcp_fast_open;
+        public Boolean tcp_multi_path;
+        public Boolean udp_fragment;
+        public String domain_strategy;
+        public Long fallback_delay;
+
+        public Boolean system;
+        public String name;
+        public Integer mtu;
+        public List<String> address;
+        public String private_key;
+        public Integer listen_port;
+        public List<WireGuardEndpointPeer> peers;
+        public String udp_timeout;
+        public Integer workers;
+    }
+
     public static class Outbound_SnellOptions extends Outbound {
         public String server;
         public Integer server_port;
@@ -4665,7 +4708,9 @@ public class SingBoxOptions {
         public String mode;
         public Boolean reuse;
         public Boolean udp;
+        @SerializedName("obfs-opts")
         public Map<String, String> obfs_opts;
+        @SerializedName("client-fingerprint")
         public String client_fingerprint;
     }
 
@@ -4682,11 +4727,14 @@ public class SingBoxOptions {
         public String client_fingerprint;
         public List<String> alpn;
         public Boolean skip_cert_verify;
+        public String reality_public_key;
+        public String reality_short_id;
 
         public String xhttp_path;
         public String xhttp_host;
         public String xhttp_mode;
         public Map<String, String> xhttp_headers;
+        public String xhttp_extra;
         public Boolean xhttp_reuse;
         public Integer xhttp_reuse_max_conns;
 
@@ -4716,6 +4764,93 @@ public class SingBoxOptions {
         public String network;
         public String pin_cert_sha256;
         public OutboundTLSOptions tls;
+    }
+
+    public static class Outbound_MasqueOptions extends Outbound {
+        public String detour;
+        public String bind_interface;
+        public String inet4_bind_address;
+        public String inet6_bind_address;
+        public String protect_path;
+        public Integer routing_mark;
+        public Boolean reuse_addr;
+        public Long connect_timeout;
+        public Boolean tcp_fast_open;
+        public Boolean tcp_multi_path;
+        public Boolean udp_fragment;
+        public String domain_strategy;
+        public Long fallback_delay;
+
+        public String server;
+        public Integer server_port;
+        public String private_key;
+        public String public_key;
+        public String local_address;
+        public String local_address_v6;
+        public String uri;
+        public String server_name;
+        public Integer mtu;
+        public Boolean udp;
+        public String network;
+        public String congestion_controller;
+        public Boolean skip_cert_verify;
+        public Boolean remote_dns_resolve;
+    }
+
+    public static class Outbound_TrustTunnelOptions extends Outbound {
+        public String detour;
+        public String bind_interface;
+        public String inet4_bind_address;
+        public String inet6_bind_address;
+        public String protect_path;
+        public Integer routing_mark;
+        public Boolean reuse_addr;
+        public Long connect_timeout;
+        public Boolean tcp_fast_open;
+        public Boolean tcp_multi_path;
+        public Boolean udp_fragment;
+        public String domain_strategy;
+        public Long fallback_delay;
+
+        public String server;
+        public Integer server_port;
+        public String username;
+        public String password;
+        public String server_name;
+        public List<String> alpn;
+        public String client_fingerprint;
+        public String fingerprint;
+        public Boolean skip_cert_verify;
+        public Boolean quic;
+        public String congestion_controller;
+        public Boolean udp;
+        public Boolean health_check;
+    }
+
+    public static class Outbound_ShadowQuicOptions extends Outbound {
+        public String detour;
+        public String bind_interface;
+        public String inet4_bind_address;
+        public String inet6_bind_address;
+        public String protect_path;
+        public Integer routing_mark;
+        public Boolean reuse_addr;
+        public Long connect_timeout;
+        public Boolean tcp_fast_open;
+        public Boolean tcp_multi_path;
+        public Boolean udp_fragment;
+        public String domain_strategy;
+        public Long fallback_delay;
+
+        public String server;
+        public Integer server_port;
+        public String username;
+        public String password;
+        public String server_name;
+        public List<String> alpn;
+        public Boolean zero_rtt;
+        public Boolean udp_over_stream;
+        public String congestion_controller;
     }
 
 }

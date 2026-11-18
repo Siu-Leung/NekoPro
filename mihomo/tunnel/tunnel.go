@@ -117,20 +117,14 @@ func (t tunnel) NatTable() C.NatTable {
 }
 
 func (t tunnel) Proxies() map[string]C.Proxy {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return proxies
 }
 
 func (t tunnel) Providers() map[string]P.ProxyProvider {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return providers
 }
 
 func (t tunnel) RuleProviders() map[string]P.RuleProvider {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return ruleProviders
 }
 
@@ -219,22 +213,16 @@ func UpdateRules(newRules []C.Rule, newSubRule map[string][]C.Rule, rp map[strin
 
 // Proxies return all proxies
 func Proxies() map[string]C.Proxy {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return proxies
 }
 
 // Providers return all compatible providers
 func Providers() map[string]P.ProxyProvider {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return providers
 }
 
 // RuleProviders return all loaded rule providers
 func RuleProviders() map[string]P.RuleProvider {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return ruleProviders
 }
 
@@ -261,16 +249,12 @@ func UpdateSniffer(dispatcher *sniffer.Dispatcher) {
 
 // Mode return current mode
 func Mode() TunnelMode {
-	configMux.RLock()
-	defer configMux.RUnlock()
 	return mode
 }
 
 // SetMode change the mode of tunnel
 func SetMode(m TunnelMode) {
-	configMux.Lock()
 	mode = m
-	configMux.Unlock()
 }
 
 func FindProcessMode() process.FindProcessMode {

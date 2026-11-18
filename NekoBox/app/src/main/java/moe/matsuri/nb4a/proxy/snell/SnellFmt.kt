@@ -8,13 +8,14 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URLDecoder
 
 fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_SnellOptions {
+    val clampedVersion = (bean.version ?: 4).coerceIn(4, 6)
     return SingBoxOptions.Outbound_SnellOptions().apply {
         type = "snell"
         server = bean.serverAddress?.trim()?.removeSurrounding("[", "]")
         server_port = bean.serverPort
         psk = bean.psk
-        version = bean.version ?: 4
-        if (version == 6) mode = bean.mode ?: "default"
+        version = clampedVersion
+        if (clampedVersion == 6) mode = bean.mode?.takeIf { it.isNotBlank() } ?: "default"
         reuse = true
         udp = true
         // obfs-opts: only set when obfs mode is not "none"
@@ -38,6 +39,7 @@ fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_Snel
 
 fun SnellBean.toUri(): String {
     val cleanHost = (serverAddress ?: "").trim().removeSurrounding("[", "]")
+    val clampedVersion = (version ?: 4).coerceIn(4, 6)
     val builder = linkBuilder()
         .host(cleanHost)
         .port(serverPort ?: 443)
@@ -46,8 +48,8 @@ fun SnellBean.toUri(): String {
     if (!beanName.isNullOrBlank()) {
         builder.encodedFragment(beanName.urlSafe())
     }
-    builder.addQueryParameter("version", (version ?: 4).toString())
-    if (version == 6) builder.addQueryParameter("mode", mode ?: "default")
+    builder.addQueryParameter("version", clampedVersion.toString())
+    if (clampedVersion == 6) builder.addQueryParameter("mode", mode?.takeIf { it.isNotBlank() } ?: "default")
     val obfsMode = this.obfsMode
     if (!obfsMode.isNullOrBlank() && obfsMode != "none") {
         builder.addQueryParameter("obfs", obfsMode)
@@ -63,13 +65,20 @@ fun SnellBean.toUri(): String {
     return builder.toLink("snell")
 }
 
+private fun percentDecodePreservingPlus(raw: String): String {
+    return runCatching { URLDecoder.decode(raw.replace("+", "%2B"), "UTF-8") }.getOrDefault(raw)
+}
+
 fun parseSnell(url: String): SnellBean {
     val trimmedUrl = url.trim()
     val mainPart = trimmedUrl.substringBefore('#').trim()
     val rawFragment = if (trimmedUrl.contains('#')) trimmedUrl.substringAfter('#').trim() else ""
     val decodedName = if (rawFragment.isNotBlank()) {
-        runCatching { URLDecoder.decode(rawFragment, "UTF-8") }.getOrDefault(rawFragment)
+        percentDecodePreservingPlus(rawFragment)
     } else ""
+
+    val rawAuthority = mainPart.substringAfter("snell://", "")
+    val hasUserInfoColon = rawAuthority.contains('@') && rawAuthority.substringBeforeLast('@').contains(':')
 
     val link = mainPart.replace("snell://", "https://").toHttpUrlOrNull()
     if (link != null) {
@@ -77,10 +86,14 @@ fun parseSnell(url: String): SnellBean {
             serverAddress = link.host.trim().removeSurrounding("[", "]")
             serverPort = link.port
             name = decodedName.ifBlank { link.fragment ?: "" }
-            psk = link.username
-            version = link.queryParameter("version")?.toIntOrNull() ?: 4
-            mode = link.queryParameter("mode") ?: "default"
-            obfsMode = link.queryParameter("obfs") ?: "none"
+            psk = if (hasUserInfoColon || link.encodedPassword.isNotEmpty()) {
+                "${link.username}:${link.password}"
+            } else {
+                link.username
+            }
+            version = (link.queryParameter("version")?.toIntOrNull() ?: 4).coerceIn(4, 6)
+            mode = link.queryParameter("mode")?.takeIf { it.isNotBlank() } ?: "default"
+            obfsMode = link.queryParameter("obfs")?.takeIf { it.isNotBlank() } ?: "none"
             obfsHost = link.queryParameter("obfs-host") ?: ""
             clientFingerprint = link.queryParameter("fp") ?: ""
         }
@@ -89,14 +102,14 @@ fun parseSnell(url: String): SnellBean {
     // Fallback regex parser for non-standard URIs (supports IPv6 with [] and IPv4/domain)
     val regex = Regex("""^snell://([^@]+)@(?:\[([a-fA-F0-9:]+)\]|([^:]+)):(\d+)(?:\?(.*))?$""")
     val match = regex.find(mainPart) ?: error("invalid snell link $url")
-    val psk = match.groupValues[1]
+    val psk = percentDecodePreservingPlus(match.groupValues[1])
     val host = if (match.groupValues[2].isNotEmpty()) match.groupValues[2] else match.groupValues[3]
     val portStr = match.groupValues[4]
     val queryStr = match.groupValues[5]
     val queryParams = if (queryStr.isNotEmpty()) {
         queryStr.split('&').filter { it.contains('=') }.associate {
             val parts = it.split('=', limit = 2)
-            parts[0] to parts.getOrElse(1) { "" }
+            percentDecodePreservingPlus(parts[0]) to percentDecodePreservingPlus(parts.getOrElse(1) { "" })
         }
     } else emptyMap()
 
@@ -105,9 +118,9 @@ fun parseSnell(url: String): SnellBean {
         serverPort = portStr.toIntOrNull() ?: 443
         name = decodedName
         this.psk = psk
-        version = queryParams["version"]?.toIntOrNull() ?: 4
-        mode = queryParams["mode"] ?: "default"
-        obfsMode = queryParams["obfs"] ?: "none"
+        version = (queryParams["version"]?.toIntOrNull() ?: 4).coerceIn(4, 6)
+        mode = queryParams["mode"]?.takeIf { it.isNotBlank() } ?: "default"
+        obfsMode = queryParams["obfs"]?.takeIf { it.isNotBlank() } ?: "none"
         obfsHost = queryParams["obfs-host"] ?: ""
         clientFingerprint = queryParams["fp"] ?: ""
     }

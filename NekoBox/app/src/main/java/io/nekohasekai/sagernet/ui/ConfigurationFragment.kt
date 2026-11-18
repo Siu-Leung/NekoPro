@@ -289,7 +289,6 @@ class ConfigurationFragment @JvmOverloads constructor(
             speedTestHidden = false
             speedTestRunner = null
             speedTestJob = null
-            DataStore.runningTest = false
         }
         DataStore.profileCacheStore.unregisterChangeListener(this)
 
@@ -462,6 +461,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_new_juicity -> {
                 startActivity(Intent(requireActivity(), JuicitySettingsActivity::class.java))
+            }
+
+            R.id.action_new_masque -> {
+                startActivity(Intent(requireActivity(), io.nekohasekai.sagernet.ui.profile.MASQUESettingsActivity::class.java))
             }
 
             R.id.action_new_ssh -> {
@@ -655,7 +658,9 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     fun speedTest(targetProfile: ProxyEntity? = null) {
-        if (DataStore.runningTest) return else DataStore.runningTest = true
+        if (!isAdded) return
+        val testToken = DataStore.acquireTestToken()
+        if (testToken == 0) return
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
         val titleText = if (isSingle) targetProfile!!.displayName() else getString(R.string.speed_test_group)
@@ -759,6 +764,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
                     runOnMainDispatcher {
+                        if (!isAdded) return@runOnMainDispatcher
                         val detail = formatSpeedTestSnapshot(sample)
                         speedTestNotification?.updateNotification(index + 1, total, false, detail)
                         if (!speedTestHidden && isAdded) {
@@ -786,7 +792,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 speedTestHidden = false
                 speedTestRunner = null
                 speedTestJob = null
-                DataStore.runningTest = false
+                DataStore.releaseTestToken(testToken)
             }
         }
     }
@@ -927,7 +933,8 @@ class ConfigurationFragment @JvmOverloads constructor(
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("EXPERIMENTAL_API_USAGE")
     fun pingTest(icmpPing: Boolean) {
-        if (DataStore.runningTest) return else DataStore.runningTest = true
+        val testToken = DataStore.acquireTestToken()
+        if (testToken == 0) return
         val test = TestDialog()
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
@@ -1053,7 +1060,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
                 GroupManager.postReload(DataStore.currentGroupId())
-                DataStore.runningTest = false
+                DataStore.releaseTestToken(testToken)
             }
         }
         test.minimize = {
@@ -1068,7 +1075,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     @OptIn(DelicateCoroutinesApi::class)
     fun urlTest() {
-        if (DataStore.runningTest) return else DataStore.runningTest = true
+        val testToken = DataStore.acquireTestToken()
+        if (testToken == 0) return
         val test = TestDialog()
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
@@ -1122,7 +1130,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
                 GroupManager.postReload(DataStore.currentGroupId())
-                DataStore.runningTest = false
+                DataStore.releaseTestToken(testToken)
             }
         }
         test.minimize = {
@@ -1362,6 +1370,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             val origin = menu.findItem(R.id.action_order_origin)
             val byName = menu.findItem(R.id.action_order_by_name)
             val byDelay = menu.findItem(R.id.action_order_by_delay)
+            val byDownload = menu.findItem(R.id.action_order_by_download_speed)
+            val byUpload = menu.findItem(R.id.action_order_by_upload_speed)
             when (proxyGroup.order) {
                 GroupOrder.ORIGIN -> {
                     origin?.isChecked = true
@@ -1373,6 +1383,14 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 GroupOrder.BY_DELAY -> {
                     byDelay?.isChecked = true
+                }
+
+                GroupOrder.BY_DOWNLOAD_SPEED -> {
+                    byDownload?.isChecked = true
+                }
+
+                GroupOrder.BY_UPLOAD_SPEED -> {
+                    byUpload?.isChecked = true
                 }
             }
 
@@ -1414,6 +1432,16 @@ class ConfigurationFragment @JvmOverloads constructor(
             byDelay?.setOnMenuItemClickListener {
                 it.isChecked = true
                 updateTo(GroupOrder.BY_DELAY)
+                true
+            }
+            byDownload?.setOnMenuItemClickListener {
+                it.isChecked = true
+                updateTo(GroupOrder.BY_DOWNLOAD_SPEED)
+                true
+            }
+            byUpload?.setOnMenuItemClickListener {
+                it.isChecked = true
+                updateTo(GroupOrder.BY_UPLOAD_SPEED)
                 true
             }
             layoutSingle?.setOnMenuItemClickListener {
@@ -1717,6 +1745,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                     GroupOrder.BY_DELAY -> {
                         newProfiles =
                             newProfiles.sortedBy { if (it.status == 1) it.ping else 114514 }
+                    }
+
+                    GroupOrder.BY_DOWNLOAD_SPEED -> {
+                        newProfiles =
+                            newProfiles.sortedByDescending { it.speedTestDownloadBitsPerSecond }
+                    }
+
+                    GroupOrder.BY_UPLOAD_SPEED -> {
+                        newProfiles =
+                            newProfiles.sortedByDescending { it.speedTestUploadBitsPerSecond }
                     }
                 }
 

@@ -270,7 +270,16 @@
         <item>3</item>
     </string-array>
 
-    <string-array name="networks_value">
+    <string-array name="networks_value" translatable="false">
+        <item>tcp</item>
+        <item>ws</item>
+        <item>http</item>
+        <item>quic</item>
+        <item>grpc</item>
+        <item>httpupgrade</item>
+    </string-array>
+
+    <string-array name="networks_vless_value" translatable="false">
         <item>tcp</item>
         <item>ws</item>
         <item>http</item>
@@ -278,6 +287,22 @@
         <item>grpc</item>
         <item>httpupgrade</item>
         <item>xhttp</item>
+    </string-array>
+
+    <string-array name="xhttp_mode_entries" translatable="false">
+        <item>default (auto)</item>
+        <item>auto</item>
+        <item>packet-up</item>
+        <item>stream-up</item>
+        <item>stream-one</item>
+    </string-array>
+
+    <string-array name="xhttp_mode_value" translatable="false">
+        <item></item>
+        <item>auto</item>
+        <item>packet-up</item>
+        <item>stream-up</item>
+        <item>stream-one</item>
     </string-array>
 
     <string-array name="trojan_go_networks_entry">
@@ -433,6 +458,8 @@
         <item>@string/group_order_origin</item>
         <item>@string/group_order_by_name</item>
         <item>@string/group_order_by_delay</item>
+        <item>@string/group_order_by_download_speed</item>
+        <item>@string/group_order_by_upload_speed</item>
     </string-array>
 
     <string-array name="ssh_auth_type">
@@ -504,10 +531,27 @@
         <item>randomized</item>
     </string-array>
 
-    <string-array name="snell_obfs_entries">
+    <string-array name="snell_obfs_entries" translatable="false">
         <item>none</item>
         <item>http</item>
         <item>tls</item>
+    </string-array>
+
+    <string-array name="snell_version_entries" translatable="false">
+        <item>4</item>
+        <item>5</item>
+        <item>6</item>
+    </string-array>
+
+    <string-array name="snell_mode_entries" translatable="false">
+        <item>default</item>
+        <item>unshaped</item>
+        <item>unsafe-raw</item>
+    </string-array>
+
+    <string-array name="masque_network_entries" translatable="false">
+        <item>h3</item>
+        <item>h2</item>
     </string-array>
 
     <string-array name="tuic_udp_relay_mode_value">

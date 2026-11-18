@@ -16,13 +16,13 @@ import (
 func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 	data := DecodeBase64(buf)
 
-	arr := strings.Split(string(data), "\n")
+	rawLines := bytes.Split(data, []byte("\n"))
 
-	proxies := make([]map[string]any, 0, len(arr))
+	proxies := make([]map[string]any, 0, len(rawLines))
 	names := make(map[string]int, 200)
 
-	for _, line := range arr {
-		line = strings.TrimRight(line, " \r")
+	for _, raw := range rawLines {
+		line := strings.TrimRight(string(raw), " \r")
 		if line == "" {
 			continue
 		}
@@ -190,7 +190,7 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 			}
 
 			switch network {
-			case "ws":
+			case "ws", "httpupgrade":
 				headers := make(map[string]any)
 				wsOpts := make(map[string]any)
 
@@ -198,6 +198,10 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 
 				wsOpts["path"] = query.Get("path")
 				wsOpts["headers"] = headers
+				if network == "httpupgrade" {
+					trojan["network"] = "ws"
+					wsOpts["v2ray-http-upgrade"] = true
+				}
 
 				trojan["ws-opts"] = wsOpts
 
@@ -357,6 +361,10 @@ func ConvertsV2Ray(buf []byte) ([]map[string]any, error) {
 				headers := make(map[string]any)
 				wsOpts := make(map[string]any)
 				wsOpts["path"] = "/"
+				if network == "httpupgrade" {
+					vmess["network"] = "ws"
+					wsOpts["v2ray-http-upgrade"] = true
+				}
 				if host, ok := values["host"].(string); ok && host != "" {
 					headers["Host"] = host
 				}

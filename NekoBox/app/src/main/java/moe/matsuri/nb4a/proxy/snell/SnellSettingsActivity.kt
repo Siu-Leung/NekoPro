@@ -21,16 +21,21 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
     private val serverPort = pbm.add(PreferenceBinding(Type.TextToInt, "serverPort"))
     private val psk = pbm.add(PreferenceBinding(Type.Text, "psk"))
     private val version = pbm.add(PreferenceBinding(Type.TextToInt, "version"))
+    private val mode = pbm.add(PreferenceBinding(Type.Text, "mode"))
     private val obfsMode = pbm.add(PreferenceBinding(Type.Text, "obfsMode"))
     private val obfsHost = pbm.add(PreferenceBinding(Type.Text, "obfsHost"))
     private val clientFingerprint = pbm.add(PreferenceBinding(Type.Text, "clientFingerprint"))
 
     override fun SnellBean.init() {
+        version = (version ?: 4).coerceIn(4, 6)
+        if (mode.isNullOrBlank()) mode = "default"
         pbm.writeToCacheAll(this)
     }
 
     override fun SnellBean.serialize() {
         pbm.fromCacheAll(this)
+        version = (version ?: 4).coerceIn(4, 6)
+        if (mode.isNullOrBlank()) mode = "default"
     }
 
     override fun PreferenceFragmentCompat.createPreferences(
@@ -38,12 +43,18 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
         rootKey: String?
     ) {
         addPreferencesFromResource(R.xml.snell_preferences)
+        pbm.setPreferenceFragment(this)
 
         findPreference<EditTextPreference>(Key.SERVER_PORT)!!.apply {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         }
         findPreference<EditTextPreference>("psk")!!.apply {
             summaryProvider = PasswordSummaryProvider
+        }
+        mode.preference.isVisible = version.readStringToIntFromCache() == 6
+        version.preference.setOnPreferenceChangeListener { _, newValue ->
+            mode.preference.isVisible = newValue?.toString()?.toIntOrNull() == 6
+            true
         }
     }
 }

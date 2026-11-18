@@ -530,6 +530,7 @@ func selectLowestLatencyServer(
 	}
 
 	results := make(chan latencyResult, len(servers))
+	sem := make(chan struct{}, 16)
 	var waitGroup sync.WaitGroup
 	for _, candidate := range servers {
 		if candidate == nil || candidate.URL == "" {
@@ -539,6 +540,13 @@ func selectLowestLatencyServer(
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results <- latencyResult{server: server, err: ctx.Err()}
+				return
+			}
 			latency, err := measureSpeedTestLatency(ctx, client, server.URL)
 			results <- latencyResult{server: server, latency: latency, err: err}
 		}()
@@ -739,7 +747,9 @@ func downloadSpeedTestPayload(
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Referer", "https://speed.cloudflare.com/")
+	if req.URL != nil && strings.Contains(strings.ToLower(req.URL.Host), "cloudflare.com") {
+		req.Header.Set("Referer", "https://speed.cloudflare.com/")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -798,7 +808,9 @@ func runSimpleDownload(
 		return 0, 0, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Referer", "https://speed.cloudflare.com/")
+	if req.URL != nil && strings.Contains(strings.ToLower(req.URL.Host), "cloudflare.com") {
+		req.Header.Set("Referer", "https://speed.cloudflare.com/")
+	}
 	started := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -828,6 +840,9 @@ func runSimpleDownload(
 				downloadBytes:         total,
 			})
 			if copyErr != nil {
+				if ctx.Err() == nil && total > 0 && (errors.Is(copyErr, context.DeadlineExceeded) || errors.Is(copyErr, context.Canceled) || errors.Is(downloadCtx.Err(), context.DeadlineExceeded)) {
+					return rate, total, nil
+				}
 				return rate, total, copyErr
 			}
 			if total == 0 {
@@ -845,8 +860,16 @@ func runSimpleDownload(
 			copyErr := <-done
 			total := transferred.Load()
 			rate := calculateSpeedTestRate(total, time.Since(started))
+			progress(speedTestProgress{
+				stage:                 SpeedTestStageDownload,
+				downloadBitsPerSecond: rate,
+				downloadBytes:         total,
+			})
 			if err := ctx.Err(); err != nil {
 				return rate, total, err
+			}
+			if total > 0 && errors.Is(downloadCtx.Err(), context.DeadlineExceeded) {
+				return rate, total, nil
 			}
 			if copyErr != nil && !errors.Is(copyErr, context.DeadlineExceeded) && !errors.Is(copyErr, context.Canceled) {
 				return rate, total, copyErr

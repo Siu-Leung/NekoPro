@@ -21,8 +21,6 @@ func init() {
 		downloadTotal: atomic.NewInt64(0),
 		pid:           int32(os.Getpid()),
 	}
-
-	go DefaultManager.handle()
 }
 
 type Manager struct {

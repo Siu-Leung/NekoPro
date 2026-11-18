@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**']
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -16,7 +16,7 @@ on:
       tag_name:
         description: 'Release Tag Name (e.g. v1.1.0)'
         required: false
-        default: 'v1.1.0'
+        default: ''
 
 permissions:
   contents: write
@@ -46,7 +46,7 @@ jobs:
 
   android-build:
     name: Android build
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,7 +94,8 @@ jobs:
           cd app/build/outputs/apk/oss/release
           test "$(find . -maxdepth 1 -name '*.apk' | wc -l)" -eq 4
           for apk in ./*.apk; do
-            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+            APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+            "$APKSIGNER" verify --verbose "$apk"
           done
           md5sum ./*.apk > checksums/MD5SUMS.txt
           sha256sum ./*.apk > checksums/SHA256SUMS.txt

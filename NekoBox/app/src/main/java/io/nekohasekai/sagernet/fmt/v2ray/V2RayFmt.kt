@@ -152,8 +152,9 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
         path = url.pathSegments.joinToString("/")
     }
 
-    type = url.queryParameter("type") ?: "tcp"
+    type = url.queryParameter("type")?.lowercase() ?: "tcp"
     if (type == "h2" || url.queryParameter("headerType") == "http") type = "http"
+    if (type == "splithttp") type = "xhttp"
 
     security = url.queryParameter("security")
     if (security.isNullOrBlank()) {
@@ -237,6 +238,9 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
             }
             url.queryParameter("mode")?.let {
                 xhttpMode = it
+            }
+            url.queryParameter("extra")?.let {
+                xhttpExtra = it
             }
         }
     }
@@ -447,18 +451,19 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
     }
 
     // VLESS & Trojan (ducksoft fmt)
+    val normalizedType = if (type == "splithttp") "xhttp" else type
     val builder = linkBuilder()
         .username(if (this is TrojanBean) password!! else uuid!!)
         .host(serverAddress!!)
         .port(serverPort!!)
-        .addQueryParameter("type", type)
+        .addQueryParameter("type", normalizedType)
 
     if (isVLESS) {
         builder.addQueryParameter("encryption", "none")
         if (encryption != "auto") builder.addQueryParameter("flow", encryption)
     }
 
-    when (type) {
+    when (normalizedType) {
         "tcp" -> {}
         "ws", "http", "httpupgrade" -> {
             if (host!!.isNotBlank()) {
@@ -467,14 +472,14 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
             if (path!!.isNotBlank()) {
                 builder.addQueryParameter("path", path!!)
             }
-            if (type == "ws") {
+            if (normalizedType == "ws") {
                 if (wsMaxEarlyData!! > 0) {
                     builder.addQueryParameter("ed", "$wsMaxEarlyData")
                     if (earlyDataHeaderName!!.isNotBlank()) {
                         builder.addQueryParameter("eh", earlyDataHeaderName!!)
                     }
                 }
-            } else if (type == "http" && !isTLS()) {
+            } else if (normalizedType == "http" && !isTLS()) {
                 builder.setQueryParameter("type", "tcp")
                 builder.addQueryParameter("headerType", "http")
             }
@@ -493,8 +498,11 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
             if (path!!.isNotBlank()) {
                 builder.addQueryParameter("path", path!!)
             }
-            if (xhttpMode!!.isNotBlank()) {
+            if (!xhttpMode.isNullOrBlank()) {
                 builder.addQueryParameter("mode", xhttpMode!!)
+            }
+            if (!xhttpExtra.isNullOrBlank()) {
+                builder.addQueryParameter("extra", xhttpExtra!!)
             }
         }
     }
@@ -662,7 +670,7 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
 
         is VMessBean -> {
             if (bean.isVLESS) {
-                if (bean.type == "xhttp") {
+                if (bean.type == "xhttp" || bean.type == "splithttp") {
                     return Outbound_VLESSXHTTPOptions().apply {
                         type = "vless_xhttp"
                         server = bean.serverAddress
@@ -678,13 +686,26 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
                         }
                         tls = bean.security == "tls"
                         server_name = bean.sni
-                        fingerprint = bean.utlsFingerprint
-                        client_fingerprint = bean.utlsFingerprint
-                        alpn = bean.alpn!!.split(",").filter { it.isNotBlank() }
-                        skip_cert_verify = bean.allowInsecure == true
+                        var fp = bean.utlsFingerprint
+                        if (!bean.realityPubKey.isNullOrBlank()) {
+                            reality_public_key = bean.realityPubKey
+                            reality_short_id = bean.realityShortId
+                            if (fp.isNullOrBlank()) fp = "chrome"
+                        }
+                        fingerprint = fp
+                        client_fingerprint = fp
+                        if (!bean.alpn.isNullOrBlank()) {
+                            alpn = bean.alpn!!.listByLineOrComma()
+                        }
+                        skip_cert_verify = bean.allowInsecure == true || DataStore.globalAllowInsecure
                         xhttp_path = bean.path
                         xhttp_host = bean.host
-                        xhttp_mode = bean.xhttpMode
+                        if (!bean.xhttpMode.isNullOrBlank()) {
+                            xhttp_mode = bean.xhttpMode
+                        }
+                        if (!bean.xhttpExtra.isNullOrBlank()) {
+                            xhttp_extra = bean.xhttpExtra
+                        }
                         udp = true
                     }
                 }

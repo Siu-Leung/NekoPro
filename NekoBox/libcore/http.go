@@ -151,14 +151,17 @@ func (c *httpClient) TrySocks5(port int32) {
 				}
 				break
 			}
+			_ = socksConn.SetDeadline(time.Now().Add(10 * time.Second))
 			_, err = socks.ClientHandshake5(socksConn, socks5.CommandConnect, metadata.ParseSocksaddr(addr), "", "")
+			_ = socksConn.SetDeadline(time.Time{})
 			if err != nil {
+				_ = socksConn.Close()
 				if c.tryH3Direct {
 					return nil, errFailConnectSocks5
 				}
 				break
 			}
-			return socksConn, err
+			return socksConn, nil
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
@@ -240,10 +243,10 @@ func (r *httpRequest) Execute() (HTTPResponse, error) {
 		return r.doH3Direct()
 	}
 	ctx, cancel := context.WithTimeout(r.request.Context(), r.timeout)
-	defer cancel()
 	request := r.request.Clone(ctx)
 	response, err := r.h1h2Client.Do(request)
 	if err != nil {
+		cancel()
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
@@ -253,22 +256,23 @@ func (r *httpRequest) Execute() (HTTPResponse, error) {
 		}
 		return nil, err
 	}
-	httpResp := &httpResponse{Response: response}
+	httpResp := &httpResponse{Response: response, cancelFunc: cancel}
 	if response.StatusCode != http.StatusOK {
-		return nil, errors.New(httpResp.errorString())
+		errMsg := httpResp.errorString()
+		httpResp.closeResources()
+		return nil, errors.New(errMsg)
 	}
 	return httpResp, nil
 }
 
-type requestFunc func() (response *http.Response, transport io.Closer, err error)
+type requestFunc func(ctx context.Context) (response *http.Response, transport io.Closer, err error)
 
 func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
-	ctx, cancel := context.WithTimeout(r.request.Context(), r.timeout)
-	defer cancel()
-
 	type result struct {
+		idx       int
 		response  *http.Response
 		transport io.Closer
+		cancel    context.CancelFunc
 		err       error
 	}
 	resultCh := make(chan result, 2)
@@ -277,7 +281,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 
 	funcs := []requestFunc{
 		// Http(s) With Ech
-		func() (response *http.Response, transport io.Closer, err error) {
+		func(ctx context.Context) (response *http.Response, transport io.Closer, err error) {
 			request := r.request.Clone(ctx)
 			echTransport := &http.Transport{
 				DisableKeepAlives:     true,
@@ -311,11 +315,15 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			return
 		},
 		// H3 HTTPS
-		func() (response *http.Response, transport io.Closer, err error) {
+		func(ctx context.Context) (response *http.Response, transport io.Closer, err error) {
 			request := r.request.Clone(ctx)
+			idleTimeout := r.timeout
+			if idleTimeout < 5*time.Second {
+				idleTimeout = 5 * time.Second
+			}
 			h3Transport := &http3.Transport{
 				TLSClientConfig: r.tls.Clone(),
-				QUICConfig:      &quic.Config{MaxIdleTimeout: time.Second},
+				QUICConfig:      &quic.Config{MaxIdleTimeout: idleTimeout},
 			}
 			transport = h3Transport
 			h3Client := &http.Client{
@@ -331,21 +339,26 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 		funcs = funcs[:1]
 	}
 
-	for i, f := range funcs {
-		go func(f requestFunc) {
+	candCancels := make([]context.CancelFunc, len(funcs))
+	for i := range funcs {
+		candCtx, candCancel := context.WithTimeout(r.request.Context(), r.timeout)
+		candCancels[i] = candCancel
+		idx := i
+		fn := funcs[i]
+		go func() {
 			defer device.DeferPanicToError("http", func(err error) { log.Println(err) })
 
 			var t string
-			switch i {
+			switch idx {
 			case 0:
 				t = "http(s)"
 			case 1:
 				t = "h3"
 			}
 
-			// 执行HTTP请求
-			rsp, transport, err := f()
+			rsp, transport, err := fn(candCtx)
 			if rsp == nil || err != nil {
+				candCancel()
 				if rsp != nil && rsp.Body != nil {
 					_ = rsp.Body.Close()
 				}
@@ -358,58 +371,64 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 				}
 				finalErr = errors.Join(finalErr, fmt.Errorf("%s: %w", t, err))
 				mu.Unlock()
-				resultCh <- result{err: err}
+				resultCh <- result{idx: idx, err: err}
 				return
 			}
 
-			// 处理 HTTP 状态码
 			if rsp.StatusCode != http.StatusOK {
-				hr := &httpResponse{Response: rsp}
+				hr := &httpResponse{Response: rsp, transportCloser: transport, cancelFunc: candCancel}
 				err = fmt.Errorf("%s: %s", t, hr.errorString())
-				if transport != nil {
-					_ = transport.Close()
-				}
+				hr.closeResources()
 				mu.Lock()
 				finalErr = errors.Join(finalErr, err)
 				mu.Unlock()
-				resultCh <- result{err: err}
+				resultCh <- result{idx: idx, err: err}
 				return
 			}
-			resultCh <- result{response: rsp, transport: transport}
-		}(f)
+			resultCh <- result{idx: idx, response: rsp, transport: transport, cancel: candCancel}
+		}()
 	}
 
 	var winner *http.Response
 	var winnerTransport io.Closer
+	var winnerCancel context.CancelFunc
 	for i := 0; i < len(funcs); i++ {
-		result := <-resultCh
-		if result.response != nil {
+		res := <-resultCh
+		if res.response != nil {
 			if winner == nil {
-				winner = result.response
-				winnerTransport = result.transport
-				cancel()
-			} else {
-				// duplicate success: keep transport alive until body is closed,
-				// but we cannot reuse it, so close it with the response body.
-				if result.transport != nil {
-					_ = result.transport.Close()
+				winner = res.response
+				winnerTransport = res.transport
+				winnerCancel = res.cancel
+				// Cancel losing in-flight transports without cancelling the winner's body read context
+				for j, c := range candCancels {
+					if j != res.idx && c != nil {
+						c()
+					}
 				}
-				if result.response.Body != nil {
-					_ = result.response.Body.Close()
+			} else {
+				if res.cancel != nil {
+					res.cancel()
+				}
+				if res.transport != nil {
+					_ = res.transport.Close()
+				}
+				if res.response.Body != nil {
+					_ = res.response.Body.Close()
 				}
 			}
 		}
 	}
 	if winner != nil {
-		// keep winner transport open; it will be closed when response body is closed
-		return &httpResponse{Response: winner, transportCloser: winnerTransport}, nil
+		return &httpResponse{Response: winner, transportCloser: winnerTransport, cancelFunc: winnerCancel}, nil
+	}
+	for _, c := range candCancels {
+		if c != nil {
+			c()
+		}
 	}
 	mu.Lock()
 	err := finalErr
 	mu.Unlock()
-	if err == nil {
-		err = ctx.Err()
-	}
 	if err == nil {
 		err = errors.New("all HTTP transports failed")
 	}
@@ -420,6 +439,7 @@ type httpResponse struct {
 	*http.Response
 
 	transportCloser io.Closer
+	cancelFunc      context.CancelFunc
 
 	getContentOnce sync.Once
 	content        []byte
@@ -469,6 +489,10 @@ func (h *httpResponse) closeResources() {
 	if h.transportCloser != nil {
 		_ = h.transportCloser.Close()
 		h.transportCloser = nil
+	}
+	if h.cancelFunc != nil {
+		h.cancelFunc()
+		h.cancelFunc = nil
 	}
 }
 

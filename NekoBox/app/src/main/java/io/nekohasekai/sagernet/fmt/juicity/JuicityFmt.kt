@@ -32,6 +32,9 @@ fun parseJuicity(url: String): JuicityBean {
         link.queryParameter("allow_insecure")?.let {
             if (it == "1" || it == "true") allowInsecure = true
         }
+        link.queryParameter("congestion_control")?.takeIf { it.isNotBlank() }?.let {
+            congestionControl = it
+        }
     }
 }
 
@@ -42,6 +45,9 @@ fun JuicityBean.toUri(): String {
         .host(serverAddress ?: "")
         .port(serverPort ?: 443)
 
+    if (!congestionControl.isNullOrBlank()) {
+        builder.addQueryParameter("congestion_control", congestionControl)
+    }
     if (!sni.isNullOrBlank()) {
         builder.addQueryParameter("sni", sni)
     }
@@ -51,7 +57,7 @@ fun JuicityBean.toUri(): String {
             builder.addQueryParameter("pinned_certchain_sha256", it)
         }
     }
-    if (allowInsecure) {
+    if (java.lang.Boolean.TRUE == allowInsecure) {
         builder.addQueryParameter("allow_insecure", "1")
     }
     if (!name.isNullOrBlank()) {
@@ -69,29 +75,35 @@ fun buildSingBoxOutboundJuicityBean(bean: JuicityBean): Outbound_JuicityOptions 
         uuid = bean.uuid
         password = bean.password
 
+        val normalizedPin = bean.pinnedCertchainSha256
+            ?.takeIf { it.isNotBlank() }
+            ?.let { normalizePinnedCertChainHash(it.listByLineOrComma().firstOrNull()) }
+
         tls = SingBoxOptions.OutboundTLSOptions().apply {
             enabled = true
             if (!bean.sni.isNullOrBlank()) {
                 server_name = bean.sni
             }
-            val hasHash = !bean.pinnedCertchainSha256.isNullOrBlank()
-            insecure = bean.allowInsecure || DataStore.globalAllowInsecure || hasHash
+            val hasHash = !normalizedPin.isNullOrBlank()
+            insecure = java.lang.Boolean.TRUE == bean.allowInsecure || DataStore.globalAllowInsecure || hasHash
         }
 
-        val hash = bean.pinnedCertchainSha256
-        if (!hash.isNullOrBlank()) {
-            normalizePinnedCertChainHash(hash.listByLineOrComma().firstOrNull())?.let {
-                pin_cert_sha256 = it
-            }
+        if (!normalizedPin.isNullOrBlank()) {
+            pin_cert_sha256 = normalizedPin
         }
     }
 }
 
+private val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
+
 private fun normalizePinnedCertChainHash(rawHash: String?): String? {
-    val certChainHash = rawHash?.replace(":", "")?.takeIf { it.isNotEmpty() } ?: return null
+    val certChainHash = rawHash?.trim()?.replace(":", "")?.takeIf { it.isNotEmpty() } ?: return null
     return when {
-        certChainHash.length == 64 -> Base64.getUrlEncoder()
-            .encodeToString(certChainHash.chunked(2).map { chunk -> chunk.toInt(16).toByte() }.toByteArray())
+        certChainHash.length == 64 && HEX_64_REGEX.matches(certChainHash) -> runCatching {
+            Base64.getUrlEncoder()
+                .encodeToString(certChainHash.chunked(2).map { chunk -> chunk.toInt(16).toByte() }.toByteArray())
+        }.getOrNull()
+        certChainHash.length == 64 -> null
         else -> certChainHash.replace('/', '_').replace('+', '-')
     }
 }

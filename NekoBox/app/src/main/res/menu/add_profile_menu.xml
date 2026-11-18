@@ -67,6 +67,9 @@
                         android:id="@+id/action_new_juicity"
                         android:title="@string/action_juicity" />
                     <item
+                        android:id="@+id/action_new_masque"
+                        android:title="@string/action_masque" />
+                    <item
                         android:id="@+id/action_new_shadowtls"
                         android:title="@string/action_shadowtls" />
                     <item
@@ -132,6 +135,12 @@
                         <item
                             android:id="@+id/action_order_by_delay"
                             android:title="@string/group_order_by_delay" />
+                        <item
+                            android:id="@+id/action_order_by_download_speed"
+                            android:title="@string/group_order_by_download_speed" />
+                        <item
+                            android:id="@+id/action_order_by_upload_speed"
+                            android:title="@string/group_order_by_upload_speed" />
                     </group>
                     <group
                         android:id="@+id/group_layout_items"

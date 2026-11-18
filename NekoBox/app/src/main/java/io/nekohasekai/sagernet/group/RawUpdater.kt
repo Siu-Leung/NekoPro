@@ -785,6 +785,7 @@ object RawUpdater : GroupUpdater() {
                 trimmed.startsWith("hy2://") ||
                 trimmed.startsWith("tuic://") ||
                 trimmed.startsWith("juicity://") ||
+                trimmed.startsWith("masque://") ||
                 trimmed.startsWith("anytls://") ||
                 trimmed.startsWith("socks://") ||
                 trimmed.startsWith("socks5://") ||

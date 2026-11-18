@@ -296,7 +296,7 @@ fun buildSingBoxOutboundHysteriaBean(bean: HysteriaBean): SingBoxOptions.SingBox
                 recv_window_conn = bean.streamReceiveWindow!!.toLong()
             }
             if (bean.connectionReceiveWindow!! > 0) {
-                recv_window_conn = bean.connectionReceiveWindow!!.toLong()
+                recv_window = bean.connectionReceiveWindow!!.toLong()
             }
             tls = SingBoxOptions.OutboundTLSOptions().apply {
                 if (bean.sni!!.isNotBlank()) {
