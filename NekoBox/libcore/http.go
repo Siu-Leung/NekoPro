@@ -442,6 +442,7 @@ type httpResponse struct {
 	cancelFunc      context.CancelFunc
 
 	getContentOnce sync.Once
+	closeBodyOnce  sync.Once
 	content        []byte
 	contentError   error
 }
@@ -483,9 +484,11 @@ func (h *httpResponse) GetContentWithLimit(maxBytes int64) ([]byte, error) {
 // closeResources closes the response body and the underlying transport (if any).
 // It is safe to call multiple times.
 func (h *httpResponse) closeResources() {
-	if h.Body != nil {
-		_ = h.Body.Close()
-	}
+	h.closeBodyOnce.Do(func() {
+		if h.Body != nil {
+			_ = h.Body.Close()
+		}
+	})
 	if h.transportCloser != nil {
 		_ = h.transportCloser.Close()
 		h.transportCloser = nil

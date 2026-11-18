@@ -596,6 +596,8 @@
     <string name="masque_uri">CONNECT-IP URI Template</string>
     <string name="masque_remote_dns_resolve">Resolve DNS Remotely</string>
     <string name="xhttp_settings">XHTTP Settings</string>
+    <string name="xhttp_host">XHTTP Host</string>
+    <string name="xhttp_path">XHTTP Path</string>
     <string name="xhttp_mode">XHTTP Mode</string>
     <string name="xhttp_extra">XHTTP Extra (JSON)</string>
     <string name="pinned_certchain_sha256">Pinned Certificate SHA256</string>

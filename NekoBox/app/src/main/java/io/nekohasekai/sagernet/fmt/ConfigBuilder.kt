@@ -26,7 +26,7 @@ import io.nekohasekai.sagernet.fmt.masque.buildSingBoxOutboundMasqueBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.buildSingBoxOutboundStandardV2RayBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
-import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
+import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxEndpointWireGuardBean
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.security.ClashApiSecret
@@ -387,8 +387,8 @@ fun buildConfig(
                         is ShadowsocksBean ->
                             buildSingBoxOutboundShadowsocksBean(bean)
 
-                        is WireGuardBean ->
-                            buildSingBoxOutboundWireguardBean(bean)
+                        is WireGuardBean -> // sing-box 1.13+: WireGuard is an endpoint
+                            buildSingBoxEndpointWireGuardBean(bean)
 
                         is SSHBean ->
                             buildSingBoxOutboundSSHBean(bean)
@@ -479,7 +479,12 @@ fun buildConfig(
                     }
                 }
 
-                outbounds.add(currentOutbound)
+                if (currentOutbound is Endpoint) {
+                    if (endpoints == null) endpoints = mutableListOf()
+                    endpoints.add(currentOutbound)
+                } else {
+                    outbounds.add(currentOutbound)
+                }
                 chainOutbounds.add(currentOutbound)
                 pastOutbound = currentOutbound
                 pastEntity = proxyEntity
