@@ -246,6 +246,13 @@ fun buildConfig(
         // init routing object
         route = RouteOptions().apply {
             auto_detect_interface = true
+            // WireGuard is an endpoint since 1.13; without route.final the
+            // default outbound falls back to the first *outbound* (direct),
+            // so a WireGuard-only profile would leak all traffic direct.
+            // "proxy" resolves both to the selector/exit outbound and to a
+            // WireGuard endpoint tagged "proxy" (OutboundManager checks the
+            // endpoint manager for the final tag at start).
+            final_ = TAG_PROXY
             rules = mutableListOf()
             rule_set = mutableListOf()
         }
