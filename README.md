@@ -12,25 +12,40 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 主要特性
 
-- sing-box `1.14.1` 主内核
-- Mihomo `1.19.31` 协议桥接
-- VLESS-XHTTP（智能指纹分流）
-- Snell 原生集成（基于 `sing-snell`，全面支持 v4/v5/v6）
+- sing-box `1.13.19` 加固版主内核
+- Mihomo `1.19.34` 协议桥接（升级 `uTLS v1.9.0-alpha.1` Chrome 155+ 指纹）
+- **MASQUE (CONNECT-IP / CONNECT-UDP / Cloudflare WARP)** 协议集成
+- **VLESS-XHTTP + REALITY** 完整支持（兼容 `splithttp`、`mode` 与 `extra` XMUX 配置）
+- Snell 原生集成（基于 `sing-snell`，全面支持 v4/v5/v6 与连接池复用）
 - **Juicity 协议原生集成**（基于 `sing-juicity`）
-- **真·速度测试模块**（基于 `speedtest-go` 高性能多流测速）
+- **真·速度测试模块**（支持按下载/上传速度排序与一键重测失败节点）
 - **候选 UA 智能轮询回退链**（解决复杂订阅源对未知 UA 的阻断与降级）
 - IPv4 / IPv6 双栈
 - AnyTLS、VMess、VLESS、Trojan、Shadowsocks、ShadowTLS
-- Hysteria 1/2、TUIC、SSH、SOCKS、WireGuard 等
+- Hysteria 1/2、TUIC、SSH、SOCKS、WireGuard (Endpoint) 等
 - 带本地认证的 Clash API 与内置仪表板
 - Android 包名：`moe.nb4a.siu`
 
 ## 当前版本
 
-`Neko-Pro-1.1.4`
+`Neko-Pro-1.2.0`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.1.4)
-- 核心 APK：`NekoBox-Neko-Pro-1.1.4-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.0)
+- 核心 APK：`NekoBox-Neko-Pro-1.2.0-arm64-v8a.apk`
+
+### v1.2.0 改动日志 (2026-11-19)
+
+- **内核与新协议升级**
+  - **Mihomo 升级至 `1.19.34`**：同步上游 `uTLS v1.9.0-alpha.1`（Chrome 155+ 指纹）、DoH 拨号泄漏修复与 TCP MSS 优化。
+  - **新增 MASQUE (Cloudflare WARP) 协议**：完整支持 `masque://` 链接导入导出、Clash YAML 订阅解析、UI 编辑（支持 IPv4/IPv6 本地地址、UDP 转发开关、远端 DNS 解析、BBR 拥塞控制）与 Room 数据库 v9 自动迁移。
+  - **VLESS-XHTTP + REALITY 全链路打通**：补齐 XHTTP 出站的 `reality_public_key` / `reality_short_id`、`xhttp_mode`、`xhttp_extra`（XMUX JSON）及 `type=splithttp` 别名兼容；构建通用 `mihomo_adapter` 拨号与 DNS 桥接器，支持链式代理 `detour` 前置跳点并消除嵌入式明文 UDP DNS 泄漏。
+  - **WireGuard 迁移至 `endpoints` 架构**：适配 sing-box 1.13+ Endpoint 规范，并显式指定 `route.final = proxy` 防止单 WireGuard 节点直连泄漏。
+  - **Snell 连接池复用修复**：修正 `snell/outbound.go` 旁路 `sing-snell` `Reuse` 连接池的问题，补全 v6 `mode` 配置与标准分享链接导出，修复 `v6_test.go` 单测编译。
+- **测速闭环与全量审计修复（Closes [#3](https://github.com/Siu-Leung/NekoPro/issues/3)）**
+  - **按下载/上传速度排序 & 一键重测失败节点**：分组排序菜单新增“以下载速度 / 以上传速度”降序排列，右上角菜单新增“一键重测失败节点”。
+  - **Cloudflare 200M 限时测速结算修复**：10 秒测试窗口到期时只要已有传输流量即按实测时长正常结算吞吐速率，不再将 `<160 Mbps` 节点误判为超时失败。
+  - **HTTP 客户端提前 `cancel()` 修复**：修复 `libcore/http.go` 在读取响应体前提前取消上下文导致大订阅或规则集下载断流的问题，并保证错误响应体关闭幂等。
+  - **UI 崩溃与路由规则修复**：修复“关于/设置”页旋转屏幕 `FragmentManager` 崩溃、测速最小化切页崩溃、自定义路由规则同填域名与 IP 时清空 `geosite:` 及正则表达式被强制转小写等问题。
 
 ### v1.1.4 改动日志 (2026-09-17)
 

@@ -27,7 +27,7 @@
 
 # Uncomment next line for release builds to enable obfuscation
 # -dontobfuscate
--keepattributes SourceFile
+-keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod,*Annotation*
 
 -dontwarn java.beans.BeanInfo
 -dontwarn java.beans.FeatureDescriptor

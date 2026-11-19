@@ -84,17 +84,21 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (url?.startsWith("http://127.0.0.1:9090/ui") == true) {
-                    // A previous Yacd session may have persisted an empty
-                    // secret in localStorage. Remove only that Yacd state once
-                    // per WebView session, then reload with our authenticated
-                    // bootstrap URL.
+                    val expectedSecret = ClashApiSecret.value
                     view?.evaluateJavascript(
                         """(() => {
-                            const marker = '__neko_dashboard_reset_v1';
-                            if (sessionStorage.getItem(marker) === '1') return;
-                            sessionStorage.setItem(marker, '1');
-                            localStorage.removeItem('yacd.metacubex.one');
-                            location.reload();
+                            try {
+                                const key = 'yacd.metacubex.one';
+                                const raw = localStorage.getItem(key);
+                                if (!raw) return;
+                                const state = JSON.parse(raw);
+                                const backends = state && state.clashAPIConfigs;
+                                if (Array.isArray(backends) && backends.length > 0 && !backends[0].secret) {
+                                    backends[0].secret = '$expectedSecret';
+                                    localStorage.setItem(key, JSON.stringify(state));
+                                    location.reload();
+                                }
+                            } catch (_) {}
                         })()""".trimIndent(),
                         null,
                     )
@@ -123,11 +127,20 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                     .show()
             }
             R.id.close -> {
-                mWebView.onPause()
-                mWebView.removeAllViews()
-                mWebView.destroy()
+                mWebView.loadUrl("about:blank")
             }
         }
         return true
+    }
+
+    override fun onDestroyView() {
+        if (::mWebView.isInitialized) {
+            mWebView.onPause()
+            mWebView.stopLoading()
+            mWebView.loadUrl("about:blank")
+            mWebView.removeAllViews()
+            mWebView.destroy()
+        }
+        super.onDestroyView()
     }
 }

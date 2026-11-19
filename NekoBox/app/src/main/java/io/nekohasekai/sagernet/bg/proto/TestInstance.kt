@@ -46,8 +46,8 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
 
     override suspend fun loadConfig() {
         // don't call destroyAllJsi here
-        if (BuildConfig.DEBUG) Logs.d(config.config)
-        box = Libcore.newSingBoxInstance(config.config, LocalResolverImpl)
+        if (BuildConfig.DEBUG) Logs.d("TestInstance loaded for ${profile.displayName()}")
+        box = Libcore.newTestSingBoxInstance(config.config, LocalResolverImpl)
     }
 
 }

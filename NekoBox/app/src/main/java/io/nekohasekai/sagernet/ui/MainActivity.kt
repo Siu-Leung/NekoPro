@@ -82,6 +82,10 @@ class MainActivity : ThemedActivity(),
 
         if (savedInstanceState == null) {
             displayFragmentWithId(R.id.nav_configuration)
+        } else {
+            supportFragmentManager.findFragmentById(R.id.fragment_holder)?.let { current ->
+                updateBottomBarVisibility(current)
+            }
         }
         onBackPressedDispatcher.addCallback {
             if (supportFragmentManager.findFragmentById(R.id.fragment_holder) is ConfigurationFragment) {
@@ -347,19 +351,27 @@ class MainActivity : ThemedActivity(),
     }
 
 
-    @SuppressLint("CommitTransaction")
-    fun displayFragment(fragment: ToolbarFragment) {
-        if (fragment is ConfigurationFragment) {
+    private fun updateBottomBarVisibility(fragment: androidx.fragment.app.Fragment) {
+        if (fragment is AboutFragment) {
+            binding.stats.allowShow = false
+            binding.stats.performHide()
+            binding.fab.hide()
+        } else if (fragment is ConfigurationFragment || DataStore.showBottomBar) {
             binding.stats.allowShow = true
             if (DataStore.serviceState == BaseService.State.Connected) {
                 binding.stats.performShow()
             }
             binding.fab.show()
-        } else if (fragment is AboutFragment || !DataStore.showBottomBar) {
+        } else {
             binding.stats.allowShow = false
             binding.stats.performHide()
             binding.fab.hide()
         }
+    }
+
+    @SuppressLint("CommitTransaction")
+    fun displayFragment(fragment: ToolbarFragment) {
+        updateBottomBarVisibility(fragment)
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_holder, fragment)
             .commitAllowingStateLoss()

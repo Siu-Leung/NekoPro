@@ -30,6 +30,7 @@ class MASQUESettingsActivity : ProfileSettingsActivity<MASQUEBean>() {
     private val congestionController = pbm.add(PreferenceBinding(Type.Text, "congestionController"))
     private val allowInsecure = pbm.add(PreferenceBinding(Type.Bool, "allowInsecure"))
     private val remoteDnsResolve = pbm.add(PreferenceBinding(Type.Bool, "remoteDnsResolve"))
+    private val udp = pbm.add(PreferenceBinding(Type.Bool, "udp"))
 
     override fun MASQUEBean.init() {
         pbm.writeToCacheAll(this)

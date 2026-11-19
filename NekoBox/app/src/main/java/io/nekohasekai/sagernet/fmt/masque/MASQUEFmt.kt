@@ -49,6 +49,9 @@ fun parseMasque(url: String): MASQUEBean {
         link.queryParameter("remote_dns_resolve")?.let {
             remoteDnsResolve = it == "1" || it == "true"
         }
+        link.queryParameter("udp")?.let {
+            udp = it != "0" && !it.equals("false", ignoreCase = true)
+        }
     }
 }
 
@@ -91,6 +94,9 @@ fun MASQUEBean.toUri(): String {
     if (remoteDnsResolve == true) {
         builder.addQueryParameter("remote_dns_resolve", "1")
     }
+    if (udp == false) {
+        builder.addQueryParameter("udp", "0")
+    }
     if (!name.isNullOrBlank()) {
         builder.encodedFragment(name!!.urlSafe())
     }
@@ -109,7 +115,7 @@ fun buildSingBoxOutboundMasqueBean(bean: MASQUEBean): SingBoxOptions.Outbound_Ma
         uri = bean.uri?.takeIf { it.isNotBlank() }
         server_name = bean.sni?.takeIf { it.isNotBlank() }
         mtu = bean.mtu ?: 1280
-        udp = true
+        udp = bean.udp != false
         network = bean.network?.takeIf { it.isNotBlank() } ?: "h3"
         congestion_controller = bean.congestionController?.takeIf { it.isNotBlank() }
         skip_cert_verify = bean.allowInsecure == true || DataStore.globalAllowInsecure

@@ -114,6 +114,9 @@
                 android:id="@+id/action_speed_test_group"
                 android:title="@string/speed_test_group" />
             <item
+                android:id="@+id/action_speed_test_retry_failed"
+                android:title="@string/speed_test_retry_failed" />
+            <item
                 android:id="@+id/action_connection_test_clear_results"
                 android:title="@string/connection_test_clear_results" />
             <item

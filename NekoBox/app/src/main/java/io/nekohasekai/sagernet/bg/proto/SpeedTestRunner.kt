@@ -110,7 +110,7 @@ class AndroidSpeedTestSession(profile: ProxyEntity) : BoxInstance(profile), Spee
         init()
         launchExternal()
         if (processes.processCount > 0) delay(500)
-        if (BuildConfig.DEBUG) Logs.d(config.config)
+        if (BuildConfig.DEBUG) Logs.d("SpeedTestSession starting for ${profile.displayName()}")
 
         val session = Libcore.newSpeedTestSession(
             profile.id.toString(),

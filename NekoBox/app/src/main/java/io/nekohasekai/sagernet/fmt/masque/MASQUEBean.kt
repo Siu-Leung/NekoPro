@@ -18,6 +18,7 @@ class MASQUEBean : AbstractBean() {
     @JvmField var congestionController: String? = null
     @JvmField var allowInsecure: Boolean? = null
     @JvmField var remoteDnsResolve: Boolean? = null
+    @JvmField var udp: Boolean? = null
 
     override fun canTCPing(): Boolean = false
 
@@ -35,10 +36,11 @@ class MASQUEBean : AbstractBean() {
         if (congestionController.isNullOrBlank()) congestionController = "bbr"
         if (allowInsecure == null) allowInsecure = false
         if (remoteDnsResolve == null) remoteDnsResolve = false
+        if (udp == null) udp = true
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(1)
+        output.writeInt(2)
         super.serialize(output)
         output.writeString(privateKey)
         output.writeString(publicKey)
@@ -51,6 +53,7 @@ class MASQUEBean : AbstractBean() {
         output.writeString(congestionController)
         output.writeBoolean(allowInsecure == true)
         output.writeBoolean(remoteDnsResolve == true)
+        output.writeBoolean(udp != false)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -69,6 +72,7 @@ class MASQUEBean : AbstractBean() {
         if (version >= 1) {
             remoteDnsResolve = input.readBoolean()
         }
+        udp = if (version >= 2) input.readBoolean() else true
     }
 
     override fun clone(): MASQUEBean =

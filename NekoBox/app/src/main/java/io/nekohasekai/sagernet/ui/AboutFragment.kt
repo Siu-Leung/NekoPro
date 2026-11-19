@@ -43,7 +43,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         ViewCompat.setOnApplyWindowInsetsListener(view, ListListener)
         toolbar.setTitle(R.string.menu_about)
 
-        parentFragmentManager.beginTransaction()
+        childFragmentManager.beginTransaction()
             .replace(R.id.about_fragment_holder, AboutContent())
             .commitAllowingStateLoss()
 
@@ -199,13 +199,11 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                             haveUpdate && releaseName != BuildConfig.VERSION_NAME
                         }
                     } else {
-                        // User: 1.4.0 Preview: pre-1.4.0 -> No update
-                        // User: 1.4.0 Preview: pre-1.4.1 -> Update
-                        // User: 1.4.0 Stable: 1.4.0 -> No update
-                        // User: 1.4.0 Stable: 1.4.1 -> Update
-                        haveUpdate && !releaseName.contains(BuildConfig.VERSION_NAME)
+                        val currentSemver = BuildConfig.VERSION_NAME.removePrefix("Neko-Pro-").removePrefix("v")
+                        haveUpdate && !releaseName.contains(BuildConfig.VERSION_NAME) && !releaseName.contains(currentSemver)
                     }
                     runOnMainDispatcher {
+                        if (!isAdded) return@runOnMainDispatcher
                         if (haveUpdate) {
                             val context = requireContext()
                             MaterialAlertDialogBuilder(context)

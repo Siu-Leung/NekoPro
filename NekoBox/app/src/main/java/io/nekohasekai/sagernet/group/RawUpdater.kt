@@ -51,9 +51,20 @@ object RawUpdater : GroupUpdater() {
         val link = subscription.link
         var proxies: List<AbstractBean>
         if (link!!.startsWith("content://")) {
-            val contentText = app.contentResolver.openInputStream(link!!.toUri())
-                ?.bufferedReader()
-                ?.readText()
+            val maxChars = 16 * 1024 * 1024
+            val contentText = app.contentResolver.openInputStream(link!!.toUri())?.use { input ->
+                val reader = input.bufferedReader()
+                val sb = StringBuilder()
+                val buf = CharArray(8192)
+                var read: Int
+                while (reader.read(buf).also { read = it } != -1) {
+                    if (sb.length + read > maxChars) {
+                        error("Subscription file exceeds 16 MB limit")
+                    }
+                    sb.append(buf, 0, read)
+                }
+                sb.toString()
+            }
 
             proxies = contentText?.let { parseRaw(contentText) }
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
@@ -66,7 +77,7 @@ object RawUpdater : GroupUpdater() {
                 add("clash-meta")
                 add("v2rayN/7.8.2")
                 add("sing-box/1.14.0")
-            }
+            }.distinct()
 
             var lastError: Throwable? = null
             var lastUserinfo = ""
@@ -433,9 +444,30 @@ object RawUpdater : GroupUpdater() {
                                     }
 
                                     "network" -> {
-                                        when (opt.value) {
+                                        when (opt.value?.toString()?.lowercase()) {
                                             "h2", "http" -> bean.type = "http"
-                                            "ws", "grpc" -> bean.type = opt.value as String
+                                            "ws", "grpc" -> bean.type = opt.value.toString().lowercase()
+                                            "xhttp", "splithttp" -> bean.type = "xhttp"
+                                        }
+                                    }
+
+                                    "xhttp-opts", "splithttp-opts" -> (opt.value as? Map<String, Any?>)?.also { xhttpOpts ->
+                                        bean.type = "xhttp"
+                                        for (xOpt in xhttpOpts) {
+                                            when (xOpt.key.lowercase()) {
+                                                "path" -> bean.path = xOpt.value?.toString()
+                                                "host" -> bean.host = xOpt.value?.toString()
+                                                "mode" -> bean.xhttpMode = xOpt.value?.toString()
+                                                "extra" -> {
+                                                    val v = xOpt.value
+                                                    bean.xhttpExtra = if (v is Map<*, *>) org.json.JSONObject(v).toString() else v?.toString()
+                                                }
+                                                "headers" -> (xOpt.value as? Map<Any, Any?>)?.forEach { (k, v) ->
+                                                    if (k.toString().equals("host", ignoreCase = true) && bean.host.isNullOrBlank()) {
+                                                        bean.host = v?.toString()
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -547,15 +579,61 @@ object RawUpdater : GroupUpdater() {
                                 when (opt.key.replace("_", "-")) {
                                     "name" -> bean.name = opt.value.toString()
                                     "server" -> bean.serverAddress = opt.value.toString().trim().removeSurrounding("[", "]")
-                                    "port" -> bean.serverPort = opt.value.toString().toInt()
+                                    "port" -> bean.serverPort = opt.value.toString().toIntOrNull() ?: 443
                                     "psk" -> bean.psk = opt.value.toString()
                                     "version" -> bean.version = opt.value.toString().toIntOrNull() ?: 4
+                                    "mode" -> bean.mode = opt.value.toString()
                                     "obfs-opts" -> {
                                         (opt.value as? Map<String, Any?>)?.let { obfs ->
                                             bean.obfsMode = obfs["mode"]?.toString() ?: "none"
                                             bean.obfsHost = obfs["host"]?.toString() ?: ""
                                         }
                                     }
+                                }
+                            }
+                            if (bean.version != null && bean.version !in 4..6) continue
+                            proxies.add(bean)
+                        }
+
+                        "juicity" -> {
+                            val bean = io.nekohasekai.sagernet.fmt.juicity.JuicityBean()
+                            for (opt in proxy) {
+                                if (opt.value == null) continue
+                                when (opt.key.replace("_", "-")) {
+                                    "name" -> bean.name = opt.value.toString()
+                                    "server" -> bean.serverAddress = opt.value.toString().trim().removeSurrounding("[", "]")
+                                    "port" -> bean.serverPort = opt.value.toString().toIntOrNull() ?: 443
+                                    "uuid" -> bean.uuid = opt.value.toString()
+                                    "password" -> bean.password = opt.value.toString()
+                                    "sni", "servername" -> bean.sni = opt.value.toString()
+                                    "skip-cert-verify" -> bean.allowInsecure = opt.value.toString().toBoolean()
+                                    "congestion-control", "congestion-controller" -> bean.congestionControl = opt.value.toString()
+                                    "pinned-certchain-sha256" -> bean.pinnedCertChainSha256 = opt.value.toString()
+                                }
+                            }
+                            proxies.add(bean)
+                        }
+
+                        "masque" -> {
+                            val bean = io.nekohasekai.sagernet.fmt.masque.MASQUEBean()
+                            for (opt in proxy) {
+                                if (opt.value == null) continue
+                                when (opt.key.replace("_", "-")) {
+                                    "name" -> bean.name = opt.value.toString()
+                                    "server" -> bean.serverAddress = opt.value.toString().trim().removeSurrounding("[", "]")
+                                    "port" -> bean.serverPort = opt.value.toString().toIntOrNull() ?: 443
+                                    "private-key" -> bean.privateKey = opt.value.toString()
+                                    "public-key", "endpoint-public-key" -> bean.publicKey = opt.value.toString()
+                                    "ip", "local-address" -> bean.localAddress = opt.value.toString()
+                                    "ipv6", "local-address-v6" -> bean.localAddressV6 = opt.value.toString()
+                                    "uri" -> bean.uri = opt.value.toString()
+                                    "sni", "servername" -> bean.sni = opt.value.toString()
+                                    "mtu" -> bean.mtu = opt.value.toString().toIntOrNull() ?: 1280
+                                    "udp" -> bean.udp = opt.value.toString().toBoolean()
+                                    "network" -> bean.network = opt.value.toString()
+                                    "congestion-controller", "congestion-control" -> bean.congestionController = opt.value.toString()
+                                    "skip-cert-verify" -> bean.allowInsecure = opt.value.toString().toBoolean()
+                                    "remote-dns-resolve" -> bean.remoteDnsResolve = opt.value.toString().toBoolean()
                                 }
                             }
                             proxies.add(bean)

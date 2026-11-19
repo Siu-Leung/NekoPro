@@ -66,6 +66,11 @@
             app:title="@string/tuic_congestion_controller"
             app:useSimpleSummaryProvider="true" />
         <SwitchPreference
+            app:defaultValue="true"
+            app:icon="@drawable/ic_baseline_compare_arrows_24"
+            app:key="udp"
+            app:title="@string/masque_udp" />
+        <SwitchPreference
             app:icon="@drawable/ic_action_dns"
             app:key="remoteDnsResolve"
             app:title="@string/masque_remote_dns_resolve" />

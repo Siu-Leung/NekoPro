@@ -64,10 +64,6 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Start">
-        <meta-data
-            android:name="android.app.shortcuts"
-            android:resource="@xml/shortcuts" />
-
         <activity
             android:name="io.nekohasekai.sagernet.ui.BlankActivity"
             android:configChanges="uiMode" />
@@ -221,7 +217,6 @@
             android:name=".QuickToggleShortcut"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:permission="${applicationId}.SERVICE"
             android:label="@string/quick_toggle"
             android:launchMode="singleTask"
             android:process=":bg"

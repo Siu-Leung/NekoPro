@@ -357,6 +357,8 @@
     <string name="group_order_origin">原始</string>
     <string name="group_order_by_name">以名称</string>
     <string name="group_order_by_delay">以延时</string>
+    <string name="group_order_by_download_speed">以下载速度</string>
+    <string name="group_order_by_upload_speed">以上传速度</string>
     <string name="sort_and_layout">排序与布局</string>
     <string name="layout_mode">布局模式</string>
     <string name="layout_single">单列</string>
@@ -514,6 +516,17 @@
     <string name="speed_test_timeout_invalid">请输入大于零毫秒的超时时间</string>
     <string name="speed_test_url_invalid">请输入有效的 HTTP 或 HTTPS URL</string>
     <string name="speed_test_group">速度测试本组</string>
+    <string name="speed_test_retry_failed">一键重测失败节点</string>
+    <string name="speed_test_no_failed_nodes">当前分组没有需要重测的失败节点</string>
+    <string name="masque_local_address_v6">本地地址 (IPv6)</string>
+    <string name="masque_uri">CONNECT-IP URI 模板</string>
+    <string name="masque_udp">启用 UDP 转发</string>
+    <string name="masque_remote_dns_resolve">远端解析 DNS</string>
+    <string name="xhttp_settings">XHTTP 设置</string>
+    <string name="xhttp_host">XHTTP 域名 (Host)</string>
+    <string name="xhttp_path">XHTTP 路径 (Path)</string>
+    <string name="xhttp_mode">XHTTP 模式</string>
+    <string name="xhttp_extra">XHTTP 扩展参数 (Extra JSON)</string>
     <string name="speed_test_confirm_title">运行速度测试？</string>
     <string name="speed_test_confirm_message">速度测试可能消耗大量流量。各配置将依次通过其自身代理进行测试。</string>
     <string name="speed_test_stage_pending">等待中</string>

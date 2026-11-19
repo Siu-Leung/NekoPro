@@ -114,6 +114,23 @@ abstract class GroupUpdater {
                 is HysteriaBean -> {
                     if (sni.isNullOrBlank()) sni = bean.serverAddress
                 }
+                is io.nekohasekai.sagernet.fmt.tuic.TuicBean -> {
+                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                }
+                is io.nekohasekai.sagernet.fmt.juicity.JuicityBean -> {
+                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                }
+                is io.nekohasekai.sagernet.fmt.masque.MASQUEBean -> {
+                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                }
+                is moe.matsuri.nb4a.proxy.anytls.AnyTLSBean -> {
+                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                }
+                is moe.matsuri.nb4a.proxy.snell.SnellBean -> {
+                    if (!obfsMode.isNullOrBlank() && obfsMode != "none" && obfsHost.isNullOrBlank()) {
+                        obfsHost = bean.serverAddress
+                    }
+                }
             }
 
             bean.serverAddress = address

@@ -525,18 +525,24 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_connection_test_clear_results -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
-                    val toClear = mutableListOf<ProxyEntity>()
-                    if (profiles.isNotEmpty()) for (profile in profiles) {
-                        if (profile.status != 0) {
-                            profile.status = 0
-                            profile.ping = 0
-                            profile.error = null
-                            toClear.add(profile)
+                    val groupId = DataStore.currentGroupId()
+                    SagerDatabase.proxyDao.clearTestResults(groupId)
+                    onMainDispatcher {
+                        adapter.groupFragments.values.forEach { fragment ->
+                            fragment.adapter?.apply {
+                                configurationList.values.forEach { profile ->
+                                    if (profile.groupId == groupId) {
+                                        profile.status = 0
+                                        profile.ping = 0
+                                        profile.error = null
+                                        profile.speedTestMode = ""
+                                        profile.speedTestDownloadBitsPerSecond = 0L
+                                        profile.speedTestUploadBitsPerSecond = 0L
+                                    }
+                                }
+                                notifyDataSetChanged()
+                            }
                         }
-                    }
-                    if (toClear.isNotEmpty()) {
-                        ProfileManager.updateProfile(toClear)
                     }
                 }
             }
@@ -546,7 +552,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
-                        if (profile.status != 0 && profile.status != 1) {
+                        val hasSpeedResult = profile.speedTestDownloadBitsPerSecond > 0L || profile.speedTestUploadBitsPerSecond > 0L
+                        if (profile.status != 0 && profile.status != 1 && !hasSpeedResult) {
                             toClear.add(profile)
                         }
                     }
@@ -643,6 +650,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_speed_test_group -> {
                 confirmSpeedTest()
             }
+
+            R.id.action_speed_test_retry_failed -> {
+                retryFailedSpeedTest()
+            }
         }
         return true
     }
@@ -657,13 +668,47 @@ class ConfigurationFragment @JvmOverloads constructor(
             .show()
     }
 
-    fun speedTest(targetProfile: ProxyEntity? = null) {
+    private fun retryFailedSpeedTest() {
+        if (DataStore.runningTest) return
+        val group = DataStore.currentGroup()
+        runOnDefaultDispatcher {
+            val allProfiles = SagerDatabase.proxyDao.getByGroup(group.id)
+            val groupHasSpeedResults = allProfiles.any {
+                it.speedTestDownloadBitsPerSecond > 0L || it.speedTestUploadBitsPerSecond > 0L
+            }
+            val failedProfiles = allProfiles.filter { p ->
+                val isErrorStatus = p.status != 0 && p.status != 1
+                val isFailedSpeed = groupHasSpeedResults &&
+                    p.speedTestDownloadBitsPerSecond <= 0L &&
+                    p.speedTestUploadBitsPerSecond <= 0L
+                isErrorStatus || isFailedSpeed
+            }
+            onMainDispatcher {
+                if (!isAdded) return@onMainDispatcher
+                if (failedProfiles.isEmpty()) {
+                    android.widget.Toast.makeText(
+                        requireContext(),
+                        R.string.speed_test_no_failed_nodes,
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    speedTest(targetProfiles = failedProfiles)
+                }
+            }
+        }
+    }
+
+    fun speedTest(targetProfile: ProxyEntity? = null, targetProfiles: List<ProxyEntity>? = null) {
         if (!isAdded) return
         val testToken = DataStore.acquireTestToken()
         if (testToken == 0) return
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
-        val titleText = if (isSingle) targetProfile!!.displayName() else getString(R.string.speed_test_group)
+        val titleText = when {
+            isSingle -> targetProfile!!.displayName()
+            targetProfiles != null -> getString(R.string.speed_test_retry_failed)
+            else -> getString(R.string.speed_test_group)
+        }
 
         val binding = LayoutProgressListBinding.inflate(layoutInflater)
         binding.progressCircular.isGone = true
@@ -714,7 +759,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         speedTestJob = runOnDefaultDispatcher {
             try {
-                val profiles = if (targetProfile != null) listOf(targetProfile) else SagerDatabase.proxyDao.getByGroup(group.id)
+                val profiles = targetProfiles ?: if (targetProfile != null) listOf(targetProfile) else SagerDatabase.proxyDao.getByGroup(group.id)
                 if (profiles.isEmpty()) {
                     onMainDispatcher {
                         dialog.dismiss()
@@ -749,7 +794,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                             }
                         }
                     } else if (sample.done && sample.error.isNotBlank()) {
-                        // 测速失败时如果原本已有延迟（status==1），不要破坏其可用状态，仅在需要时刷新
+                        // 测速失败时如果原本已有延迟（status==1），不要破坏其可用状态，持久化失败状态以便一键重测
+                        SagerDatabase.proxyDao.getById(sample.profileId)?.let { dbProfile ->
+                            if (dbProfile.status != 1) {
+                                dbProfile.status = 2
+                                dbProfile.error = sample.error
+                                SagerDatabase.proxyDao.updateProxy(dbProfile)
+                            }
+                        }
                         runOnMainDispatcher {
                             adapter.groupFragments.values.forEach { fragment ->
                                 fragment.adapter?.configurationList?.get(sample.profileId)?.let { p ->
@@ -1541,6 +1593,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profile.speedTestMode = outcome.mode
                 profile.speedTestDownloadBitsPerSecond = outcome.downloadBitsPerSecond
                 profile.speedTestUploadBitsPerSecond = outcome.uploadBitsPerSecond
+                if (profile.status != 1) {
+                    profile.status = 0
+                    profile.error = null
+                }
                 val index = configurationIdList.indexOf(profileId)
                 if (index >= 0) notifyItemChanged(index)
             }
@@ -1933,7 +1989,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (proxyEntity.status == 3) {
                     val err = proxyEntity.error ?: "<?>"
                     val msg = Protocols.genFriendlyMsg(err)
-                    profileStatus.text = if (msg != err) msg else getString(R.string.unavailable)
+                    val baseErr = if (msg != err) msg else getString(R.string.unavailable)
+                    profileStatus.text = if (stText != null) "$baseErr
+$stText" else baseErr
                     profileStatus.setOnClickListener {
                         alert(err).tryToShow()
                     }

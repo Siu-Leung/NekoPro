@@ -594,6 +594,7 @@
     <string name="action_masque" translatable="false">MASQUE (WARP)</string>
     <string name="masque_local_address_v6">Local Address (IPv6)</string>
     <string name="masque_uri">CONNECT-IP URI Template</string>
+    <string name="masque_udp">Enable UDP Relay</string>
     <string name="masque_remote_dns_resolve">Resolve DNS Remotely</string>
     <string name="xhttp_settings">XHTTP Settings</string>
     <string name="xhttp_host">XHTTP Host</string>
@@ -611,6 +612,8 @@
     <string name="speed_test_timeout_invalid">Enter a timeout greater than zero milliseconds</string>
     <string name="speed_test_url_invalid">Enter a valid HTTP or HTTPS URL</string>
     <string name="speed_test_group">Speed test this group</string>
+    <string name="speed_test_retry_failed">Retry failed speed test nodes</string>
+    <string name="speed_test_no_failed_nodes">No failed or untested nodes to retry</string>
     <string name="speed_test_confirm_title">Run speed test?</string>
     <string name="speed_test_confirm_message">Speed testing can use significant data. Profiles are tested one at a time through their own proxy.</string>
     <string name="speed_test_stage_pending">Waiting</string>
