@@ -21,6 +21,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/experimental/v2rayapi"
 	"github.com/sagernet/sing-box/protocol/group"
+	"github.com/sagernet/sing-box/protocol/mihomo_adapter"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/common/dialer"
@@ -156,6 +157,9 @@ func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b 
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
+	// never let a temporary test instance take over the process-global
+	// mihomo protect/DNS hooks from the main instance
+	ctx = mihomo_adapter.ContextWithTestInstance(ctx)
 
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
@@ -334,16 +338,21 @@ func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker)
 	return client
 }
 
-var protectCloser io.Closer
+var (
+	protectMu     sync.Mutex
+	protectCloser io.Closer
+)
 
 func goServeProtect(start bool) {
+	protectMu.Lock()
+	defer protectMu.Unlock()
 	if protectCloser != nil {
-		protectCloser.Close()
+		_ = protectCloser.Close()
 		protectCloser = nil
 	}
 	if start {
 		closer, err := protect_server.ServeProtect("protect_path", false, 0, func(fd int) {
-			intfBox.AutoDetectInterfaceControl(int32(fd))
+			_ = intfBox.AutoDetectInterfaceControl(int32(fd))
 		})
 		if err != nil {
 			log.Println("goServeProtect error:", err)

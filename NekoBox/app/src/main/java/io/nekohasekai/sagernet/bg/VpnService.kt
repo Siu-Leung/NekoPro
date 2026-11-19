@@ -77,6 +77,9 @@ class VpnService : BaseVpnService(),
                 )
             } else return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
         }
+        // We were started via startForegroundService(): we must call startForeground()
+        // before stopping, otherwise Android 8+ crashes the process.
+        if (data.notification == null) data.notification = createNotification("")
         stopRunner()
         return Service.START_NOT_STICKY
     }

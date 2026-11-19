@@ -25,13 +25,14 @@ class ShadowsocksSettingsActivity : ProfileSettingsActivity<ShadowsocksBean>() {
         pbm.add(PreferenceBinding(Type.Text, "pluginName").apply { disable = true })
     private val pluginConfig =
         pbm.add(PreferenceBinding(Type.Text, "pluginConfig").apply { disable = true })
-    private val sUoT = pbm.add(PreferenceBinding(Type.Bool, "sUoT"))
+    private val sUoT = pbm.add(PreferenceBinding(Type.Bool, "sUoT").apply { disable = true })
 
     override fun ShadowsocksBean.init() {
         pbm.writeToCacheAll(this)
 
         DataStore.profileCacheStore.putString("pluginName", plugin!!.substringBefore(";"))
-        DataStore.profileCacheStore.putString("pluginConfig", plugin!!.substringAfter(";"))
+        DataStore.profileCacheStore.putString("pluginConfig", plugin!!.substringAfter(";", ""))
+        DataStore.profileCacheStore.putBoolean("sUoT", sUoT == true)
     }
 
     override fun ShadowsocksBean.serialize() {
@@ -40,6 +41,7 @@ class ShadowsocksSettingsActivity : ProfileSettingsActivity<ShadowsocksBean>() {
         val pn = pluginName.readStringFromCache()
         val pc = pluginConfig.readStringFromCache()
         plugin = if (pn.isNotBlank()) "$pn;$pc" else ""
+        sUoT = DataStore.profileCacheStore.getBoolean("sUoT")
     }
 
     override fun PreferenceFragmentCompat.createPreferences(

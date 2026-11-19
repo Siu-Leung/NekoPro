@@ -30,14 +30,17 @@ class WireGuardBean : AbstractBean() {
         output.writeInt(2); super.serialize(output)
         output.writeString(localAddress); output.writeString(privateKey)
         output.writeString(peerPublicKey); output.writeString(peerPreSharedKey)
-        output.writeInt(mtu!!); output.writeString(reserved)
+        output.writeInt(mtu ?: 1420); output.writeString(reserved)
     }
 
     override fun deserialize(input: ByteBufferInput) {
         val version = input.readInt(); super.deserialize(input)
         localAddress = input.readString(); privateKey = input.readString()
         peerPublicKey = input.readString(); peerPreSharedKey = input.readString()
-        mtu = input.readInt(); reserved = input.readString()
+        mtu = input.readInt()
+        if (version >= 2) {
+            reserved = input.readString()
+        }
     }
 
     override fun clone(): WireGuardBean =

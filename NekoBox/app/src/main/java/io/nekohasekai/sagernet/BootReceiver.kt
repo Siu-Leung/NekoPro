@@ -23,6 +23,14 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        val action = intent.action
+        if (action != Intent.ACTION_BOOT_COMPLETED &&
+            action != Intent.ACTION_LOCKED_BOOT_COMPLETED &&
+            action != Intent.ACTION_MY_PACKAGE_REPLACED
+        ) {
+            return
+        }
+
         runOnDefaultDispatcher {
             SubscriptionUpdater.reconfigureUpdater()
         }
@@ -32,9 +40,11 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        val doStart = when (intent.action) {
+        val doStart = when (action) {
             Intent.ACTION_LOCKED_BOOT_COMPLETED -> false // DataStore.directBootAware
-            else -> Build.VERSION.SDK_INT < 24 || SagerNet.user.isUserUnlocked
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED ->
+                Build.VERSION.SDK_INT < 24 || SagerNet.user.isUserUnlocked
+            else -> false
         } && DataStore.selectedProxy > 0
 
         if (doStart) SagerNet.startService()

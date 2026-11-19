@@ -2,17 +2,18 @@ package io.nekohasekai.sagernet.fmt.juicity
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.linkBuilder
+import io.nekohasekai.sagernet.ktx.redactLink
 import io.nekohasekai.sagernet.ktx.toLink
 import io.nekohasekai.sagernet.ktx.urlSafe
 import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.SingBoxOptions.Outbound_JuicityOptions
 import moe.matsuri.nb4a.utils.listByLineOrComma
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import java.util.Base64
+import okio.ByteString.Companion.toByteString
 
 fun parseJuicity(url: String): JuicityBean {
     val link = url.replace("juicity://", "https://").toHttpUrlOrNull() ?: error(
-        "invalid juicity link $url"
+        "invalid juicity link ${url.redactLink()}"
     )
     return JuicityBean().apply {
         name = link.fragment
@@ -100,8 +101,9 @@ private fun normalizePinnedCertChainHash(rawHash: String?): String? {
     val certChainHash = rawHash?.trim()?.replace(":", "")?.takeIf { it.isNotEmpty() } ?: return null
     return when {
         certChainHash.length == 64 && HEX_64_REGEX.matches(certChainHash) -> runCatching {
-            Base64.getUrlEncoder()
-                .encodeToString(certChainHash.chunked(2).map { chunk -> chunk.toInt(16).toByte() }.toByteArray())
+            // java.util.Base64 is unavailable on API < 26; okio is portable.
+            certChainHash.chunked(2).map { chunk -> chunk.toInt(16).toByte() }.toByteArray()
+                .toByteString().base64Url()
         }.getOrNull()
         certChainHash.length == 64 -> null
         else -> certChainHash.replace('/', '_').replace('+', '-')

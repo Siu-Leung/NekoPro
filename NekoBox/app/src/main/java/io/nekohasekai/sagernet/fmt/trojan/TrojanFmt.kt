@@ -1,12 +1,13 @@
 package io.nekohasekai.sagernet.fmt.trojan
 
 import io.nekohasekai.sagernet.fmt.v2ray.parseDuckSoft
+import io.nekohasekai.sagernet.ktx.redactLink
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 fun parseTrojan(server: String): TrojanBean {
 
     val link = server.replace("trojan://", "https://").toHttpUrlOrNull()
-        ?: error("invalid trojan link $server")
+        ?: error("invalid trojan link ${server.redactLink()}")
 
     return TrojanBean().apply {
         parseDuckSoft(link)

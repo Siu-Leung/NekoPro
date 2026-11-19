@@ -67,6 +67,14 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	neko_log.TruncateOnStart = isBgProcess
 	neko_log.SetupLog(int(maxLogSizeKb)*1024, filepath.Join(cachePath, "neko.log"))
 
+	// certs: load synchronously from app-private internal storage before any TLS
+	// connections start, appending to system roots rather than replacing them.
+	if internalAssetsPath != "" {
+		if pem, err := os.ReadFile(filepath.Join(internalAssetsPath, "ca.pem")); err == nil {
+			updateRootCACerts(pem)
+		}
+	}
+
 	// nekoutils
 	nekoutils.Selector_OnProxySelected = intfNB4A.Selector_OnProxySelected
 
@@ -74,12 +82,6 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	go func() {
 		defer device.DeferPanicToError("InitCore-go", func(err error) { log.Println(err) })
 		device.GoDebug(process)
-
-		// certs
-		pem, err := os.ReadFile(externalAssetsPath + "ca.pem")
-		if err == nil {
-			updateRootCACerts(pem)
-		}
 
 		// bg
 		if isBgProcess {

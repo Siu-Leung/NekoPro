@@ -25,10 +25,13 @@ import (
 var (
 	hookMu            sync.Mutex
 	hookInstalled     bool
-	activeProtectFunc atomic.Value // holds control.Func
+	activeProtectFunc atomic.Pointer[protectFuncHolder]
 	activeDNSRouter   atomic.Pointer[dnsRouterHolder]
 	resolverInstallMu sync.Mutex
 	resolverInstalled bool
+
+	registryMu sync.Mutex
+	registry   []*hookEntry // in installation order; the last live entry wins
 )
 
 type dnsRouterHolder struct {
@@ -36,33 +39,139 @@ type dnsRouterHolder struct {
 	transportManager adapter.DNSTransportManager
 }
 
-// InstallProtectHook registers (and refreshes across Box restarts) the active
-// sing-box Android VPN socket protect callback and encrypted DNS router bridge
-// for embedded mihomo outbounds.
-func InstallProtectHook(ctx context.Context) {
+type protectFuncHolder struct {
+	fn control.Func
+}
+
+// hookKey identifies the sing-box instance owning an entry. Services are
+// per-Box pointers, so they are comparable and unique per instance.
+type hookKey struct {
+	router         adapter.DNSRouter
+	networkManager adapter.NetworkManager
+}
+
+type hookEntry struct {
+	key     hookKey
+	refs    int
+	test    bool
+	dns     *dnsRouterHolder
+	protect control.Func
+}
+
+type testInstanceKey struct{}
+
+// ContextWithTestInstance marks ctx as belonging to a temporary (URL test /
+// speed test) sing-box instance. Hooks installed from such a context never
+// take precedence over hooks installed by a regular (main) instance.
+func ContextWithTestInstance(ctx context.Context) context.Context {
+	return context.WithValue(ctx, testInstanceKey{}, true)
+}
+
+func isTestInstance(ctx context.Context) bool {
+	v, _ := ctx.Value(testInstanceKey{}).(bool)
+	return v
+}
+
+// refreshActiveLocked publishes the DNS router / protect func of the most
+// recently installed live entry, preferring non-test instances.
+// registryMu must be held.
+func refreshActiveLocked() {
+	var (
+		dnsHolder *dnsRouterHolder
+		protect   control.Func
+	)
+	for _, wantTest := range []bool{false, true} {
+		for i := len(registry) - 1; i >= 0; i-- {
+			e := registry[i]
+			if e.test != wantTest {
+				continue
+			}
+			if dnsHolder == nil && e.dns != nil {
+				dnsHolder = e.dns
+			}
+			if protect == nil && e.protect != nil {
+				protect = e.protect
+			}
+		}
+	}
+	activeDNSRouter.Store(dnsHolder)
+	if protect != nil {
+		activeProtectFunc.Store(&protectFuncHolder{fn: protect})
+	} else {
+		activeProtectFunc.Store(nil)
+	}
+}
+
+// InstallProtectHook registers the sing-box Android VPN socket protect
+// callback and encrypted DNS router bridge of the instance owning ctx for
+// embedded mihomo outbounds. The returned function releases the
+// registration and must be called when the outbound is closed; once all
+// outbounds of an instance released it, the previous live instance (if any)
+// becomes active again.
+func InstallProtectHook(ctx context.Context) (release func()) {
+	release = func() {}
 	resolver.DisableIPv6 = false
 	if ctx == nil {
 		return
 	}
 
+	entry := &hookEntry{test: isTestInstance(ctx)}
 	if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
-		transportManager := service.FromContext[adapter.DNSTransportManager](ctx)
-		activeDNSRouter.Store(&dnsRouterHolder{
+		entry.key.router = dnsRouter
+		entry.dns = &dnsRouterHolder{
 			router:           dnsRouter,
-			transportManager: transportManager,
-		})
+			transportManager: service.FromContext[adapter.DNSTransportManager](ctx),
+		}
 		installSingBoxResolverOnce()
 	}
+	if networkManager := service.FromContext[adapter.NetworkManager](ctx); networkManager != nil {
+		entry.key.networkManager = networkManager
+		entry.protect = networkManager.ProtectFunc()
+	}
+	if entry.dns == nil && entry.protect == nil {
+		return
+	}
 
-	networkManager := service.FromContext[adapter.NetworkManager](ctx)
-	if networkManager == nil {
+	registryMu.Lock()
+	var existing *hookEntry
+	for _, e := range registry {
+		if e.key == entry.key {
+			existing = e
+			break
+		}
+	}
+	if existing != nil {
+		existing.refs++
+		entry = existing
+	} else {
+		entry.refs = 1
+		registry = append(registry, entry)
+	}
+	refreshActiveLocked()
+	registryMu.Unlock()
+
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			registryMu.Lock()
+			defer registryMu.Unlock()
+			entry.refs--
+			if entry.refs > 0 {
+				return
+			}
+			for i, e := range registry {
+				if e == entry {
+					registry = append(registry[:i], registry[i+1:]...)
+					break
+				}
+			}
+			refreshActiveLocked()
+		})
+	}
+
+	if entry.protect == nil {
 		return
 	}
-	protectFunc := networkManager.ProtectFunc()
-	if protectFunc == nil {
-		return
-	}
-	activeProtectFunc.Store(protectFunc)
 
 	hookMu.Lock()
 	defer hookMu.Unlock()
@@ -76,12 +185,13 @@ func InstallProtectHook(ctx context.Context) {
 				return err
 			}
 		}
-		if fn, ok := activeProtectFunc.Load().(control.Func); ok && fn != nil {
-			return fn(network, address, conn)
+		if h := activeProtectFunc.Load(); h != nil && h.fn != nil {
+			return h.fn(network, address, conn)
 		}
 		return nil
 	}
 	hookInstalled = true
+	return
 }
 
 func installSingBoxResolverOnce() {
@@ -90,10 +200,21 @@ func installSingBoxResolverOnce() {
 	if resolverInstalled {
 		return
 	}
-	r := &singBoxResolver{fallback: resolver.SystemResolver}
-	resolver.DefaultResolver = r
-	resolver.ProxyServerHostResolver = r
-	resolver.DirectHostResolver = r
+	// Proxied target domains (resolved by mihomo outbounds before being sent
+	// through the tunnel) must not leak to the direct DNS server.
+	remote := &singBoxResolver{
+		fallback:   resolver.SystemResolver,
+		transports: []string{"dns-remote", "dns-direct", "dns-local"},
+		strict:     true,
+	}
+	// Proxy server hostnames and direct destinations use direct DNS.
+	direct := &singBoxResolver{
+		fallback:   resolver.SystemResolver,
+		transports: []string{"dns-direct", "dns-local"},
+	}
+	resolver.DefaultResolver = remote
+	resolver.ProxyServerHostResolver = direct
+	resolver.DirectHostResolver = direct
 	resolverInstalled = true
 }
 
@@ -131,17 +252,22 @@ func (a *singBoxDialerAdapter) ListenPacket(ctx context.Context, network, addres
 
 type singBoxResolver struct {
 	fallback resolver.Resolver
+	// transports lists DNS transport tags in order of preference; the
+	// transport manager default is used if none of them exists.
+	transports []string
+	// strict disables the system resolver fallback when the sing-box DNS
+	// router is available but fails, so proxied domains never leak to it.
+	strict bool
 }
 
 func (r *singBoxResolver) defaultTransport(h *dnsRouterHolder) adapter.DNSTransport {
 	if h == nil || h.transportManager == nil {
 		return nil
 	}
-	if tr, ok := h.transportManager.Transport("dns-direct"); ok {
-		return tr
-	}
-	if tr, ok := h.transportManager.Transport("dns-local"); ok {
-		return tr
+	for _, tag := range r.transports {
+		if tr, ok := h.transportManager.Transport(tag); ok {
+			return tr
+		}
 	}
 	return h.transportManager.Default()
 }
@@ -159,6 +285,12 @@ func (r *singBoxResolver) lookup(ctx context.Context, host string, strategy boxC
 		})
 		if err == nil && len(addrs) > 0 {
 			return addrs, nil
+		}
+		if r.strict {
+			if err == nil {
+				err = resolver.ErrIPNotFound
+			}
+			return nil, err
 		}
 	}
 	if r.fallback != nil {

@@ -16,6 +16,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.databinding.LayoutAssetItemBinding
 import io.nekohasekai.sagernet.databinding.LayoutAssetsBinding
 import io.nekohasekai.sagernet.ktx.*
+import io.nekohasekai.sagernet.security.AssetImportPolicy
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import libcore.Libcore
 import moe.matsuri.nb4a.utils.Util
@@ -97,10 +98,12 @@ class AssetsActivity : ThemedActivity() {
 
     val importFile = registerForActivityResult(ActivityResultContracts.GetContent()) { file ->
         if (file != null) {
-            val fileName = contentResolver.query(file, null, null, null, null)?.use { cursor ->
-                cursor.moveToFirst()
-                cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME).let(cursor::getString)
-            }?.takeIf { it.isNotBlank() } ?: file.pathSegments.last()
+            val fileName = runCatching {
+                contentResolver.query(file, null, null, null, null)?.use { cursor ->
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null
+                }
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: (file.lastPathSegment ?: "")
                 .substringAfterLast('/')
                 .substringAfter(':')
 
@@ -110,19 +113,23 @@ class AssetsActivity : ThemedActivity() {
             }
             val filesDir = getExternalFilesDir(null) ?: filesDir
 
-            runOnDefaultDispatcher {
-                val outFile = File(filesDir, fileName).apply {
-                    parentFile?.mkdirs()
+            // Security: confine the destination to filesDir (rejects "../", separators, etc.).
+            val outFile = runCatching { AssetImportPolicy.destination(filesDir, fileName) }
+                .getOrElse {
+                    alert(getString(R.string.route_not_asset, fileName)).show()
+                    return@registerForActivityResult
                 }
 
-                contentResolver.openInputStream(file)?.use(outFile.outputStream())
+            runOnDefaultDispatcher {
+                outFile.parentFile?.mkdirs()
+
+                contentResolver.openInputStream(file)?.use { input ->
+                    outFile.outputStream().use { input.copyTo(it) }
+                }
 
                 File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
                     if (isFile) delete()
-                    createNewFile()
-                    val fw = FileWriter(this)
-                    fw.write("Custom")
-                    fw.close()
+                    FileWriter(this).use { it.write("Custom") }
                 }
 
                 adapter.reloadAssets()
@@ -214,7 +221,7 @@ class AssetsActivity : ThemedActivity() {
                     try {
                         versionFile.readText().trim()
                     } catch (e: Throwable) {
-                        snackbar(e.readableMessage)
+                        snackbar(e.readableMessage).show()
                         "<unknown>"
                     }
                 } else {
@@ -279,7 +286,7 @@ class AssetsActivity : ThemedActivity() {
     suspend fun updateAsset(file: File, versionFile: File, localVersion: String) {
         var fileName = file.name
 
-        val ruleProvider = rulesProviders[DataStore.rulesProvider]
+        val ruleProvider = rulesProviders.getOrElse(DataStore.rulesProvider) { rulesProviders[0] }
         val repo = ruleProvider.repoByFileName[fileName]
 
         val client = Libcore.newHttpClient().apply {
@@ -321,7 +328,10 @@ class AssetsActivity : ThemedActivity() {
                 Libcore.unxz(cacheFile.absolutePath, file.absolutePath)
                 cacheFile.delete()
             } else {
-                cacheFile.renameTo(file)
+                if (!cacheFile.renameTo(file)) {
+                    cacheFile.copyTo(file, overwrite = true)
+                    cacheFile.delete()
+                }
             }
 
             versionFile.writeText(tagName)

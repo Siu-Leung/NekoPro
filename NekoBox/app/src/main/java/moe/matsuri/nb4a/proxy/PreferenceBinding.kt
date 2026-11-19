@@ -41,10 +41,29 @@ class PreferenceBinding(
         return value
     }
 
+    private fun findField(target: Any): java.lang.reflect.Field? {
+        try {
+            return target.javaClass.getField(fieldName)
+        } catch (_: NoSuchFieldException) {
+            var cls: Class<*>? = target.javaClass
+            while (cls != null) {
+                try {
+                    return cls.getDeclaredField(fieldName).apply { isAccessible = true }
+                } catch (_: NoSuchFieldException) {
+                    cls = cls.superclass
+                }
+            }
+            return null
+        }
+    }
+
     fun fromCache() {
         if (disable) return
         val f = try {
-            bean!!.javaClass.getField(fieldName)
+            findField(bean!!) ?: run {
+                Logs.d("binding no field: $fieldName")
+                return
+            }
         } catch (e: Exception) {
             Logs.d("binding no field: ${e.readableMessage}")
             return
@@ -60,7 +79,7 @@ class PreferenceBinding(
     fun writeToCache() {
         if (disable) return
         val f = try {
-            bean!!.javaClass.getField(fieldName) ?: return
+            findField(bean!!) ?: return
         } catch (e: Exception) {
             Logs.d("binding no field: ${e.readableMessage}")
             return

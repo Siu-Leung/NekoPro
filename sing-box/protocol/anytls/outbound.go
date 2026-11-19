@@ -87,7 +87,11 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 	outbound.client = client
 	outbound.clientMetadata = options.ClientMetadata
-	outbound.sessionClient = sessionClientOf(client)
+	if options.ClientMetadata != "" {
+		// Only hook into the session internals when an override is configured;
+		// otherwise keep the library default "client=sing-box/..." metadata.
+		outbound.sessionClient = sessionClientOf(client)
+	}
 
 	outbound.uotClient = &uot.Client{
 		Dialer:  (anytlsDialer)(outbound.createProxy),

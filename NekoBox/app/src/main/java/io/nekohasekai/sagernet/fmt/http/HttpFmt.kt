@@ -2,12 +2,13 @@ package io.nekohasekai.sagernet.fmt.http
 
 import io.nekohasekai.sagernet.fmt.v2ray.isTLS
 import io.nekohasekai.sagernet.fmt.v2ray.setTLS
+import io.nekohasekai.sagernet.ktx.redactLink
 import io.nekohasekai.sagernet.ktx.urlSafe
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 fun parseHttp(link: String): HttpBean {
-    val httpUrl = link.toHttpUrlOrNull() ?: error("Invalid http(s) link: $link")
+    val httpUrl = link.toHttpUrlOrNull() ?: error("Invalid http(s) link: ${link.redactLink()}")
 
     if (httpUrl.encodedPath != "/") error("Not http proxy")
 

@@ -318,6 +318,22 @@ class ConfigurationFragment @JvmOverloads constructor(
         return super.onKeyDown(ketCode, event)
     }
 
+    private fun readBoundedBytes(input: java.io.InputStream, maxBytes: Int): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            total += read
+            if (total > maxBytes) {
+                throw IllegalArgumentException("Import file exceeds size limit")
+            }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
     private val importFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { file ->
             if (file != null) runOnDefaultDispatcher {
@@ -325,28 +341,41 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val fileName =
                         requireContext().contentResolver.query(file, null, null, null, null)
                             ?.use { cursor ->
-                                cursor.moveToFirst()
-                                cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)
-                                    .let(cursor::getString)
+                                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
                             }
                     val proxies = mutableListOf<AbstractBean>()
-                    if (fileName != null && fileName.endsWith(".zip")) {
-                        // try parse wireguard zip
-                        val zip =
-                            ZipInputStream(requireContext().contentResolver.openInputStream(file)!!)
-                        while (true) {
-                            val entry = zip.nextEntry ?: break
-                            if (entry.isDirectory) continue
-                            val fileText = zip.bufferedReader().readText()
-                            RawUpdater.parseRaw(fileText, entry.name)
-                                ?.let { pl -> proxies.addAll(pl) }
-                            zip.closeEntry()
+                    if (fileName != null && fileName.endsWith(".zip", ignoreCase = true)) {
+                        // try parse wireguard zip (bounded against zip bombs)
+                        val maxEntries = 256
+                        val maxEntryBytes = 2 * 1024 * 1024
+                        val maxTotalBytes = 16 * 1024 * 1024
+                        ZipInputStream(requireContext().contentResolver.openInputStream(file)!!).use { zip ->
+                            var entryCount = 0
+                            var totalBytes = 0
+                            while (true) {
+                                val entry = zip.nextEntry ?: break
+                                try {
+                                    if (entry.isDirectory) continue
+                                    entryCount++
+                                    if (entryCount > maxEntries) {
+                                        throw IllegalArgumentException("Zip archive contains too many entries")
+                                    }
+                                    val remaining = (maxTotalBytes - totalBytes).coerceAtMost(maxEntryBytes)
+                                    val bytes = readBoundedBytes(zip, remaining)
+                                    totalBytes += bytes.size
+                                    val fileText = String(bytes, Charsets.UTF_8)
+                                    RawUpdater.parseRaw(fileText, entry.name)
+                                        ?.let { pl -> proxies.addAll(pl) }
+                                } finally {
+                                    zip.closeEntry()
+                                }
+                            }
                         }
-                        zip.closeQuietly()
                     } else {
                         val fileText =
                             requireContext().contentResolver.openInputStream(file)!!.use {
-                                it.bufferedReader().readText()
+                                String(readBoundedBytes(it, 16 * 1024 * 1024), Charsets.UTF_8)
                             }
                         RawUpdater.parseRaw(fileText, fileName ?: "")
                             ?.let { pl -> proxies.addAll(pl) }

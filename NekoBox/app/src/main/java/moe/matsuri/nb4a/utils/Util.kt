@@ -96,23 +96,36 @@ object Util {
         return output.copyOfRange(0, compressedDataLength)
     }
 
+    private const val MAX_ZLIB_DECOMPRESSED_BYTES = 16 * 1024 * 1024
+
     fun zlibDecompress(input: ByteArray): ByteArray {
         val inflater = Inflater()
         val outputStream = ByteArrayOutputStream()
 
-        return outputStream.use {
-            val buffer = ByteArray(1024)
+        try {
+            return outputStream.use {
+                val buffer = ByteArray(4096)
 
-            inflater.setInput(input)
+                inflater.setInput(input)
 
-            var count = -1
-            while (count != 0) {
-                count = inflater.inflate(buffer)
-                outputStream.write(buffer, 0, count)
+                var total = 0
+                while (!inflater.finished()) {
+                    val count = inflater.inflate(buffer)
+                    if (count == 0) {
+                        if (inflater.needsInput() || inflater.needsDictionary()) break
+                        continue
+                    }
+                    total += count
+                    if (total > MAX_ZLIB_DECOMPRESSED_BYTES) {
+                        throw IllegalArgumentException("Decompressed payload exceeds size limit")
+                    }
+                    outputStream.write(buffer, 0, count)
+                }
+
+                outputStream.toByteArray()
             }
-
+        } finally {
             inflater.end()
-            outputStream.toByteArray()
         }
     }
 
@@ -120,7 +133,7 @@ object Util {
         val o = mutableMapOf<String, Any?>()
         m.forEach {
             if (it.key is String) {
-                o[it.key as String] = it.value as Any
+                o[it.key as String] = it.value
             }
         }
         return o
@@ -154,7 +167,7 @@ object Util {
 
     fun mergeJSON(dst: MutableMap<String, Any?>, j: String) {
         if (j.isBlank()) return
-        val src = JavaUtil.gson.fromJson(j, dst.javaClass)
+        val src = JavaUtil.gson.fromJson(j, dst.javaClass) ?: return
         mergeMap(dst, src)
     }
 

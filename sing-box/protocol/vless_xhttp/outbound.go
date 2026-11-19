@@ -21,6 +21,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/mihomo_adapter"
+	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
@@ -35,6 +36,7 @@ type Outbound struct {
 	proxy     C.ProxyAdapter
 	uotClient *uot.Client
 	logger    log.ContextLogger
+	release   func()
 }
 
 func setMihomoIPv6Enabled() {
@@ -190,11 +192,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 
-	mihomo_adapter.InstallProtectHook(ctx)
+	release := mihomo_adapter.InstallProtectHook(ctx)
 	setMihomoIPv6Enabled()
 
 	proxy, err := outbound.NewVless(*vlessOption)
 	if err != nil {
+		release()
 		return nil, err
 	}
 
@@ -202,6 +205,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Adapter: outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeVlessXHTTP, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
 		proxy:   proxy,
 		logger:  logger,
+		release: release,
 	}
 
 	out.uotClient = &uot.Client{
@@ -244,8 +248,12 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 		h.logger.InfoContext(ctx, "vless-xhttp outbound connection to ", destination)
 		return h.createProxy(ctx, destination)
 	case N.NetworkUDP:
-		h.logger.InfoContext(ctx, "vless-xhttp outbound UoT packet connection to ", destination)
-		return h.uotClient.DialContext(ctx, network, destination)
+		// ListenPacket prefers native UDP and already falls back to UoT.
+		pc, err := h.ListenPacket(ctx, destination)
+		if err != nil {
+			return nil, err
+		}
+		return bufio.NewBindPacketConn(pc, destination), nil
 	}
 	return nil, os.ErrInvalid
 }
@@ -262,7 +270,9 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	}
 	pc, err := h.proxy.ListenPacketContext(ctx, meta)
 	if err == nil && pc != nil {
-		return pc, nil
+		// mihomo resolved a domain destination into meta.DstIP and the
+		// returned connection only accepts IP addresses; translate.
+		return mihomo_adapter.WrapResolvedPacketConn(pc, meta, destination), nil
 	}
 	if err != nil {
 		h.logger.DebugContext(ctx, "vless-xhttp native UDP unavailable, falling back to UoT: ", err)
@@ -277,5 +287,6 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 }
 
 func (h *Outbound) Close() error {
+	h.release()
 	return h.proxy.Close()
 }

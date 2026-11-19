@@ -16,15 +16,15 @@ fun parseShadowsocks(url: String): ShadowsocksBean {
 
     if (url.substringBefore("#").contains("@")) {
         var link = url.replace("ss://", "https://").toHttpUrlOrNull() ?: error(
-            "invalid ss-android link $url"
+            "invalid ss-android link ${url.redactLink()}"
         )
 
         if (link.username.isBlank()) { // fix justmysocks's shit link
             link = (("https://" + url.substringAfter("ss://")
                 .substringBefore("#")
                 .decodeBase64UrlSafe()).toHttpUrlOrNull()
-                ?: error("invalid jms link $url")
-                    ).newBuilder().fragment(url.substringAfter("#")).build()
+                ?: error("invalid jms link ${url.redactLink()}")
+                    ).newBuilder().fragment(url.substringAfter("#", "")).build()
         }
 
         // ss-android style
@@ -59,7 +59,7 @@ fun parseShadowsocks(url: String): ShadowsocksBean {
         if (v2Url.contains("#")) v2Url = v2Url.substringBefore("#")
 
         val link = ("https://" + v2Url.substringAfter("ss://")
-            .decodeBase64UrlSafe()).toHttpUrlOrNull() ?: error("invalid v2rayN link $url")
+            .decodeBase64UrlSafe()).toHttpUrlOrNull() ?: error("invalid v2rayN link ${url.redactLink()}")
 
         return ShadowsocksBean().apply {
             serverAddress = link.host
@@ -67,7 +67,7 @@ fun parseShadowsocks(url: String): ShadowsocksBean {
             method = link.username
             password = link.password
             plugin = ""
-            val remarks = url.substringAfter("#").unUrlSafe()
+            val remarks = url.substringAfter("#", "").unUrlSafe()
             if (remarks.isNotBlank()) name = remarks
         }
     }
@@ -116,7 +116,7 @@ fun buildSingBoxOutboundShadowsocksBean(bean: ShadowsocksBean): SingBoxOptions.O
         method = bean.method
         if (bean.plugin!!.isNotBlank()) {
             plugin = bean.plugin!!.substringBefore(";")
-            plugin_opts = bean.plugin!!.substringAfter(";")
+            plugin_opts = bean.plugin!!.substringAfter(";", "")
             if (plugin == "none") {
                 plugin = null
                 plugin_opts = null

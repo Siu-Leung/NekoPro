@@ -27,8 +27,9 @@ func RegisterOutbound(registry *outboundAdapter.Registry) {
 
 type Outbound struct {
 	outboundAdapter.Adapter
-	proxy  C.ProxyAdapter
-	logger log.ContextLogger
+	proxy   C.ProxyAdapter
+	logger  log.ContextLogger
+	release func()
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MieruOutboundOptions) (adapter.Outbound, error) {
@@ -70,9 +71,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		TrafficPattern: strings.TrimSpace(options.TrafficPattern),
 	}
 
-	mihomo_adapter.InstallProtectHook(ctx)
+	release := mihomo_adapter.InstallProtectHook(ctx)
 	proxy, err := outbound.NewMieru(mieruOpt)
 	if err != nil {
+		release()
 		return nil, err
 	}
 
@@ -85,6 +87,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Adapter: outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeMieru, tag, networks, options.DialerOptions),
 		proxy:   proxy,
 		logger:  logger,
+		release: release,
 	}, nil
 }
 
@@ -125,13 +128,17 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	metadata.Outbound = h.Tag()
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "mieru outbound packet connection to ", destination)
-	pc, err := h.proxy.ListenPacketContext(ctx, buildMetadata(C.UDP, destination))
+	meta := buildMetadata(C.UDP, destination)
+	pc, err := h.proxy.ListenPacketContext(ctx, meta)
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	// mihomo resolved a domain destination into meta.DstIP and the returned
+	// connection only accepts IP addresses; translate between them.
+	return mihomo_adapter.WrapResolvedPacketConn(pc, meta, destination), nil
 }
 
 func (h *Outbound) Close() error {
+	h.release()
 	return h.proxy.Close()
 }

@@ -63,30 +63,27 @@ object PluginManager {
     }
 
     private fun initNativeInternal(pluginId: String): String? {
-        fun soIfExist(soName: String): String? {
-            val f = File(SagerNet.application.applicationInfo.nativeLibraryDir, soName)
-            if (f.canExecute()) {
-                return f.absolutePath
-            }
-            return null
-        }
-        return when (pluginId) {
-            "hysteria-plugin" -> soIfExist("libhysteria.so")
-            "hysteria2-plugin" -> soIfExist("libhysteria2.so")
-            else -> null
-        }
+        val soName = Plugins.internalSoName(pluginId) ?: return null
+        val f = File(SagerNet.application.applicationInfo.nativeLibraryDir, soName)
+        return if (f.canExecute()) f.absolutePath else null
     }
 
     private fun initNativeFaster(provider: ProviderInfo): String? {
         return provider.loadString(Plugins.METADATA_KEY_EXECUTABLE_PATH)
             ?.let { relativePath ->
-                File(provider.applicationInfo.nativeLibraryDir).resolve(relativePath).apply {
-                    check(canExecute())
-                }.absolutePath
+                val baseDir = File(provider.applicationInfo.nativeLibraryDir).canonicalFile
+                // Reject absolute paths and "../" escapes outside the plugin's native lib dir.
+                check(!File(relativePath).isAbsolute) { "absolute plugin path rejected" }
+                val target = File(baseDir, relativePath).canonicalFile
+                check(target.path.startsWith(baseDir.path + File.separator)) {
+                    "plugin path escapes nativeLibraryDir"
+                }
+                check(target.canExecute())
+                target.absolutePath
             }
     }
 
-    fun ComponentInfo.loadString(key: String) = when (val value = metaData.get(key)) {
+    fun ComponentInfo.loadString(key: String) = when (val value = metaData?.get(key)) {
         is String -> value
         is Int -> SagerNet.application.packageManager.getResourcesForApplication(applicationInfo)
             .getString(value)

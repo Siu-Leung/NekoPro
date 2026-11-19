@@ -80,10 +80,12 @@ class KeyValuePair() : Parcelable {
         get() = if (valueType == TYPE_STRING_SET) {
             val buffer = ByteBuffer.wrap(value)
             val result = HashSet<String>()
-            while (buffer.hasRemaining()) {
-                val chArr = ByteArray(buffer.int)
+            while (buffer.remaining() >= 4) {
+                val len = buffer.int
+                if (len < 0 || len > buffer.remaining()) break
+                val chArr = ByteArray(len)
                 buffer.get(chArr)
-                result.add(String(chArr))
+                result.add(String(chArr, Charsets.UTF_8))
             }
             result
         } else null
@@ -131,9 +133,10 @@ class KeyValuePair() : Parcelable {
         val stream = ByteArrayOutputStream()
         val intBuffer = ByteBuffer.allocate(4)
         for (v in value) {
+            val bytes = v.toByteArray(Charsets.UTF_8)
             intBuffer.rewind()
-            stream.write(intBuffer.putInt(v.length).array())
-            stream.write(v.toByteArray())
+            stream.write(intBuffer.putInt(bytes.size).array())
+            stream.write(bytes)
         }
         this.value = stream.toByteArray()
         return this

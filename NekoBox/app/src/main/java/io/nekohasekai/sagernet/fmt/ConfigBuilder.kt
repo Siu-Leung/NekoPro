@@ -27,8 +27,10 @@ import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.buildSingBoxOutboundStandardV2RayBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxEndpointWireGuardBean
+import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
+import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.security.ClashApiSecret
 import io.nekohasekai.sagernet.utils.PackageCache
 import moe.matsuri.nb4a.*
@@ -88,7 +90,11 @@ fun buildConfig(
     val selectorNames = ArrayList<String>()
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
 
-    fun ProxyEntity.resolveChainInternal(): MutableList<ProxyEntity> {
+    fun ProxyEntity.resolveChainInternal(visited: MutableSet<Long> = hashSetOf()): MutableList<ProxyEntity> {
+        if (!visited.add(id)) {
+            Logs.w("Detected proxy chain cycle at profile $id, breaking cycle")
+            return mutableListOf()
+        }
         val bean = requireBean()
         if (bean is ChainBean) {
             val beans = SagerDatabase.proxyDao.getEntities(bean.proxies!!)
@@ -96,7 +102,7 @@ fun buildConfig(
             val beanList = ArrayList<ProxyEntity>()
             for (proxyId in bean.proxies!!) {
                 val item = beansMap[proxyId] ?: continue
-                beanList.addAll(item.resolveChainInternal())
+                beanList.addAll(item.resolveChainInternal(HashSet(visited)))
             }
             return beanList.asReversed()
         }
@@ -116,14 +122,15 @@ fun buildConfig(
 
     fun ProxyEntity.resolveChain(): MutableList<ProxyEntity> {
         val thisGroup = SagerDatabase.groupDao.getById(groupId)
-        val frontProxy = thisGroup?.frontProxy?.let { SagerDatabase.proxyDao.getById(it) }
-        val landingProxy = thisGroup?.landingProxy?.let { SagerDatabase.proxyDao.getById(it) }
-        val list = resolveChainInternal()
+        val frontProxy = thisGroup?.frontProxy?.takeIf { it > 0 && it != id }?.let { SagerDatabase.proxyDao.getById(it) }
+        val landingProxy = thisGroup?.landingProxy?.takeIf { it > 0 && it != id }?.let { SagerDatabase.proxyDao.getById(it) }
+        val visited = hashSetOf<Long>()
+        val list = resolveChainInternal(visited)
         if (frontProxy != null) {
-            list.add(frontProxy)
+            list.addAll(frontProxy.resolveChainInternal(HashSet(visited)))
         }
         if (landingProxy != null) {
-            list.add(0, landingProxy)
+            list.addAll(0, landingProxy.resolveChainInternal(HashSet(visited)))
         }
         return list
     }
@@ -162,8 +169,9 @@ fun buildConfig(
     }
 
     return MyOptions().apply {
-        if (!forTest && (DataStore.enableClashAPI || DataStore.enableCacheFile)) experimental = ExperimentalOptions().apply {
-            if (DataStore.enableClashAPI) clash_api = ClashAPIOptions().apply {
+        val enableClashApi = DataStore.enableClashAPI && !forExport
+        if (!forTest && (enableClashApi || DataStore.enableCacheFile)) experimental = ExperimentalOptions().apply {
+            if (enableClashApi) clash_api = ClashAPIOptions().apply {
                 external_controller = "127.0.0.1:9090"
                 secret = ClashApiSecret.value
                 external_ui = java.io.File(SagerNet.application.filesDir, "yacd").absolutePath
@@ -281,6 +289,9 @@ fun buildConfig(
             chainId: Long, entity: ProxyEntity
         ): String {
             val profileList = entity.resolveChain()
+            if (profileList.isEmpty()) {
+                throw IllegalStateException("Empty proxy chain for ${entity.displayName()}")
+            }
             val chainTrafficSet = HashSet<ProxyEntity>().apply {
                 plusAssign(profileList)
                 add(entity)
@@ -320,16 +331,20 @@ fun buildConfig(
                     bypassDNSBeans += proxyEntity.requireBean()
                 }
 
-                // last profile set as "proxy"
-                if (chainId == 0L && index == 0) {
-                    tagOut = TAG_PROXY
-                }
+                val existingGlobalTag = if (needGlobal) globalOutbounds[proxyEntity.id] else null
+                if (existingGlobalTag != null) {
+                    tagOut = existingGlobalTag
+                } else {
+                    // last profile set as "proxy"
+                    if (chainId == 0L && index == 0) {
+                        tagOut = TAG_PROXY
+                    }
 
-                // selector human readable name
-                if (buildSelector && index == 0) {
-                    tagOut = selectorName(bean.displayName())
+                    // selector human readable name
+                    if (buildSelector && index == 0) {
+                        tagOut = selectorName(bean.displayName())
+                    }
                 }
-
 
                 // chain rules
                 if (index > 0) {
@@ -349,8 +364,7 @@ fun buildConfig(
 
                 // now tagOut is determined
                 if (needGlobal) {
-                    globalOutbounds[proxyEntity.id]?.let {
-                        if (index == 0) chainTagOut = it // single, duplicate chain
+                    if (existingGlobalTag != null) {
                         return@forEachIndexed
                     }
                     globalOutbounds[proxyEntity.id] = tagOut
@@ -427,12 +441,6 @@ fun buildConfig(
                     }
 
                     // domain_strategy
-                    pastEntity?.requireBean()?.apply {
-                        // don't loopback
-                        if (defaultServerDomainStrategy != "" && !serverAddress!!.isIpAddress()) {
-                            domainListDNSDirectForce.add("full:$serverAddress")
-                        }
-                    }
                     _hack_config_map["domain_strategy"] =
                         if (forTest) "" else defaultServerDomainStrategy
 
@@ -525,15 +533,17 @@ fun buildConfig(
         for (rule in extraRules) {
             if (rule.packages.isNotEmpty()) {
                 PackageCache.awaitLoadSync()
+                if (!isVPN) {
+                    runOnMainDispatcher {
+                        Toast.makeText(
+                            SagerNet.application,
+                            SagerNet.application.getString(R.string.route_need_vpn, rule.displayName()),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
             }
             val uidList = rule.packages.map {
-                if (!isVPN) {
-                    Toast.makeText(
-                        SagerNet.application,
-                        SagerNet.application.getString(R.string.route_need_vpn, rule.displayName()),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
                 PackageCache[it]?.takeIf { uid -> uid >= 1000 }
             }.toHashSet().filterNotNull()
             val ruleSets = mutableListOf<RuleSet>()
@@ -593,25 +603,36 @@ fun buildConfig(
                     }
                 }
 
-                when (rule.outbound) {
-                    -1L -> {
-                        userDNSRuleList += makeDnsRuleObj().apply { server = "dns-direct" }
-                    }
+                val hasNonDnsConditions =
+                    rule.ip.isNotBlank() ||
+                        rule.port.isNotBlank() ||
+                        rule.sourcePort.isNotBlank() ||
+                        rule.network.isNotBlank() ||
+                        rule.source.isNotBlank() ||
+                        rule.protocol.isNotBlank() ||
+                        rule.config.isNotBlank()
 
-                    0L -> {
-                        if (useFakeDns) userDNSRuleList += makeDnsRuleObj().apply {
-                            server = "dns-fake"
-                            inbound = listOf("tun-in")
+                if (!hasNonDnsConditions) {
+                    when (rule.outbound) {
+                        -1L -> {
+                            userDNSRuleList += makeDnsRuleObj().apply { server = "dns-direct" }
                         }
-                        userDNSRuleList += makeDnsRuleObj().apply {
-                            server = "dns-remote"
-                        }
-                    }
 
-                    -2L -> {
-                        userDNSRuleList += makeDnsRuleObj().apply {
-                            server = "dns-block"
-                            disable_cache = true
+                        0L -> {
+                            if (useFakeDns) userDNSRuleList += makeDnsRuleObj().apply {
+                                server = "dns-fake"
+                                inbound = listOf("tun-in")
+                            }
+                            userDNSRuleList += makeDnsRuleObj().apply {
+                                server = "dns-remote"
+                            }
+                        }
+
+                        -2L -> {
+                            userDNSRuleList += makeDnsRuleObj().apply {
+                                server = "dns-block"
+                                disable_cache = true
+                            }
                         }
                     }
                 }
@@ -628,11 +649,13 @@ fun buildConfig(
 
             if (!ruleObj.checkEmpty()) {
                 if (ruleObj.outbound.isNullOrBlank()) {
-                    Toast.makeText(
-                        SagerNet.application,
-                        "Warning: " + rule.displayName() + ": A non-existent outbound was specified.",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    runOnMainDispatcher {
+                        Toast.makeText(
+                            SagerNet.application,
+                            "Warning: " + rule.displayName() + ": A non-existent outbound was specified.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 } else {
                     // block 改用新的写法
                     if (ruleObj.outbound == TAG_BLOCK) {
@@ -660,14 +683,15 @@ fun buildConfig(
             var serverAddr = it.serverAddress
 
             if (it is ConfigBean) {
-                var config = mutableMapOf<String, Any>()
-                config = gson.fromJson(it.config, config.javaClass)
-                config["server"]?.apply {
-                    serverAddr = toString()
+                runCatching {
+                    val config = gson.fromJson(it.config, Map::class.java)
+                    config?.get("server")?.toString()?.takeIf { s -> s.isNotBlank() }?.let { s ->
+                        serverAddr = s
+                    }
                 }
             }
 
-            if (!serverAddr!!.isIpAddress()) {
+            if (!serverAddr.isNullOrBlank() && !serverAddr!!.isIpAddress()) {
                 domainListDNSDirectForce.add("full:${serverAddr}")
             }
         }
@@ -727,12 +751,13 @@ fun buildConfig(
         if (forTest) {
             dns.rules = listOf()
         } else {
-            // built-in DNS rules
-            route.rules.add(0, Rule_DefaultOptions().apply {
+            // built-in DNS rules (insert after sniff so protocol=["dns"] can match sniffed DNS)
+            val hijackInsertIndex = if (needSniff) 1 else 0
+            route.rules.add(hijackInsertIndex, Rule_DefaultOptions().apply {
                 protocol = listOf("dns")
                 action = "hijack-dns"
             })
-            route.rules.add(0, Rule_DefaultOptions().apply {
+            route.rules.add(hijackInsertIndex, Rule_DefaultOptions().apply {
                 port = listOf(53)
                 action = "hijack-dns"
             })
@@ -742,9 +767,12 @@ fun buildConfig(
                     ip_is_private = true
                 })
             }
-            // block mcast
+            // block mcast (split into two rules so dst and src are OR'd rather than AND'd)
             route.rules.add(Rule_DefaultOptions().apply {
                 ip_cidr = listOf("224.0.0.0/3", "ff00::/8")
+                action = "reject"
+            })
+            route.rules.add(Rule_DefaultOptions().apply {
                 source_ip_cidr = listOf("224.0.0.0/3", "ff00::/8")
                 action = "reject"
             })

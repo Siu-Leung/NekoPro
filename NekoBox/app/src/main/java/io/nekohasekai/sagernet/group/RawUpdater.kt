@@ -346,7 +346,7 @@ object RawUpdater : GroupUpdater() {
                                         ssPlugin.apply {
                                             add("v2ray-plugin")
                                             add("mode=" + (opts["mode"]?.toString() ?: ""))
-                                            if (opts["mode"]?.toString() == "true") add("tls")
+                                            if (opts["tls"]?.toString() == "true") add("tls")
                                             add("host=" + (opts["host"]?.toString() ?: ""))
                                             add("path=" + (opts["path"]?.toString() ?: ""))
                                             if (opts["mux"]?.toString() == "true") add("mux=8")
@@ -703,10 +703,10 @@ object RawUpdater : GroupUpdater() {
                                         opt.value.toString().substringBefore(" ").toIntOrNull()
                                             ?: 100
 
-                                    "recv-window-conn" -> bean.connectionReceiveWindow =
+                                    "recv-window-conn" -> bean.streamReceiveWindow =
                                         opt.value.toString().toIntOrNull() ?: 0
 
-                                    "recv-window" -> bean.streamReceiveWindow =
+                                    "recv-window" -> bean.connectionReceiveWindow =
                                         opt.value.toString().toIntOrNull() ?: 0
 
                                     "disable-mtu-discovery" -> bean.disableMtuDiscovery =
@@ -802,10 +802,10 @@ object RawUpdater : GroupUpdater() {
                                 }
                             }
                             if (ip.isNotBlank()) {
-                                bean.serverAddress = ip
                                 if (bean.sni.isNullOrBlank() && !bean.serverAddress.isNullOrBlank() && !bean.serverAddress!!.isIpAddress()) {
                                     bean.sni = bean.serverAddress
                                 }
+                                bean.serverAddress = ip
                             }
                             proxies.add(bean)
                         }
@@ -912,7 +912,7 @@ object RawUpdater : GroupUpdater() {
         if (localAddresses.isNullOrEmpty()) error("Empty address in 'Interface' selection")
         bean.localAddress = localAddresses.flatMap { it.split(",") }.joinToString("\n")
         bean.privateKey = iface["PrivateKey"]
-        bean.mtu = iface["MTU"]?.toIntOrNull()
+        iface["MTU"]?.toIntOrNull()?.let { bean.mtu = it }
         val peers = ini.getAll("Peer")
         if (peers.isNullOrEmpty()) error("Missing 'Peer' selections")
         val beans = mutableListOf<WireGuardBean>()
