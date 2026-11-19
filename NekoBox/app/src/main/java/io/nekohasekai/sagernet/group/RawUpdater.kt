@@ -608,7 +608,7 @@ object RawUpdater : GroupUpdater() {
                                     "sni", "servername" -> bean.sni = opt.value.toString()
                                     "skip-cert-verify" -> bean.allowInsecure = opt.value.toString().toBoolean()
                                     "congestion-control", "congestion-controller" -> bean.congestionControl = opt.value.toString()
-                                    "pinned-certchain-sha256" -> bean.pinnedCertChainSha256 = opt.value.toString()
+                                    "pinned-certchain-sha256" -> bean.pinnedCertchainSha256 = opt.value.toString()
                                 }
                             }
                             proxies.add(bean)
