@@ -28,10 +28,21 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.2.1`
+`Neko-Pro-1.2.2`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.1)
-- 核心 APK：`NekoBox-Neko-Pro-1.2.1-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.2)
+- 核心 APK：`NekoBox-Neko-Pro-1.2.2-arm64-v8a.apk`
+
+### v1.2.2 改动日志 (2026-11-19)
+
+- **更新与自动发布链路闭环**
+  - **「关于」页接入正式版检查更新**：新增 `AppUpdatePolicy` 语义化版本比对（修复子串匹配导致 `1.2.1` 漏检 `1.2.10` 或反向提示降级的问题），修复 `Libcore.newHttpClient()` 未关闭资源泄漏、GitHub API 限流/异常 JSON 报错与防连点，校验官方 Release 链接后安全跳转下载页。
+  - **规则库（GeoIP / GeoSite）热更新生效**：`AssetsActivity` 导入与在线更新改为唯一临时文件原子替换、最小体积校验并显式调用 `ResetGeoipCache`/`ResetGeositeCache` 及提示重载；Go 层 `geoip.go`/`geosite.go` 增加基于 `os.FileInfo`（inode/大小/mtime）的自动变更检测，跨 `:bg` 进程更新规则库后无需重启进程即可生效。
+  - **CI 自动推送 GitHub Releases**：合入 `main` 且检测到 `nb4a.properties` 为未发布的新版本时自动创建 `v*` tag 并发布签名 APK + 校验和至 Releases 下载页，自动从 `README.md` 提取对应版本更新说明；避免 `main`/发版 tag 触发并发误取消，收紧 job 权限并纳入 `libneko` Go 单测。
+- **稳定性、测速一致性与编辑页修复**
+  - **测速结果防覆盖与状态一致（H10）**：`TrafficLooper` 持久化流量改为仅更新 `tx`/`rx` 的局部 SQL，避免断开或切换节点时用旧快照覆盖期间的测速结果与编辑；测速成功自动清理残留错误状态，测速失败清空过期速度值并同步 UI；修复速度排序分组测速后自动重排、`speedTest` `finally` 块在 `NonCancellable + Main` 线程安全关闭弹窗以及 `pingTest` `underlyingNetwork!!` 空指针。
+  - **后台服务并发与生命周期修复（H11）**：`BaseService.Binder.callbackIdMap` 改用 `ConcurrentHashMap<IBinder, Int>` 并在 `onCallbackDied` 清理已死客户端；`SelectorOnly` 重载、`urlTest` 与待机休眠回调均先校验 `proxy.isInitialized()` 避免未初始化 `lateinit box` 崩溃；`ProxyInstance.close()` 改为先停止 `TrafficLooper`（含等待轮询退出）再关闭 `box`。
+  - **屏幕旋转编辑数据保护（H13）**：`StandardV2RaySettingsActivity` 旋转重建后自动恢复 `tmpBean` 与 Trojan/VLESS 字段绑定（不再清空 Trojan 密码或把 VLESS `xhttp` 重置为 `tcp`）；`ProfileSettingsActivity` 旋转保留 `dirty` 与 `isSubscription` 状态；`RouteSettingsActivity` 与 `GroupSettingsActivity` 旋转后重新注册变更监听，并修复 `EXTRA_PACKAGE_NAME` 预填路由保存时报“Empty route”的问题。
 
 ### v1.2.1 改动日志 (2026-11-19)
 

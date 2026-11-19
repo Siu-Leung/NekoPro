@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.databinding.LayoutAssetItemBinding
 import io.nekohasekai.sagernet.databinding.LayoutAssetsBinding
@@ -121,18 +122,42 @@ class AssetsActivity : ThemedActivity() {
                 }
 
             runOnDefaultDispatcher {
-                outFile.parentFile?.mkdirs()
+                runCatching {
+                    val parent = outFile.parentFile ?: filesDir
+                    parent.mkdirs()
+                    val tmpFile = File.createTempFile("${outFile.name}.", ".tmp", parent)
+                    try {
+                        contentResolver.openInputStream(file)?.use { input ->
+                            tmpFile.outputStream().use { input.copyTo(it) }
+                        } ?: error("Unable to open selected file")
+                        if (tmpFile.length() == 0L) error("Imported asset file is empty")
+                        if (!tmpFile.renameTo(outFile)) {
+                            tmpFile.copyTo(outFile, overwrite = true)
+                            tmpFile.delete()
+                        }
+                    } finally {
+                        if (tmpFile.exists()) tmpFile.delete()
+                    }
 
-                contentResolver.openInputStream(file)?.use { input ->
-                    outFile.outputStream().use { input.copyTo(it) }
+                    File(parent, outFile.nameWithoutExtension + ".version.txt").apply {
+                        if (isFile) delete()
+                        FileWriter(this).use { it.write("Custom") }
+                    }
+
+                    resetAssetCache(outFile.name)
+                    adapter.reloadAssets()
+                    if (DataStore.serviceState.started) {
+                        onMainDispatcher {
+                            snackbar(R.string.need_reload)
+                                .setAction(R.string.apply) { SagerNet.reloadService() }
+                                .show()
+                        }
+                    }
+                }.onFailure {
+                    onMainDispatcher {
+                        alert(it.readableMessage).tryToShow()
+                    }
                 }
-
-                File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
-                    if (isFile) delete()
-                    FileWriter(this).use { it.write("Custom") }
-                }
-
-                adapter.reloadAssets()
             }
 
         }
@@ -283,11 +308,19 @@ class AssetsActivity : ThemedActivity() {
         ),
     )
 
+    private fun resetAssetCache(fileName: String) {
+        when (fileName) {
+            "geoip.db" -> Libcore.resetGeoipCache()
+            "geosite.db" -> Libcore.resetGeositeCache()
+        }
+    }
+
     suspend fun updateAsset(file: File, versionFile: File, localVersion: String) {
-        var fileName = file.name
+        val fileName = file.name
 
         val ruleProvider = rulesProviders.getOrElse(DataStore.rulesProvider) { rulesProviders[0] }
         val repo = ruleProvider.repoByFileName[fileName]
+            ?: error("Unsupported asset: $fileName")
 
         val client = Libcore.newHttpClient().apply {
             modernTLS()
@@ -298,12 +331,13 @@ class AssetsActivity : ThemedActivity() {
         try {
             var response = client.newRequest().apply {
                 setURL("https://api.github.com/repos/$repo/releases/latest")
+                setHeader("Accept", "application/vnd.github+json")
             }.execute()
 
             val release = JSONObject(Util.getStringBox(response.contentString))
-            val tagName = release.optString("tag_name")
+            val tagName = release.optString("tag_name").trim()
 
-            if (tagName == localVersion) {
+            if (tagName.isNotEmpty() && tagName == localVersion) {
                 onMainDispatcher {
                     snackbar(R.string.route_asset_no_update).show()
                 }
@@ -312,34 +346,62 @@ class AssetsActivity : ThemedActivity() {
 
             val releaseAssets = release.getJSONArray("assets").filterIsInstance<JSONObject>()
             val assetToDownload = releaseAssets.find { it.getStr("name") == fileName }
-                ?: error("File $fileName not found in release ${release["url"]}")
+                ?: error("File $fileName not found in release ${release.optString("url")}")
             val browserDownloadUrl = assetToDownload.getStr("browser_download_url")
+                ?.takeIf { it.isNotBlank() }
+                ?: error("Missing download URL for $fileName")
 
             response = client.newRequest().apply {
                 setURL(browserDownloadUrl)
             }.execute()
 
-            val cacheFile = File(file.parentFile, file.name + ".tmp")
-            cacheFile.parentFile?.mkdirs()
-
-            response.writeTo(cacheFile.canonicalPath)
-
-            if (fileName.endsWith(".xz")) {
-                Libcore.unxz(cacheFile.absolutePath, file.absolutePath)
-                cacheFile.delete()
-            } else {
-                if (!cacheFile.renameTo(file)) {
-                    cacheFile.copyTo(file, overwrite = true)
-                    cacheFile.delete()
+            val parentDir = file.parentFile ?: (getExternalFilesDir(null) ?: filesDir)
+            parentDir.mkdirs()
+            val cacheFile = File.createTempFile("${file.name}.", ".tmp", parentDir)
+            try {
+                response.writeTo(cacheFile.canonicalPath)
+                val minBytes = if (fileName.endsWith(".xz")) 64L else 1024L
+                if (cacheFile.length() < minBytes) {
+                    error("Downloaded $fileName is unexpectedly small (${cacheFile.length()} bytes)")
                 }
+
+                if (fileName.endsWith(".xz")) {
+                    val extractedFile = File.createTempFile("${file.name}.", ".db.tmp", parentDir)
+                    try {
+                        Libcore.unxz(cacheFile.absolutePath, extractedFile.absolutePath)
+                        if (extractedFile.length() < 1024L) {
+                            error("Extracted $fileName is unexpectedly small (${extractedFile.length()} bytes)")
+                        }
+                        if (!extractedFile.renameTo(file)) {
+                            extractedFile.copyTo(file, overwrite = true)
+                            extractedFile.delete()
+                        }
+                    } finally {
+                        if (extractedFile.exists()) extractedFile.delete()
+                    }
+                } else {
+                    if (!cacheFile.renameTo(file)) {
+                        cacheFile.copyTo(file, overwrite = true)
+                        cacheFile.delete()
+                    }
+                }
+            } finally {
+                if (cacheFile.exists()) cacheFile.delete()
             }
 
-            versionFile.writeText(tagName)
+            if (tagName.isNotEmpty()) {
+                versionFile.writeText(tagName)
+            }
 
+            resetAssetCache(fileName)
             adapter.reloadAssets()
 
             onMainDispatcher {
-                snackbar(R.string.route_asset_updated).show()
+                val bar = snackbar(R.string.route_asset_updated)
+                if (DataStore.serviceState.started) {
+                    bar.setAction(R.string.apply) { SagerNet.reloadService() }
+                }
+                bar.show()
             }
         } finally {
             client.close()

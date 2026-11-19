@@ -2,6 +2,7 @@ package libcore
 
 import (
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -15,6 +16,7 @@ var (
 	geositeMu           sync.RWMutex
 	cachedGeositeReader *geosites.Reader
 	cachedGeositePath   string
+	cachedGeositeInfo   os.FileInfo
 )
 
 func closeGeositeReader(r *geosites.Reader) {
@@ -27,8 +29,13 @@ func closeGeositeReader(r *geosites.Reader) {
 }
 
 func readGeoSiteCode(path, code string) (items []geosites.Item, openErr error, readErr error) {
+	currentInfo, statErr := os.Stat(path)
+	if statErr != nil {
+		return nil, statErr, nil
+	}
+
 	geositeMu.RLock()
-	if cachedGeositeReader != nil && cachedGeositePath == path {
+	if cachedGeositeReader != nil && cachedGeositePath == path && sameGeoFile(cachedGeositeInfo, currentInfo) {
 		items, readErr = cachedGeositeReader.Read(code)
 		geositeMu.RUnlock()
 		return items, nil, readErr
@@ -37,7 +44,10 @@ func readGeoSiteCode(path, code string) (items []geosites.Item, openErr error, r
 
 	geositeMu.Lock()
 	defer geositeMu.Unlock()
-	if cachedGeositeReader == nil || cachedGeositePath != path {
+	if latestInfo, err := os.Stat(path); err == nil {
+		currentInfo = latestInfo
+	}
+	if cachedGeositeReader == nil || cachedGeositePath != path || !sameGeoFile(cachedGeositeInfo, currentInfo) {
 		r, _, err := geosites.Open(path)
 		if err != nil {
 			return nil, err, nil
@@ -45,6 +55,7 @@ func readGeoSiteCode(path, code string) (items []geosites.Item, openErr error, r
 		closeGeositeReader(cachedGeositeReader)
 		cachedGeositeReader = r
 		cachedGeositePath = path
+		cachedGeositeInfo = currentInfo
 	}
 	items, readErr = cachedGeositeReader.Read(code)
 	return items, nil, readErr
@@ -58,6 +69,7 @@ func ResetGeositeCache() {
 	closeGeositeReader(cachedGeositeReader)
 	cachedGeositeReader = nil
 	cachedGeositePath = ""
+	cachedGeositeInfo = nil
 }
 
 func getGeoSiteRules(code string) ([]option.HeadlessRule, error) {

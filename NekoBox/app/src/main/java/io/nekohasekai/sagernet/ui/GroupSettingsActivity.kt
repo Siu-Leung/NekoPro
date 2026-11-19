@@ -233,6 +233,8 @@ class GroupSettingsActivity(
                 }
             }
 
+        } else {
+            DataStore.profileCacheStore.registerChangeListener(this)
         }
 
     }

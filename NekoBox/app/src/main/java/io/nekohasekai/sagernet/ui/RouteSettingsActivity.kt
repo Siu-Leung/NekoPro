@@ -101,8 +101,20 @@ class RouteSettingsActivity(
 
     private lateinit var editConfigPreference: EditConfigPreference
 
+    private fun hasRuleContent(): Boolean {
+        return DataStore.routeDomain.isNotBlank() ||
+            DataStore.routeIP.isNotBlank() ||
+            DataStore.routePort.isNotBlank() ||
+            DataStore.routeSourcePort.isNotBlank() ||
+            DataStore.routeNetwork.isNotBlank() ||
+            DataStore.routeSource.isNotBlank() ||
+            DataStore.routeProtocol.isNotBlank() ||
+            DataStore.routePackages.isNotBlank() ||
+            DataStore.serverConfig.isNotBlank()
+    }
+
     fun needSave(): Boolean {
-        return DataStore.dirty
+        return DataStore.dirty || (DataStore.editingId == 0L && hasRuleContent())
     }
 
     fun PreferenceFragmentCompat.createPreferences(
@@ -250,19 +262,26 @@ class RouteSettingsActivity(
             }
 
 
+        } else {
+            DataStore.profileCacheStore.registerChangeListener(this)
         }
 
     }
 
     suspend fun saveAndExit() {
 
-        if (!needSave()) {
+        if (DataStore.editingId == 0L && !hasRuleContent()) {
             onMainDispatcher {
                 MaterialAlertDialogBuilder(this@RouteSettingsActivity).setTitle(R.string.empty_route)
                     .setMessage(R.string.empty_route_notice)
                     .setPositiveButton(android.R.string.ok, null)
                     .show()
             }
+            return
+        }
+
+        if (!needSave()) {
+            finish()
             return
         }
 

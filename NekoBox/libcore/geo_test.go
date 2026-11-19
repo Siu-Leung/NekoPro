@@ -193,3 +193,87 @@ func TestGeoipConcurrentLookupAndResetNoRace(t *testing.T) {
 		t.Fatalf("concurrent geoip lookups failed (first err: %v, count: %d)", errs[0], len(errs))
 	}
 }
+
+func TestGeoipAutoReloadsWhenFileReplacedOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	writeTestGeoipDB(t, dir, "cn")
+
+	savedExternal := externalAssetsPath
+	externalAssetsPath = dir
+	t.Cleanup(func() {
+		ResetGeoipCache()
+		externalAssetsPath = savedExternal
+	})
+	ResetGeoipCache()
+
+	if _, err := getGeoIPRules("cn"); err != nil {
+		t.Fatalf("initial getGeoIPRules(cn): %v", err)
+	}
+	if _, err := getGeoIPRules("jp"); err == nil {
+		t.Fatalf("expected jp missing before replacement")
+	}
+
+	// Atomically replace geoip.db with a new inode containing "jp" instead of "cn".
+	tmpDir := t.TempDir()
+	newDB := writeTestGeoipDB(t, tmpDir, "jp")
+	data, err := os.ReadFile(newDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpPath := filepath.Join(dir, geoipDat+".new")
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmpPath, filepath.Join(dir, geoipDat)); err != nil {
+		t.Fatal(err)
+	}
+
+	rules, err := getGeoIPRules("jp")
+	if err != nil || len(rules) != 1 || len(rules[0].DefaultOptions.IPCIDR) == 0 {
+		t.Fatalf("getGeoIPRules(jp) after atomic replace = (%v, %v)", rules, err)
+	}
+	if _, err := getGeoIPRules("cn"); err == nil {
+		t.Fatalf("expected stale cn cache to be invalidated after atomic replace")
+	}
+}
+
+func TestGeositeAutoReloadsWhenFileReplacedOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	writeTestGeositeDB(t, dir, map[string][]geosites.Item{
+		"cn": {{Type: geosites.RuleTypeDomainSuffix, Value: "old.cn"}},
+	})
+
+	savedExternal := externalAssetsPath
+	externalAssetsPath = dir
+	t.Cleanup(func() {
+		ResetGeositeCache()
+		externalAssetsPath = savedExternal
+	})
+	ResetGeositeCache()
+
+	rules, err := getGeoSiteRules("cn")
+	if err != nil || len(rules) != 1 || len(rules[0].DefaultOptions.DomainSuffix) != 1 || rules[0].DefaultOptions.DomainSuffix[0] != "old.cn" {
+		t.Fatalf("initial getGeoSiteRules(cn) = (%+v, %v)", rules, err)
+	}
+
+	tmpDir := t.TempDir()
+	newDB := writeTestGeositeDB(t, tmpDir, map[string][]geosites.Item{
+		"cn": {{Type: geosites.RuleTypeDomainSuffix, Value: "new.cn"}},
+	})
+	data, err := os.ReadFile(newDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpPath := filepath.Join(dir, geositeDat+".new")
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmpPath, filepath.Join(dir, geositeDat)); err != nil {
+		t.Fatal(err)
+	}
+
+	rules, err = getGeoSiteRules("cn")
+	if err != nil || len(rules) != 1 || len(rules[0].DefaultOptions.DomainSuffix) != 1 || rules[0].DefaultOptions.DomainSuffix[0] != "new.cn" {
+		t.Fatalf("getGeoSiteRules(cn) after replace = (%+v, %v)", rules, err)
+	}
+}

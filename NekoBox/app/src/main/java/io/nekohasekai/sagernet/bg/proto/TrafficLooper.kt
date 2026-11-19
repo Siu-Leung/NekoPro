@@ -22,16 +22,21 @@ class TrafficLooper
     private val tagMap = mutableMapOf<String, TrafficUpdater.TrafficLooperData>() // tag to 1 data
 
     suspend fun stop() {
-        job?.cancel()
+        val runningJob = job
+        job = null
+        runningJob?.cancel()
+        withTimeoutOrNull(2000L) {
+            runningJob?.join()
+        }
         // finally traffic post
         if (!DataStore.profileTrafficStatistics) return
         val traffic = mutableMapOf<Long, TrafficData>()
         data.proxy?.config?.trafficMap?.forEach { (_, ents) ->
             for (ent in ents) {
-                val item = idMap[ent.id] ?: return@forEach
+                val item = idMap[ent.id] ?: continue
                 ent.rx = item.rx
                 ent.tx = item.tx
-                ProfileManager.updateProfile(ent) // update DB
+                ProfileManager.updateTraffic(ent.id, item.tx, item.rx) // update DB tx/rx only
                 traffic[ent.id] = TrafficData(
                     id = ent.id,
                     rx = ent.rx,
@@ -66,8 +71,11 @@ class TrafficLooper
                 data.proxy?.config?.trafficMap?.get(tag)?.firstOrNull()?.let {
                     it.rx = rx
                     it.tx = tx
+                    val profileId = it.id
+                    val finalTx = tx
+                    val finalRx = rx
                     runOnDefaultDispatcher {
-                        ProfileManager.updateProfile(it) // update DB
+                        ProfileManager.updateTraffic(profileId, finalTx, finalRx) // update DB tx/rx only
                     }
                 }
             }
@@ -166,7 +174,7 @@ class TrafficLooper
                 && data.binder.callbackIdMap.containsValue(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)
             ) {
                 data.binder.broadcast { b ->
-                    if (data.binder.callbackIdMap[b] == SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND) {
+                    if (data.binder.callbackIdMap[b.asBinder()] == SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND) {
                         b.cbSpeedUpdate(speed)
                         if (profileTrafficStatistics) {
                             idMap.forEach { (id, item) ->
