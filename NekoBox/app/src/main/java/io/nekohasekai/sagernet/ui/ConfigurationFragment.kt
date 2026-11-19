@@ -1990,8 +1990,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val err = proxyEntity.error ?: "<?>"
                     val msg = Protocols.genFriendlyMsg(err)
                     val baseErr = if (msg != err) msg else getString(R.string.unavailable)
-                    profileStatus.text = if (stText != null) "$baseErr
-$stText" else baseErr
+                    profileStatus.text = if (stText != null) "$baseErr\n$stText" else baseErr
                     profileStatus.setOnClickListener {
                         alert(err).tryToShow()
                     }
