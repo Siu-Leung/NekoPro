@@ -28,10 +28,26 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.2.0`
+`Neko-Pro-1.2.1`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.0)
-- 核心 APK：`NekoBox-Neko-Pro-1.2.0-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.1)
+- 核心 APK：`NekoBox-Neko-Pro-1.2.1-arm64-v8a.apk`
+
+### v1.2.1 改动日志 (2026-11-19)
+
+- **安全与权限加固**
+  - **插件加载校验与 Root 隔离**：优先加载 APK 内置原生插件，对第三方插件实施已知包名白名单与首次使用（TOFU）签名证书固定，限制可执行路径不得逃逸 `nativeLibraryDir`；Hysteria FakeTCP 仅允许使用内置插件并将 `su -c` 命令整体转义为单参数。
+  - **资产导入与快捷方式保护**：自定义规则库导入接入 `AssetImportPolicy` 防止路径穿越；为 `QuickToggleShortcut` 增加签名权限保护，并将 `ACTION_CREATE_SHORTCUT` 隔离至独立 `<activity-alias>`；`BootReceiver` 显式校验系统广播 Action。
+  - **密钥防泄漏与存储隔离**：导出配置时自动剔除 `clash_api`（避免泄漏 `ClashApiSecret` 与本地路径）；WebView 控制台日志脱敏、限制仅允许 `http/https` 面板地址并将 `localStorage` 密钥比对改为安全 JSON 引用；自动备份配置全面排除 `root/file/sharedpref/database`；崩溃日志扩大敏感键脱敏并统一脱敏代理链接解析报错；自定义 `ca.pem` 改为仅从应用私有内部目录同步加载并追加至系统证书池（不再替换系统根证书）。
+  - **Unix Socket 保护服务加固**：`protect_server` 强制校验 `SO_PEERCRED` 同 UID、设置 `0600` 权限、单连接 5 秒超时并在任何异常路径关闭所有收到的文件描述符。
+- **Go 内核与协议栈修复**
+  - **多实例并发隔离与 DNS/UDP 修复**：测速临时实例不再覆盖主代理实例的保护回调；`mihomo_adapter` 区分直连主机解析与远端目标解析，MASQUE 开启远端 DNS 解析时走隧道内 DNS；VLESS-XHTTP/MASQUE/Mieru 补齐 UDP NAT 地址映射与实例引用释放，AnyTLS 未配置 `client_metadata` 时恢复默认客户端标识。
+  - **GeoIP/GeoSite 并发竞态与句柄泄漏修复**：以 `sync.RWMutex` 与代际校验保护缓存读写与重置，释放旧句柄防止 FD 泄漏。
+  - **日志轮转与 HTTP 客户端修复**：修复 `neko_log` 首次轮转后因残留已关闭文件句柄导致的持续写入失败并同步重定向 `stderr`；`libcore/http.go` 改为按响应头超时（避免大文件下载中途超时）、隔离单请求 `AllowInsecure` TLS 配置、修复 `Execute()` panic 返回 `(nil, nil)` 及 H3 竞速 panic 死锁与慢分支阻塞。
+- **DNS / 路由、解析与稳定性修复**
+  - **路由与配置生成修复**：`ConfigBuilder` 增加链式代理成环保护与前置/落地代理递归解析；修复 `globalOutbounds` 复用导致悬空 `detour`；非纯域名/UID 规则不再误生成 DNS 规则；`hijack-dns` 置后于 `sniff`；多播阻断拆分为目标/源两条独立规则；移除尾跳直连 DNS 注入；`Rule_DefaultOptions.checkEmpty()` 补全 `ip_is_private`、`source_ip_is_private`、`source_port`、`network`、`protocol` 检查。
+  - **崩溃、死循环与兼容性修复**：修复 Android 8+ `VpnService` 未进入前台即停止导致的崩溃；以 Okio 替代 `java.util.Base64` 恢复 API < 26 兼容；修复 `rulesProvider` 偏好数组越界、`TrafficLooper` 忙等死循环、`NativeInterface` 空指针、WireGuard 缺省 MTU 空指针与 v1 反序列化、`GroupUpdater` IPv6 排序反转、Shadowsocks `sUoT` 开关失效、`RawUpdater` 多处字段映射错误及 `SubscriptionUpdater` 延迟计算错误。
+  - **备份恢复与导入防炸弹**：备份恢复改为先全量解析再在 Room 事务内原子写入（避免异常清空现有数据），修复 `ProxyGroup` 序列化字段缺失与 `KeyValuePair` UTF-8 字节长度计算；为 ZIP 导入与 `zlibDecompress` 增加体积/条目上限防护；对齐测速默认参数与 `DataStore` 一致。
 
 ### v1.2.0 改动日志 (2026-11-19)
 

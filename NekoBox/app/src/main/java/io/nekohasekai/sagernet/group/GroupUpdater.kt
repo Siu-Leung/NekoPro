@@ -15,7 +15,7 @@ import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.isTLS
 import io.nekohasekai.sagernet.ktx.*
 import kotlinx.coroutines.*
-import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.util.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,59 +41,63 @@ abstract class GroupUpdater {
     ) {
         val ipv6Mode = DataStore.ipv6Mode
         val lookupPool = newFixedThreadPoolContext(5, "DNS Lookup")
-        val lookupJobs = mutableListOf<Job>()
-        val progress = Progress(profiles.size)
-        if (groupId != null) {
-            GroupUpdater.progress[groupId] = progress
-            GroupManager.postReload(groupId)
-        }
-        val ipv6First = ipv6Mode >= IPv6Mode.PREFER
+        try {
+            val lookupJobs = mutableListOf<Job>()
+            val progress = Progress(profiles.size)
+            if (groupId != null) {
+                GroupUpdater.progress[groupId] = progress
+                GroupManager.postReload(groupId)
+            }
+            val ipv6First = ipv6Mode >= IPv6Mode.PREFER
 
-        for (profile in profiles) {
-            when (profile) {
-                // SNI rewrite unsupported
-                is NaiveBean -> continue
+            for (profile in profiles) {
+                when (profile) {
+                    // SNI rewrite unsupported
+                    is NaiveBean -> continue
+                }
+
+                val serverAddress = profile.serverAddress
+                if (!serverAddress.isNullOrEmpty() && serverAddress.isIpAddress()) continue
+
+                lookupJobs.add(GlobalScope.launch(lookupPool) {
+                    try {
+                        val underlyingNetwork = SagerNet.underlyingNetwork
+                        val results = if (
+                            underlyingNetwork != null &&
+                            DataStore.enableFakeDns &&
+                            DataStore.serviceState.started &&
+                            DataStore.serviceMode == Key.MODE_VPN
+                        ) {
+                            // FakeDNS
+                            underlyingNetwork
+                                .getAllByName(profile.serverAddress)
+                                .filterNotNull()
+                        } else {
+                            // System DNS is enough (when VPN connected, it uses v2ray-core)
+                            InetAddress.getAllByName(profile.serverAddress).filterNotNull()
+                        }
+                        if (results.isEmpty()) error("empty response")
+                        rewriteAddress(profile, results, ipv6First)
+                    } catch (e: Exception) {
+                        Logs.d("Lookup ${profile.serverAddress} failed: ${e.readableMessage}", e)
+                    }
+                    if (groupId != null) {
+                        progress.progress++
+                        GroupManager.postReload(groupId)
+                    }
+                })
             }
 
-            val serverAddress = profile.serverAddress
-            if (!serverAddress.isNullOrEmpty() && serverAddress.isIpAddress()) continue
-
-            lookupJobs.add(GlobalScope.launch(lookupPool) {
-                try {
-                    val results = if (
-                        SagerNet.underlyingNetwork != null &&
-                        DataStore.enableFakeDns &&
-                        DataStore.serviceState.started &&
-                        DataStore.serviceMode == Key.MODE_VPN
-                    ) {
-                        // FakeDNS
-                        SagerNet.underlyingNetwork!!
-                            .getAllByName(profile.serverAddress)
-                            .filterNotNull()
-                    } else {
-                        // System DNS is enough (when VPN connected, it uses v2ray-core)
-                        InetAddress.getAllByName(profile.serverAddress).filterNotNull()
-                    }
-                    if (results.isEmpty()) error("empty response")
-                    rewriteAddress(profile, results, ipv6First)
-                } catch (e: Exception) {
-                    Logs.d("Lookup ${profile.serverAddress} failed: ${e.readableMessage}", e)
-                }
-                if (groupId != null) {
-                    progress.progress++
-                    GroupManager.postReload(groupId)
-                }
-            })
+            lookupJobs.joinAll()
+        } finally {
+            lookupPool.close()
         }
-
-        lookupJobs.joinAll()
-        lookupPool.close()
     }
 
     protected fun rewriteAddress(
         bean: AbstractBean, addresses: List<InetAddress>, ipv6First: Boolean
     ) {
-        val address = addresses.sortedBy { (it is Inet4Address) xor ipv6First }[0].hostAddress
+        val address = addresses.sortedBy { (it is Inet6Address) xor ipv6First }[0].hostAddress
 
         with(bean) {
             when (this) {
@@ -121,7 +125,7 @@ abstract class GroupUpdater {
                     if (sni.isNullOrBlank()) sni = bean.serverAddress
                 }
                 is io.nekohasekai.sagernet.fmt.masque.MASQUEBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    // Preserve empty SNI so Cloudflare WARP/MASQUE uses its default SNI.
                 }
                 is moe.matsuri.nb4a.proxy.anytls.AnyTLSBean -> {
                     if (sni.isNullOrBlank()) sni = bean.serverAddress

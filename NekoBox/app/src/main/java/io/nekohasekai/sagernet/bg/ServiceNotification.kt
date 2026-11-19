@@ -171,7 +171,7 @@ class ServiceNotification(
             val resetUpstreamAction = NotificationCompat.Action.Builder(
                 0, service.getString(R.string.reset_connections),
                 PendingIntent.getBroadcast(
-                    service, 0, Intent(Action.RESET_UPSTREAM_CONNECTIONS), flags
+                    service, 0, Intent(Action.RESET_UPSTREAM_CONNECTIONS).setPackage(service.packageName), flags
                 )
             ).setShowsUserInterface(false).build()
             it.addAction(resetUpstreamAction)

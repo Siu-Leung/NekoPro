@@ -1,6 +1,7 @@
 package libcore
 
 import (
+	"io"
 	"path/filepath"
 	"sync"
 
@@ -11,43 +12,61 @@ import (
 )
 
 var (
+	geositeMu           sync.RWMutex
 	cachedGeositeReader *geosites.Reader
 	cachedGeositePath   string
-	geositeLock         sync.Mutex
 )
 
-func getCachedGeositeReader(path string) (*geosites.Reader, error) {
-	geositeLock.Lock()
-	defer geositeLock.Unlock()
-	if cachedGeositeReader != nil && cachedGeositePath == path {
-		return cachedGeositeReader, nil
+func closeGeositeReader(r *geosites.Reader) {
+	if r == nil {
+		return
 	}
-	r, _, err := geosites.Open(path)
-	if err != nil {
-		return nil, err
+	if closer, ok := r.Upstream().(io.Closer); ok {
+		_ = closer.Close()
 	}
-	cachedGeositeReader = r
-	cachedGeositePath = path
-	return r, nil
 }
 
-// ResetGeositeCache drops the cached geosite reader so that a newly updated
-// geosite.db takes effect without restarting the process.
+func readGeoSiteCode(path, code string) (items []geosites.Item, openErr error, readErr error) {
+	geositeMu.RLock()
+	if cachedGeositeReader != nil && cachedGeositePath == path {
+		items, readErr = cachedGeositeReader.Read(code)
+		geositeMu.RUnlock()
+		return items, nil, readErr
+	}
+	geositeMu.RUnlock()
+
+	geositeMu.Lock()
+	defer geositeMu.Unlock()
+	if cachedGeositeReader == nil || cachedGeositePath != path {
+		r, _, err := geosites.Open(path)
+		if err != nil {
+			return nil, err, nil
+		}
+		closeGeositeReader(cachedGeositeReader)
+		cachedGeositeReader = r
+		cachedGeositePath = path
+	}
+	items, readErr = cachedGeositeReader.Read(code)
+	return items, nil, readErr
+}
+
+// ResetGeositeCache closes and drops the cached geosite reader so that a newly
+// updated geosite.db takes effect without restarting the process.
 func ResetGeositeCache() {
-	geositeLock.Lock()
+	geositeMu.Lock()
+	defer geositeMu.Unlock()
+	closeGeositeReader(cachedGeositeReader)
 	cachedGeositeReader = nil
 	cachedGeositePath = ""
-	geositeLock.Unlock()
 }
 
 func getGeoSiteRules(code string) ([]option.HeadlessRule, error) {
-	dbPath := filepath.Join(externalAssetsPath, "geosite.db")
-	reader, err := getCachedGeositeReader(dbPath)
-	if err != nil {
-		return nil, err
+	dbPath := filepath.Join(externalAssetsPath, geositeDat)
+	sourceSet, openErr, readErr := readGeoSiteCode(dbPath, code)
+	if openErr != nil {
+		return nil, openErr
 	}
-	sourceSet, err := reader.Read(code)
-	if err != nil {
+	if readErr != nil {
 		return nil, nil
 	}
 

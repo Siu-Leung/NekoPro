@@ -29,11 +29,17 @@ import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.*
 
 class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
     override fun name0() = app.getString(R.string.backup)
+
+    private fun backupFileName(): String {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        return "nekobox_backup_$timestamp.json"
+    }
 
     var content = ""
     private val exportSettings =
@@ -84,7 +90,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 )
                 onMainDispatcher {
                     startFilesForResult(
-                        exportSettings, "nekobox_backup_${Date().toLocaleString()}.json"
+                        exportSettings, backupFileName()
                     )
                 }
             }
@@ -98,9 +104,10 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                     binding.backupSettings.isChecked
                 )
                 app.cacheDir.mkdirs()
-                val cacheFile = File(
-                    app.cacheDir, "nekobox_backup_${Date().toLocaleString()}.json"
-                )
+                app.cacheDir.listFiles { f ->
+                    f.isFile && f.name.startsWith("nekobox_backup_") && f.name.endsWith(".json")
+                }?.forEach { it.delete() }
+                val cacheFile = File(app.cacheDir, backupFileName())
                 cacheFile.writeText(content)
                 onMainDispatcher {
                     startActivity(
@@ -126,8 +133,8 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
     fun Parcelable.toBase64Str(): String {
         val parcel = Parcel.obtain()
-        writeToParcel(parcel, 0)
         try {
+            writeToParcel(parcel, 0)
             return Util.b64EncodeUrlSafe(parcel.marshall())
         } finally {
             parcel.recycle()
@@ -179,12 +186,12 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
     suspend fun startImport(file: Uri) {
         val fileName = requireContext().contentResolver.query(file, null, null, null, null)
             ?.use { cursor ->
-                cursor.moveToFirst()
-                cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME).let(cursor::getString)
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
             }
-            ?.takeIf { it.isNotBlank() } ?: file.pathSegments.last()
-            .substringAfterLast('/')
-            .substringAfter(':')
+            ?.takeIf { it.isNotBlank() } ?: file.pathSegments.lastOrNull()
+            ?.substringAfterLast('/')
+            ?.substringAfter(':') ?: ""
 
         if (!fileName.endsWith(".json")) {
             onMainDispatcher {
@@ -262,63 +269,70 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         }
     }
 
+    private inline fun <T> decodeParcelArray(
+        array: JSONArray,
+        creator: (Parcel) -> T
+    ): List<T> {
+        val result = ArrayList<T>(array.length())
+        for (i in 0 until array.length()) {
+            val data = Util.b64Decode(array[i] as String)
+            val parcel = Parcel.obtain()
+            try {
+                parcel.unmarshall(data, 0, data.size)
+                parcel.setDataPosition(0)
+                result.add(creator(parcel))
+            } finally {
+                parcel.recycle()
+            }
+        }
+        return result
+    }
+
     fun finishImport(
         content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean
     ) {
+        // Parse all selected sections before mutating any database so a malformed
+        // entry never leaves existing user data wiped.
+        var profiles: List<ProxyEntity>? = null
+        var groups: List<ProxyGroup>? = null
         if (profile && content.has("profiles")) {
-            val profiles = mutableListOf<ProxyEntity>()
-            val jsonProfiles = content.getJSONArray("profiles")
-            for (i in 0 until jsonProfiles.length()) {
-                val data = Util.b64Decode(jsonProfiles[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                profiles.add(ProxyEntity.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+            profiles = decodeParcelArray(content.getJSONArray("profiles")) {
+                ProxyEntity.CREATOR.createFromParcel(it)
             }
-            SagerDatabase.proxyDao.reset()
-            SagerDatabase.proxyDao.insert(profiles)
+            groups = decodeParcelArray(content.getJSONArray("groups")) {
+                ProxyGroup.CREATOR.createFromParcel(it)
+            }
+        }
+        val rules = if (rule && content.has("rules")) {
+            decodeParcelArray(content.getJSONArray("rules")) {
+                ParcelizeBridge.createRule(it)
+            }
+        } else null
+        val settings = if (setting && content.has("settings")) {
+            decodeParcelArray(content.getJSONArray("settings")) {
+                KeyValuePair.CREATOR.createFromParcel(it)
+            }
+        } else null
 
-            val groups = mutableListOf<ProxyGroup>()
-            val jsonGroups = content.getJSONArray("groups")
-            for (i in 0 until jsonGroups.length()) {
-                val data = Util.b64Decode(jsonGroups[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                groups.add(ProxyGroup.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
+        if (profiles != null || rules != null) {
+            SagerDatabase.instance.runInTransaction {
+                if (profiles != null && groups != null) {
+                    SagerDatabase.proxyDao.reset()
+                    SagerDatabase.proxyDao.insert(profiles)
+                    SagerDatabase.groupDao.reset()
+                    SagerDatabase.groupDao.insert(groups)
+                }
+                if (rules != null) {
+                    SagerDatabase.rulesDao.reset()
+                    SagerDatabase.rulesDao.insert(rules)
+                }
             }
-            SagerDatabase.groupDao.reset()
-            SagerDatabase.groupDao.insert(groups)
         }
-        if (rule && content.has("rules")) {
-            val rules = mutableListOf<RuleEntity>()
-            val jsonRules = content.getJSONArray("rules")
-            for (i in 0 until jsonRules.length()) {
-                val data = Util.b64Decode(jsonRules[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                rules.add(ParcelizeBridge.createRule(parcel))
-                parcel.recycle()
+        if (settings != null) {
+            PublicDatabase.instance.runInTransaction {
+                PublicDatabase.kvPairDao.reset()
+                PublicDatabase.kvPairDao.insert(settings)
             }
-            SagerDatabase.rulesDao.reset()
-            SagerDatabase.rulesDao.insert(rules)
-        }
-        if (setting && content.has("settings")) {
-            val settings = mutableListOf<KeyValuePair>()
-            val jsonSettings = content.getJSONArray("settings")
-            for (i in 0 until jsonSettings.length()) {
-                val data = Util.b64Decode(jsonSettings[i] as String)
-                val parcel = Parcel.obtain()
-                parcel.unmarshall(data, 0, data.size)
-                parcel.setDataPosition(0)
-                settings.add(KeyValuePair.CREATOR.createFromParcel(parcel))
-                parcel.recycle()
-            }
-            PublicDatabase.kvPairDao.reset()
-            PublicDatabase.kvPairDao.insert(settings)
         }
     }
 

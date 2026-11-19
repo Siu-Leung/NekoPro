@@ -98,7 +98,10 @@ object CrashHandler : Thread.UncaughtExceptionHandler {
 
 
         try {
-            val sensitiveKeys = setOf("password", "psk", "secret", "key", "token", "uuid", "cert", "private")
+            val sensitiveKeys = setOf(
+                "password", "psk", "secret", "key", "token", "uuid", "cert", "private",
+                "auth", "url", "link", "dns", "config", "custom", "yacd"
+            )
             report += "Settings: \n"
             for (pair in PublicDatabase.kvPairDao.all()) {
                 report += "\n"

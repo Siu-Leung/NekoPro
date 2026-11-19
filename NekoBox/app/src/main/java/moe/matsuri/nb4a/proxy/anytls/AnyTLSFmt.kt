@@ -2,6 +2,7 @@ package moe.matsuri.nb4a.proxy.anytls
 
 import io.nekohasekai.sagernet.ktx.blankAsNull
 import io.nekohasekai.sagernet.ktx.linkBuilder
+import io.nekohasekai.sagernet.ktx.redactLink
 import io.nekohasekai.sagernet.ktx.toLink
 import io.nekohasekai.sagernet.ktx.urlSafe
 import moe.matsuri.nb4a.SingBoxOptions
@@ -78,7 +79,7 @@ fun AnyTLSBean.toUri(): String {
 fun parseAnytls(url: String): AnyTLSBean {
     // https://github.com/anytls/anytls-go/blob/main/docs/uri_scheme.md
     val link = url.replace("anytls://", "https://").toHttpUrlOrNull() ?: error(
-        "invalid anytls link $url"
+        "invalid anytls link ${url.redactLink()}"
     )
     return AnyTLSBean().apply {
         serverAddress = link.host

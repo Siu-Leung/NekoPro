@@ -1,13 +1,16 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.MenuItem
 import android.view.View
 import android.webkit.*
 import android.widget.EditText
+import android.widget.Toast
 import androidx.appcompat.widget.Toolbar
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
@@ -15,7 +18,11 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.databinding.LayoutWebviewBinding
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.security.ClashApiSecret
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.WebViewUtil
+import org.json.JSONObject
 
 internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
     if (!configuredUrl.startsWith("http://127.0.0.1:9090/ui")) return configuredUrl
@@ -26,11 +33,34 @@ internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
     return "${base}?hostname=127.0.0.1&port=9090&secret=$secret"
 }
 
+private fun isAllowedDashboardUrl(url: String): Boolean {
+    val scheme = Uri.parse(url.trim()).scheme?.lowercase()
+    return scheme == "http" || scheme == "https"
+}
+
 // Fragment必须有一个无参public的构造函数，否则在数据恢复的时候，会报crash
 
 class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenuItemClickListener {
 
     lateinit var mWebView: WebView
+    @Volatile
+    private var cachedSecret: String? = null
+
+    private fun loadDashboardUrl(configuredUrl: String) {
+        val trimmed = configuredUrl.trim()
+        if (!isAllowedDashboardUrl(trimmed)) {
+            Logs.w("Blocked non-HTTP(S) dashboard URL")
+            return
+        }
+        viewLifecycleOwnerLiveData.value?.lifecycleScope?.launch {
+            val secret = cachedSecret ?: withContext(Dispatchers.IO) {
+                ClashApiSecret.value.also { cachedSecret = it }
+            }
+            if (::mWebView.isInitialized) {
+                mWebView.loadUrl(buildDashboardUrl(trimmed, secret))
+            }
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -60,7 +90,14 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
         mWebView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                 if (consoleMessage != null) {
-                    Logs.d("WebView Console [${consoleMessage.messageLevel()}]: ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})")
+                    val sanitizedSource = consoleMessage.sourceId()?.substringBefore('?')
+                    val secret = cachedSecret
+                    val sanitizedMsg = if (!secret.isNullOrEmpty()) {
+                        consoleMessage.message()?.replace(secret, "[REDACTED]")
+                    } else {
+                        consoleMessage.message()
+                    }
+                    Logs.d("WebView Console [${consoleMessage.messageLevel()}]: $sanitizedMsg ($sanitizedSource:${consoleMessage.lineNumber()})")
                 }
                 return super.onConsoleMessage(consoleMessage)
             }
@@ -84,29 +121,35 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (url?.startsWith("http://127.0.0.1:9090/ui") == true) {
-                    val expectedSecret = ClashApiSecret.value
-                    view?.evaluateJavascript(
-                        """(() => {
-                            try {
-                                const key = 'yacd.metacubex.one';
-                                const raw = localStorage.getItem(key);
-                                if (!raw) return;
-                                const state = JSON.parse(raw);
-                                const backends = state && state.clashAPIConfigs;
-                                if (Array.isArray(backends) && backends.length > 0 && !backends[0].secret) {
-                                    backends[0].secret = '$expectedSecret';
-                                    localStorage.setItem(key, JSON.stringify(state));
-                                    location.reload();
-                                }
-                            } catch (_) {}
-                        })()""".trimIndent(),
-                        null,
-                    )
+                    val webView = view ?: return
+                    viewLifecycleOwnerLiveData.value?.lifecycleScope?.launch {
+                        val expectedSecret = cachedSecret ?: withContext(Dispatchers.IO) {
+                            ClashApiSecret.value.also { cachedSecret = it }
+                        }
+                        val quotedSecret = JSONObject.quote(expectedSecret)
+                        webView.evaluateJavascript(
+                            """(() => {
+                                try {
+                                    const key = 'yacd.metacubex.one';
+                                    const raw = localStorage.getItem(key);
+                                    if (!raw) return;
+                                    const state = JSON.parse(raw);
+                                    const backends = state && state.clashAPIConfigs;
+                                    if (Array.isArray(backends) && backends.length > 0 && backends[0].secret !== $quotedSecret) {
+                                        backends[0].secret = $quotedSecret;
+                                        localStorage.setItem(key, JSON.stringify(state));
+                                        location.reload();
+                                    }
+                                } catch (_) {}
+                            })()""".trimIndent(),
+                            null,
+                        )
+                    }
                 }
             }
         }
         mWebView.clearCache(false)
-        mWebView.loadUrl(buildDashboardUrl(DataStore.yacdURL, ClashApiSecret.value))
+        loadDashboardUrl(DataStore.yacdURL)
     }
 
     @SuppressLint("CheckResult")
@@ -120,8 +163,17 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.set_panel_url)
                     .setView(view)
                     .setPositiveButton(android.R.string.ok) { _, _ ->
-                        DataStore.yacdURL = view.text.toString()
-                        mWebView.loadUrl(buildDashboardUrl(DataStore.yacdURL, ClashApiSecret.value))
+                        val newUrl = view.text.toString().trim()
+                        if (!isAllowedDashboardUrl(newUrl)) {
+                            Toast.makeText(
+                                requireContext(),
+                                "Only http:// and https:// URLs are supported",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@setPositiveButton
+                        }
+                        DataStore.yacdURL = newUrl
+                        loadDashboardUrl(newUrl)
                     }
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()

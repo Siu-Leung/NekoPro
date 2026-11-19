@@ -2,11 +2,17 @@
 <data-extraction-rules xmlns:tools="http://schemas.android.com/tools"
     tools:ignore="FullBackupContent">
     <cloud-backup>
-        <!-- Proxy profiles and configuration databases contain credentials. -->
+        <!-- Proxy profiles, configuration databases, WebView storage, and runtime files contain credentials. -->
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="sharedpref" path="." />
         <exclude domain="database" path="." />
         <exclude domain="device_database" path="." />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="sharedpref" path="." />
         <exclude domain="database" path="." />
         <exclude domain="device_database" path="." />
     </device-transfer>

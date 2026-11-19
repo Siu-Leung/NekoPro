@@ -27,8 +27,9 @@ func RegisterOutbound(registry *outboundAdapter.Registry) {
 
 type Outbound struct {
 	outboundAdapter.Adapter
-	proxy  C.ProxyAdapter
-	logger log.ContextLogger
+	proxy   C.ProxyAdapter
+	logger  log.ContextLogger
+	release func()
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MasqueOutboundOptions) (adapter.Outbound, error) {
@@ -53,6 +54,17 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		ipv4 = "172.16.0.2/32"
 	}
 
+	dnsServers := options.DNS
+	if options.RemoteDNSResolve && len(dnsServers) == 0 {
+		// mihomo only creates the in-tunnel resolver when DNS servers are
+		// configured; default to Cloudflare (reachable through WARP).
+		dnsServers = []string{"1.1.1.1", "2606:4700:4700::1111"}
+		if strings.TrimSpace(options.Network) == "h3-l4proxy" {
+			// L4 proxy mode does not support UDP; query over TCP instead.
+			dnsServers = []string{"tcp://1.1.1.1", "tcp://[2606:4700:4700::1111]"}
+		}
+	}
+
 	masqueOpt := outbound.MasqueOption{
 		BasicOption: outbound.BasicOption{
 			DialerForAPI: mihomo_adapter.NewDialer(outboundDialer),
@@ -73,12 +85,13 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		CongestionController: strings.TrimSpace(options.CongestionController),
 		CWND:                 options.CWND,
 		RemoteDnsResolve:     options.RemoteDNSResolve,
-		Dns:                  options.DNS,
+		Dns:                  dnsServers,
 	}
 
-	mihomo_adapter.InstallProtectHook(ctx)
+	release := mihomo_adapter.InstallProtectHook(ctx)
 	proxy, err := outbound.NewMasque(masqueOpt)
 	if err != nil {
+		release()
 		return nil, err
 	}
 
@@ -91,6 +104,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Adapter: outboundAdapter.NewAdapterWithDialerOptions(boxConstant.TypeMasque, tag, networks, options.DialerOptions),
 		proxy:   proxy,
 		logger:  logger,
+		release: release,
 	}, nil
 }
 
@@ -131,13 +145,17 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	metadata.Outbound = h.Tag()
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "masque outbound packet connection to ", destination)
-	pc, err := h.proxy.ListenPacketContext(ctx, buildMetadata(C.UDP, destination))
+	meta := buildMetadata(C.UDP, destination)
+	pc, err := h.proxy.ListenPacketContext(ctx, meta)
 	if err != nil {
 		return nil, err
 	}
-	return pc, nil
+	// mihomo resolved a domain destination into meta.DstIP and the returned
+	// connection only accepts IP addresses; translate between them.
+	return mihomo_adapter.WrapResolvedPacketConn(pc, meta, destination), nil
 }
 
 func (h *Outbound) Close() error {
+	h.release()
 	return h.proxy.Close()
 }

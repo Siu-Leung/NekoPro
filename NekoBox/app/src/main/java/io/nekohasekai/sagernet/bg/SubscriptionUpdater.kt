@@ -30,11 +30,12 @@ object SubscriptionUpdater {
         // PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS
         var minDelay =
             subscriptions.minByOrNull { it.subscription!!.autoUpdateDelay!! }!!.subscription!!.autoUpdateDelay!!.toLong()
-        val now = System.currentTimeMillis() / 1000L
-        var minInitDelay =
-            subscriptions.minOf { now - it.subscription!!.lastUpdated!! - (minDelay * 60) }
         if (minDelay < 15) minDelay = 15
-        if (minInitDelay > 60) minInitDelay = 60
+        val now = System.currentTimeMillis() / 1000L
+        val minInitDelay = subscriptions.minOf { sub ->
+            val intervalSec = sub.subscription!!.autoUpdateDelay!!.toLong().coerceAtLeast(15L) * 60L
+            (sub.subscription!!.lastUpdated!!.toLong() + intervalSec - now).coerceAtLeast(0L)
+        }.coerceAtMost(60L)
 
         // main process
         RemoteWorkManager.getInstance(app).enqueueUniquePeriodicWork(
@@ -72,7 +73,7 @@ object SubscriptionUpdater {
             if (subscriptions.isNotEmpty()) for (profile in subscriptions) {
                 val subscription = profile.subscription!!
 
-                if (((System.currentTimeMillis() / 1000).toInt() - subscription.lastUpdated!!) < subscription.autoUpdateDelay!! * 60) {
+                if ((System.currentTimeMillis() / 1000L - subscription.lastUpdated!!.toLong()) < subscription.autoUpdateDelay!!.toLong() * 60L) {
                     Logs.d("work: not updating " + profile.displayName())
                     continue
                 }

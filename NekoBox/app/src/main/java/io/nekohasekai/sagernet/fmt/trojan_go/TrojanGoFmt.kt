@@ -11,7 +11,7 @@ import org.json.JSONObject
 
 fun parseTrojanGo(server: String): TrojanGoBean {
     val link = server.replace("trojan-go://", "https://").toHttpUrlOrNull() ?: error(
-        "invalid trojan-link link $server"
+        "invalid trojan-go link ${server.redactLink()}"
     )
     return TrojanGoBean().apply {
         serverAddress = link.host

@@ -101,6 +101,23 @@ fun String.decodeBase64UrlSafe(): String {
     return String(Util.b64Decode(this))
 }
 
+fun String.redactLink(): String {
+    val trimmed = trim()
+    val schemeEnd = trimmed.indexOf("://")
+    if (schemeEnd <= 0) return "<redacted>"
+    val scheme = trimmed.substring(0, schemeEnd)
+    val authority = trimmed.substring(schemeEnd + 3)
+        .substringBefore('#')
+        .substringBefore('?')
+        .substringBefore('/')
+    val atIndex = authority.lastIndexOf('@')
+    return if (atIndex >= 0 && atIndex + 1 < authority.length) {
+        "$scheme://<redacted>@${authority.substring(atIndex + 1)}"
+    } else {
+        "$scheme://<redacted>"
+    }
+}
+
 // Sub
 
 class SubscriptionFoundException(val link: String) : RuntimeException()

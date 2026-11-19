@@ -8,30 +8,90 @@ import (
 	"os"
 	"reflect"
 	"syscall"
+	"time"
 )
 
-func getOneFd(socket int) (int, error) {
-	// recvmsg
-	buf := make([]byte, syscall.CmsgSpace(4))
-	_, _, _, _, err := syscall.Recvmsg(socket, nil, buf, 0)
+const (
+	maxControlFds  = 16
+	protectTimeout = 5 * time.Second
+)
+
+func closeAllFds(fds []int) {
+	for _, fd := range fds {
+		if fd >= 0 {
+			_ = syscall.Close(fd)
+		}
+	}
+}
+
+func checkPeerUID(peerUID uint32, expectedUID int) error {
+	if expectedUID < 0 || uint64(peerUID) != uint64(expectedUID) {
+		return fmt.Errorf("unauthorized peer uid %d (want %d)", peerUID, expectedUID)
+	}
+	return nil
+}
+
+func verifyPeerCred(conn *net.UnixConn) error {
+	rawConn, err := conn.SyscallConn()
 	if err != nil {
-		return 0, err
+		return err
+	}
+	var (
+		ucred   *syscall.Ucred
+		credErr error
+	)
+	if err := rawConn.Control(func(fd uintptr) {
+		ucred, credErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	}); err != nil {
+		return err
+	}
+	if credErr != nil {
+		return credErr
+	}
+	return checkPeerUID(ucred.Uid, os.Getuid())
+}
+
+func getOneFd(conn *net.UnixConn) (int, error) {
+	var data [1]byte
+	oob := make([]byte, syscall.CmsgSpace(4*maxControlFds))
+	_, oobn, flags, _, err := conn.ReadMsgUnix(data[:], oob)
+	if err != nil && !(err == io.EOF && oobn > 0) {
+		return -1, err
 	}
 
-	// parse control msgs
-	var msgs []syscall.SocketControlMessage
-	msgs, _ = syscall.ParseSocketControlMessage(buf)
-
+	msgs, parseErr := syscall.ParseSocketControlMessage(oob[:oobn])
+	var allFds []int
+	var rightsErr error
+	for i := range msgs {
+		if msgs[i].Header.Level == syscall.SOL_SOCKET && msgs[i].Header.Type == syscall.SCM_RIGHTS {
+			fds, err := syscall.ParseUnixRights(&msgs[i])
+			if err != nil && rightsErr == nil {
+				rightsErr = err
+			}
+			allFds = append(allFds, fds...)
+		}
+	}
+	if parseErr != nil {
+		closeAllFds(allFds)
+		return -1, parseErr
+	}
+	if rightsErr != nil {
+		closeAllFds(allFds)
+		return -1, rightsErr
+	}
+	if flags&syscall.MSG_CTRUNC != 0 {
+		closeAllFds(allFds)
+		return -1, fmt.Errorf("control message truncated")
+	}
 	if len(msgs) != 1 {
-		return 0, fmt.Errorf("invaild msgs count: %d", len(msgs))
+		closeAllFds(allFds)
+		return -1, fmt.Errorf("invalid msgs count: %d", len(msgs))
 	}
-
-	var fds []int
-	fds, _ = syscall.ParseUnixRights(&msgs[0])
-	if len(fds) != 1 {
-		return 0, fmt.Errorf("invaild fds count: %d", len(fds))
+	if len(allFds) != 1 {
+		closeAllFds(allFds)
+		return -1, fmt.Errorf("invalid fds count: %d", len(allFds))
 	}
-	return fds[0], nil
+	return allFds[0], nil
 }
 
 // GetFdFromConn get net.Conn's file descriptor.
@@ -48,16 +108,22 @@ func ServeProtect(path string, verbose bool, fwmark int, protectCtl func(fd int)
 		log.Println("ServeProtect", path, fwmark)
 	}
 
-	os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		return nil, err
 	}
-	os.Chmod(path, 0777)
+	if err := os.Chmod(path, 0600); err != nil {
+		_ = l.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
 
 	go func(ctl func(fd int)) {
 		for {
-			c, err := l.Accept()
+			c, err := l.AcceptUnix()
 			if err != nil {
 				if verbose {
 					log.Println("protect server accept:", err)
@@ -65,15 +131,24 @@ func ServeProtect(path string, verbose bool, fwmark int, protectCtl func(fd int)
 				return
 			}
 
-			go func() {
-				socket := GetFdFromConn(c)
-				defer c.Close()
+			go func(conn *net.UnixConn) {
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(protectTimeout))
 
-				fd, err := getOneFd(socket)
+				if err := verifyPeerCred(conn); err != nil {
+					if verbose {
+						log.Println("protect server verifyPeerCred:", err)
+					}
+					_, _ = conn.Write([]byte{0})
+					return
+				}
+
+				fd, err := getOneFd(conn)
 				if err != nil {
 					if verbose {
 						log.Println("protect server getOneFd:", err)
 					}
+					_, _ = conn.Write([]byte{0})
 					return
 				}
 				defer syscall.Close(fd)
@@ -81,7 +156,7 @@ func ServeProtect(path string, verbose bool, fwmark int, protectCtl func(fd int)
 				var protectErr error
 				if ctl == nil {
 					// linux
-					if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, fwmark); err != nil {
+					if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_MARK, fwmark); err != nil {
 						log.Println("protect server syscall.SetsockoptInt:", err)
 						protectErr = err
 					}
@@ -91,11 +166,11 @@ func ServeProtect(path string, verbose bool, fwmark int, protectCtl func(fd int)
 				}
 
 				if protectErr == nil {
-					_, _ = c.Write([]byte{1})
+					_, _ = conn.Write([]byte{1})
 				} else {
-					_, _ = c.Write([]byte{0})
+					_, _ = conn.Write([]byte{0})
 				}
-			}()
+			}(c)
 		}
 	}(protectCtl)
 

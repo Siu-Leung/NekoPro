@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.fmt.masque
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.linkBuilder
+import io.nekohasekai.sagernet.ktx.redactLink
 import io.nekohasekai.sagernet.ktx.toLink
 import io.nekohasekai.sagernet.ktx.urlSafe
 import moe.matsuri.nb4a.SingBoxOptions
@@ -9,7 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 fun parseMasque(url: String): MASQUEBean {
     val link = url.trim().replace("masque://", "https://").toHttpUrlOrNull()
-        ?: error("invalid masque link $url")
+        ?: error("invalid masque link ${url.redactLink()}")
     return MASQUEBean().apply {
         serverAddress = link.host.trim().removeSurrounding("[", "]")
         serverPort = link.port

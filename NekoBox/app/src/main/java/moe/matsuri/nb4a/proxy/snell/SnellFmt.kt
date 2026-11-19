@@ -1,6 +1,7 @@
 package moe.matsuri.nb4a.proxy.snell
 
 import io.nekohasekai.sagernet.ktx.linkBuilder
+import io.nekohasekai.sagernet.ktx.redactLink
 import io.nekohasekai.sagernet.ktx.toLink
 import io.nekohasekai.sagernet.ktx.urlSafe
 import moe.matsuri.nb4a.SingBoxOptions
@@ -101,7 +102,7 @@ fun parseSnell(url: String): SnellBean {
 
     // Fallback regex parser for non-standard URIs (supports IPv6 with [] and IPv4/domain)
     val regex = Regex("""^snell://([^@]+)@(?:\[([a-fA-F0-9:]+)\]|([^:]+)):(\d+)(?:\?(.*))?$""")
-    val match = regex.find(mainPart) ?: error("invalid snell link $url")
+    val match = regex.find(mainPart) ?: error("invalid snell link ${url.redactLink()}")
     val psk = percentDecodePreservingPlus(match.groupValues[1])
     val host = if (match.groupValues[2].isNotEmpty()) match.groupValues[2] else match.groupValues[3]
     val portStr = match.groupValues[4]

@@ -108,7 +108,7 @@ class MainActivity : ThemedActivity(),
         DataStore.configurationStore.registerChangeListener(this)
         GroupManager.userInterface = GroupInterfaceAdapter(this)
 
-        if (intent?.action == Intent.ACTION_VIEW) {
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) {
             onNewIntent(intent)
         }
 
@@ -285,7 +285,7 @@ class MainActivity : ThemedActivity(),
             .setPositiveButton(R.string.action_download) { _, _ ->
                 showDownloadDialog(pluginEntity)
             }
-            .setNeutralButton(android.R.string.cancel, null)
+            .setNegativeButton(android.R.string.cancel, null)
             .setNeutralButton(R.string.action_learn_more) { _, _ ->
                 launchCustomTab("https://matsuridayo.github.io/nb4a-plugin/")
             }

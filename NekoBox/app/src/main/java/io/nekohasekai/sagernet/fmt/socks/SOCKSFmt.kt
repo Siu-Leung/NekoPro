@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.fmt.socks
 
 import io.nekohasekai.sagernet.ktx.decodeBase64UrlSafe
+import io.nekohasekai.sagernet.ktx.redactLink
 import io.nekohasekai.sagernet.ktx.toLink
 import io.nekohasekai.sagernet.ktx.unUrlSafe
 import io.nekohasekai.sagernet.ktx.urlSafe
@@ -12,7 +13,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 fun parseSOCKS(link: String): SOCKSBean {
     val url = ("http://" + link.substringAfter("://")).toHttpUrlOrNull()
-        ?: error("Not supported: $link")
+        ?: error("Not supported: ${link.redactLink()}")
 
     return SOCKSBean().apply {
         protocol = when {

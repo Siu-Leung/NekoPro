@@ -5,7 +5,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.security.SecureRandom
-import java.util.Base64
+import okio.ByteString.Companion.decodeBase64
+import okio.ByteString.Companion.toByteString
 
 /** Stores one installation-scoped secret in Android's no-backup directory. */
 class InstallSecretStore(
@@ -26,7 +27,8 @@ class InstallSecretStore(
 
     private fun createSecret(secretFile: File): String {
         val bytes = ByteArray(SECRET_BYTES).also(random::nextBytes)
-        val secret = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        // java.util.Base64 is unavailable on API < 26 (not desugared); okio works everywhere.
+        val secret = bytes.toByteString().base64Url().trimEnd('=')
         val temporary = File.createTempFile(".$SECRET_FILE.", ".tmp", directory)
         try {
             FileOutputStream(temporary).use { output ->
@@ -46,7 +48,7 @@ class InstallSecretStore(
     private fun readValidSecret(file: File): String? {
         if (!file.isFile) return null
         val secret = file.readText(Charsets.US_ASCII).trim()
-        val decoded = runCatching { Base64.getUrlDecoder().decode(secret) }.getOrNull()
+        val decoded = runCatching { secret.decodeBase64()?.toByteArray() }.getOrNull()
         return secret.takeIf { decoded?.size == SECRET_BYTES }
     }
 

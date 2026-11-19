@@ -180,8 +180,9 @@ abstract class BoxInstance(
                         configFile.writeText(config)
                         cacheFiles.add(configFile)
 
+                        val plugin = initPlugin("hysteria-plugin")
                         val commands = mutableListOf(
-                            initPlugin("hysteria-plugin").path,
+                            plugin.path,
                             "--no-check",
                             "--config",
                             configFile.absolutePath,
@@ -191,7 +192,16 @@ abstract class BoxInstance(
                         )
 
                         if (bean.protocol == HysteriaBean.PROTOCOL_FAKETCP) {
-                            commands.addAll(0, listOf("su", "-c"))
+                            // Never run a third-party provided binary as root.
+                            check(plugin.info.applicationInfo == null) {
+                                "FakeTCP requires the built-in hysteria plugin"
+                            }
+                            // `su -c` only takes ONE argument: pass the whole command line quoted.
+                            val shellCommand = commands.joinToString(" ") {
+                                "'" + it.replace("'", "'\\''") + "'"
+                            }
+                            commands.clear()
+                            commands.addAll(listOf("su", "-c", shellCommand))
                         }
 
                         processes.start(commands)

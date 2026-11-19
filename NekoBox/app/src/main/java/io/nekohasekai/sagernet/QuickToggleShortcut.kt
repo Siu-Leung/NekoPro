@@ -41,7 +41,7 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent.action == Intent.ACTION_CREATE_SHORTCUT) {
+        if (intent?.action == Intent.ACTION_CREATE_SHORTCUT) {
             setResult(RESULT_OK, ShortcutManagerCompat.createShortcutResultIntent(this,
                 ShortcutInfoCompat.Builder(this, "toggle")
                     .setIntent(Intent(this,
@@ -50,6 +50,9 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
                         R.drawable.ic_qu_shadowsocks_launcher))
                     .setShortLabel(getString(R.string.quick_toggle))
                     .build()))
+            finish()
+        } else if (intent?.component?.className != QuickToggleShortcut::class.java.name) {
+            // The exported QuickToggleShortcutCreator alias only handles ACTION_CREATE_SHORTCUT.
             finish()
         } else {
             profileId = intent.getLongExtra("profile", -1L)
