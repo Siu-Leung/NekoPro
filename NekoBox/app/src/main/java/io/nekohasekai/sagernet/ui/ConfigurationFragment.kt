@@ -105,12 +105,14 @@ import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.Protocols.getProtocolColor
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSSettingsActivity
@@ -118,6 +120,7 @@ import moe.matsuri.nb4a.proxy.config.ConfigSettingActivity
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSSettingsActivity
 import moe.matsuri.nb4a.ui.ConnectionTestNotification
 import okhttp3.internal.closeQuietly
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.UnknownHostException
@@ -823,17 +826,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                             }
                         }
                     } else if (sample.done && sample.error.isNotBlank()) {
-                        // 测速失败时如果原本已有延迟（status==1），不要破坏其可用状态，持久化失败状态以便一键重测
-                        SagerDatabase.proxyDao.getById(sample.profileId)?.let { dbProfile ->
-                            if (dbProfile.status != 1) {
-                                dbProfile.status = 2
-                                dbProfile.error = sample.error
-                                SagerDatabase.proxyDao.updateProxy(dbProfile)
-                            }
-                        }
+                        // 测速失败时清空过期速度值，若原本已有延迟（status==1）则保留其可用状态
+                        SagerDatabase.proxyDao.updateSpeedTestFailure(sample.profileId, sample.error)
                         runOnMainDispatcher {
                             adapter.groupFragments.values.forEach { fragment ->
                                 fragment.adapter?.configurationList?.get(sample.profileId)?.let { p ->
+                                    p.speedTestMode = ""
+                                    p.speedTestDownloadBitsPerSecond = 0L
+                                    p.speedTestUploadBitsPerSecond = 0L
                                     if (p.status != 1) {
                                         p.status = 2
                                         p.error = sample.error
@@ -856,23 +856,35 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
                 }
-                delay(800)
-                onMainDispatcher {
-                    dialog.dismiss()
+                if (group.order == GroupOrder.BY_DOWNLOAD_SPEED || group.order == GroupOrder.BY_UPLOAD_SPEED) {
+                    GroupManager.postReload(group.id)
                 }
+                delay(800)
             } catch (_: kotlinx.coroutines.CancellationException) {
                 runOnMainDispatcher {
                     if (!speedTestHidden && isAdded) {
                         binding.nowTesting.text = getString(R.string.speed_test_stage_cancelled)
                     }
                 }
+            } catch (e: Exception) {
+                Logs.w(e)
+                runOnMainDispatcher {
+                    if (isAdded) {
+                        snackbar(e.readableMessage).show()
+                    }
+                }
             } finally {
-                speedTestNotification?.updateNotification(0, 0, true)
-                speedTestNotification = null
-                speedTestDialog = null
-                speedTestHidden = false
-                speedTestRunner = null
-                speedTestJob = null
+                withContext(Dispatchers.Main.immediate + NonCancellable) {
+                    if (dialog.isShowing) {
+                        runCatching { dialog.dismiss() }
+                    }
+                    speedTestNotification?.updateNotification(0, 0, true)
+                    speedTestNotification = null
+                    speedTestDialog = null
+                    speedTestHidden = false
+                    speedTestRunner = null
+                    speedTestJob = null
+                }
                 DataStore.releaseTestToken(testToken)
             }
         }
@@ -1045,12 +1057,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                         var address = profile.requireBean().serverAddress
                         if (!address!!.isIpAddress()) {
                             try {
-                                SagerNet.underlyingNetwork!!.getAllByName(address).apply {
-                                    if (isNotEmpty()) {
-                                        address = this[0].hostAddress
-                                    }
+                                val resolved = SagerNet.underlyingNetwork?.getAllByName(address)
+                                    ?: InetAddress.getAllByName(address)
+                                resolved.firstOrNull()?.hostAddress?.let {
+                                    address = it
                                 }
                             } catch (ignored: UnknownHostException) {
+                            } catch (ignored: Exception) {
                             }
                         }
                         if (!isActive) break

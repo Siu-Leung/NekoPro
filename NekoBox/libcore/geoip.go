@@ -3,6 +3,7 @@ package libcore
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,9 +18,19 @@ var (
 	geoipMu         sync.RWMutex
 	geoipReader     *maxminddb.Reader
 	geoipPath       string
+	geoipInfo       os.FileInfo
 	geoipGen        uint64
 	geoipRulesCache = make(map[string][]option.HeadlessRule)
 )
+
+func sameGeoFile(cached, current os.FileInfo) bool {
+	if cached == nil || current == nil {
+		return false
+	}
+	return os.SameFile(cached, current) &&
+		cached.Size() == current.Size() &&
+		cached.ModTime().Equal(current.ModTime())
+}
 
 // ResetGeoipCache drops the cached geoip reader and rules so that a newly
 // updated geoip.db takes effect without restarting the process.
@@ -31,6 +42,7 @@ func ResetGeoipCache() {
 		geoipReader = nil
 	}
 	geoipPath = ""
+	geoipInfo = nil
 	geoipGen++
 	geoipRulesCache = make(map[string][]option.HeadlessRule)
 }
@@ -77,11 +89,15 @@ func loadGeoIPRules(reader *maxminddb.Reader, key, countryCode string) ([]option
 func getGeoIPRules(countryCode string) ([]option.HeadlessRule, error) {
 	dbPath := filepath.Join(externalAssetsPath, geoipDat)
 	key := strings.ToLower(countryCode)
+	currentInfo, statErr := os.Stat(dbPath)
+	if statErr != nil {
+		return nil, statErr
+	}
 
 	// Fast path: hold RLock across cache check and database iteration so
 	// ResetGeoipCache cannot close/munmap geoipReader while it is in use.
 	geoipMu.RLock()
-	if geoipReader != nil && geoipPath == dbPath {
+	if geoipReader != nil && geoipPath == dbPath && sameGeoFile(geoipInfo, currentInfo) {
 		if rules, ok := geoipRulesCache[key]; ok {
 			geoipMu.RUnlock()
 			return rules, nil
@@ -101,10 +117,13 @@ func getGeoIPRules(countryCode string) ([]option.HeadlessRule, error) {
 	}
 	geoipMu.RUnlock()
 
-	// Cold path: lazily open (or reopen on path change) under exclusive lock.
+	// Cold path: lazily open (or reopen on path/file replacement) under exclusive lock.
 	geoipMu.Lock()
 	defer geoipMu.Unlock()
-	if geoipReader == nil || geoipPath != dbPath {
+	if latestInfo, err := os.Stat(dbPath); err == nil {
+		currentInfo = latestInfo
+	}
+	if geoipReader == nil || geoipPath != dbPath || !sameGeoFile(geoipInfo, currentInfo) {
 		r, err := maxminddb.Open(dbPath)
 		if err != nil {
 			return nil, err
@@ -114,6 +133,7 @@ func getGeoIPRules(countryCode string) ([]option.HeadlessRule, error) {
 		}
 		geoipReader = r
 		geoipPath = dbPath
+		geoipInfo = currentInfo
 		geoipGen++
 		geoipRulesCache = make(map[string][]option.HeadlessRule)
 	}

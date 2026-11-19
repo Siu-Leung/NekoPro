@@ -33,7 +33,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import moe.matsuri.nb4a.utils.Util
-import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AboutFragment : ToolbarFragment(R.layout.layout_about) {
 
@@ -51,6 +51,8 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
     }
 
     class AboutContent : MaterialAboutFragment() {
+
+        private val checkingUpdate = AtomicBoolean(false)
 
         val requestIgnoreBatteryOptimizations = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -73,9 +75,15 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .text(R.string.app_version)
                                 .subText(SagerNet.appVersionNameForDisplay)
                                 .setOnClickAction {
-                                    requireContext().launchCustomTab(
-                                        "https://github.com/Siu-Leung/NekoPro/releases"
-                                    )
+                                    openReleaseUrl(requireContext(), AppUpdatePolicy.RELEASES_PAGE_URL)
+                                }
+                                .build())
+                        .addItem(
+                            MaterialAboutActionItem.Builder()
+                                .icon(R.drawable.ic_baseline_update_24)
+                                .text(R.string.check_update_release)
+                                .setOnClickAction {
+                                    checkUpdate()
                                 }
                                 .build())
                         .addItem(
@@ -173,35 +181,43 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             }
         }
 
-        fun checkUpdate(checkPreview: Boolean) {
+        private fun openReleaseUrl(context: Context, url: String) {
+            val safeUrl = if (
+                url == AppUpdatePolicy.RELEASES_PAGE_URL ||
+                AppUpdatePolicy.isAllowedReleaseUrl(url)
+            ) {
+                url
+            } else {
+                AppUpdatePolicy.RELEASES_PAGE_URL
+            }
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, safeUrl.toUri()))
+            }.onFailure {
+                Logs.w(it)
+                Toast.makeText(app, it.readableMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        fun checkUpdate() {
+            if (!checkingUpdate.compareAndSet(false, true)) return
             runOnIoDispatcher {
+                val client = Libcore.newHttpClient().apply {
+                    modernTLS()
+                    trySocks5(DataStore.mixedPort)
+                }
                 try {
-                    val client = Libcore.newHttpClient().apply {
-                        modernTLS()
-                        trySocks5(DataStore.mixedPort)
-                    }
                     val response = client.newRequest().apply {
-                        if (checkPreview) {
-                            setURL("https://api.github.com/repos/Siu-Leung/NekoPro/releases/tags/preview")
-                        } else {
-                            setURL("https://api.github.com/repos/Siu-Leung/NekoPro/releases/latest")
-                        }
+                        setURL(AppUpdatePolicy.LATEST_RELEASE_API_URL)
+                        setUserAgent("NekoPro/${BuildConfig.VERSION_NAME}")
+                        setHeader("Accept", "application/vnd.github+json")
                     }.execute()
-                    val release = JSONObject(Util.getStringBox(response.contentString))
-                    val releaseName = release.getString("name")
-                    val releaseUrl = release.getString("html_url")
-                    var haveUpdate = releaseName.isNotBlank()
-                    haveUpdate = if (isPreview) {
-                        if (checkPreview) {
-                            haveUpdate && releaseName != BuildConfig.PRE_VERSION_NAME
-                        } else {
-                            // User: 1.3.9 pre-1.4.0 Stable: 1.3.9 -> No update
-                            haveUpdate && releaseName != BuildConfig.VERSION_NAME
-                        }
-                    } else {
-                        val currentSemver = BuildConfig.VERSION_NAME.removePrefix("Neko-Pro-").removePrefix("v")
-                        haveUpdate && !releaseName.contains(BuildConfig.VERSION_NAME) && !releaseName.contains(currentSemver)
-                    }
+                    val release = AppUpdatePolicy.parseLatestRelease(
+                        Util.getStringBox(response.contentString)
+                    )
+                    val haveUpdate = AppUpdatePolicy.isUpdateAvailable(
+                        BuildConfig.VERSION_NAME,
+                        release.version,
+                    )
                     runOnMainDispatcher {
                         if (!isAdded) return@runOnMainDispatcher
                         if (haveUpdate) {
@@ -212,12 +228,11 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                     context.getString(
                                         R.string.update_dialog_message,
                                         SagerNet.appVersionNameForDisplay,
-                                        releaseName
+                                        release.displayName,
                                     )
                                 )
                                 .setPositiveButton(R.string.yes) { _, _ ->
-                                    val intent = Intent(Intent.ACTION_VIEW, releaseUrl.toUri())
-                                    context.startActivity(intent)
+                                    openReleaseUrl(context, release.releaseUrl)
                                 }
                                 .setNegativeButton(R.string.no, null)
                                 .show()
@@ -230,6 +245,9 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                     runOnMainDispatcher {
                         Toast.makeText(app, e.readableMessage, Toast.LENGTH_SHORT).show()
                     }
+                } finally {
+                    client.close()
+                    checkingUpdate.set(false)
                 }
             }
         }

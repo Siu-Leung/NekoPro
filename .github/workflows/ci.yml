@@ -19,11 +19,11 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') && github.ref != 'refs/heads/main' }}
 
 jobs:
   go-tests:
@@ -37,6 +37,9 @@ jobs:
           cache-dependency-path: |
             sing-box/go.sum
             NekoBox/libcore/go.sum
+      - name: Test libneko
+        working-directory: libneko
+        run: go test ./...
       - name: Test sing-box
         working-directory: sing-box
         run: go test ./...
@@ -48,6 +51,8 @@ jobs:
     name: Android build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -106,12 +111,99 @@ jobs:
             NekoBox/app/build/outputs/apk/oss/release/*.apk
             NekoBox/app/build/outputs/apk/oss/release/checksums/*.txt
           if-no-files-found: error
+      - name: Resolve release metadata
+        id: release_meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_STR: ${{ github.ref }}
+          GITHUB_REF_NAME_STR: ${{ github.ref_name }}
+          INPUT_PUBLISH: ${{ inputs.publish_release }}
+          INPUT_TAG: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          should_release="false"
+          tag_name=""
+
+          derive_tag_from_props() {
+            local raw ver
+            raw="$(grep -E '^VERSION_NAME=' NekoBox/nb4a.properties | head -n1 | cut -d= -f2- | tr -d '\r\n ')"
+            ver="$(printf '%s' "$raw" | sed -nE 's/.*([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?).*/\1/p')"
+            if [ -n "$ver" ]; then
+              printf 'v%s' "$ver"
+            fi
+          }
+
+          if [[ "$GITHUB_REF_STR" == refs/tags/v* ]]; then
+            should_release="true"
+            tag_name="$GITHUB_REF_NAME_STR"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$INPUT_PUBLISH" == "true" ]]; then
+            should_release="true"
+            tag_name="${INPUT_TAG:-$(derive_tag_from_props)}"
+          elif [[ "$EVENT_NAME" == "push" && "$GITHUB_REF_STR" == "refs/heads/main" ]]; then
+            candidate_tag="$(derive_tag_from_props)"
+            if [ -n "$candidate_tag" ]; then
+              tag_exists="$(git ls-remote --tags origin "refs/tags/${candidate_tag}")"
+              if [ -z "$tag_exists" ] && ! gh release view "$candidate_tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                should_release="true"
+                tag_name="$candidate_tag"
+              else
+                echo "Release tag ${candidate_tag} already exists; skipping auto-release."
+              fi
+            fi
+          fi
+
+          has_notes="false"
+          notes_path="${RUNNER_TEMP}/release-notes.md"
+          if [[ "$should_release" == "true" && -n "$tag_name" ]]; then
+            python3 - "$tag_name" "$notes_path" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          tag = sys.argv[1]
+          out_path = Path(sys.argv[2])
+          readme = Path("README.md").read_text(encoding="utf-8").splitlines()
+
+          heading_re = re.compile(rf"^###\s+{re.escape(tag)}\b")
+          start = None
+          for idx, line in enumerate(readme):
+              if heading_re.match(line):
+                  start = idx + 1
+                  break
+
+          if start is not None:
+              body_lines = []
+              for line in readme[start:]:
+                  if line.startswith("## ") or line.startswith("### "):
+                      break
+                  body_lines.append(line)
+              body = "\n".join(body_lines).strip()
+              if body:
+                  out_path.write_text(f"## Neko Pro {tag} 更新说明\n\n{body}\n", encoding="utf-8")
+          PY
+            if [ -s "$notes_path" ]; then
+              has_notes="true"
+            fi
+          fi
+
+          {
+            echo "should_release=${should_release}"
+            echo "tag_name=${tag_name}"
+            echo "has_notes=${has_notes}"
+            echo "body_path=${notes_path}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved release metadata: should_release=${should_release} tag_name=${tag_name} has_notes=${has_notes}"
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: steps.release_meta.outputs.should_release == 'true' && steps.release_meta.outputs.tag_name != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag_name || github.ref_name }}
-          name: Neko Pro ${{ inputs.tag_name || github.ref_name }}
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: Neko Pro ${{ steps.release_meta.outputs.tag_name }}
+          body_path: ${{ steps.release_meta.outputs.has_notes == 'true' && steps.release_meta.outputs.body_path || '' }}
+          generate_release_notes: ${{ steps.release_meta.outputs.has_notes != 'true' }}
+          make_latest: true
           files: |
             NekoBox/app/build/outputs/apk/oss/release/*.apk
             NekoBox/app/build/outputs/apk/oss/release/checksums/*.txt

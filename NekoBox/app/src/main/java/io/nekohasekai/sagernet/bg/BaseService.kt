@@ -25,6 +25,7 @@ import libcore.Libcore
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.utils.Util
 import java.net.UnknownHostException
+import java.util.concurrent.ConcurrentHashMap
 
 class BaseService {
 
@@ -88,10 +89,11 @@ class BaseService {
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val activeProxy = proxy?.takeIf { it.isInitialized() }
                         if (SagerNet.power.isDeviceIdleMode) {
-                            proxy?.box?.sleep()
+                            activeProxy?.box?.sleep()
                         } else {
-                            proxy?.box?.wake()
+                            activeProxy?.box?.wake()
                             if (DataStore.wakeResetConnections) {
                                 Libcore.resetAllConnections(true)
                             }
@@ -133,13 +135,14 @@ class BaseService {
 
     class Binder(private var data: Data? = null) : ISagerNetService.Stub(), CoroutineScope,
         AutoCloseable {
+        val callbackIdMap = ConcurrentHashMap<IBinder, Int>()
+
         private val callbacks = object : RemoteCallbackList<ISagerNetServiceCallback>() {
             override fun onCallbackDied(callback: ISagerNetServiceCallback?, cookie: Any?) {
                 super.onCallbackDied(callback, cookie)
+                callback?.asBinder()?.let { callbackIdMap.remove(it) }
             }
         }
-
-        val callbackIdMap = mutableMapOf<ISagerNetServiceCallback, Int>()
 
         override val coroutineContext = Dispatchers.Main.immediate + Job()
 
@@ -151,10 +154,10 @@ class BaseService {
                 Runtime.getRuntime().exit(0)
                 return
             }
-            if (!callbackIdMap.contains(cb)) {
+            val binder = cb.asBinder()
+            if (callbackIdMap.put(binder, id) == null) {
                 callbacks.register(cb)
             }
-            callbackIdMap[cb] = id
         }
 
         private val broadcastMutex = Mutex()
@@ -177,17 +180,18 @@ class BaseService {
         }
 
         override fun unregisterCallback(cb: ISagerNetServiceCallback) {
-            callbackIdMap.remove(cb)
+            callbackIdMap.remove(cb.asBinder())
             callbacks.unregister(cb)
         }
 
         override fun urlTest(): Int {
-            if (data?.proxy?.box == null) {
+            val proxy = data?.proxy
+            if (proxy == null || !proxy.isInitialized()) {
                 error("core not started")
             }
             try {
                 return Libcore.urlTest(
-                    data!!.proxy!!.box, DataStore.connectionTestURL, 3000
+                    proxy.box, DataStore.connectionTestURL, 3000
                 )
             } catch (e: Exception) {
                 error(Protocols.genFriendlyMsg(e.readableMessage))
@@ -205,6 +209,7 @@ class BaseService {
         }
 
         override fun close() {
+            callbackIdMap.clear()
             callbacks.kill()
             cancel()
             data = null
@@ -226,12 +231,14 @@ class BaseService {
             }
             data.serviceScope.launch {
                 if (reason is ReloadReason.SelectorOnly && canReloadSelector(reason.profileId)) {
-                    val proxy = data.proxy ?: return@launch
-                    val tag = proxy.config.profileTagMap[reason.profileId].orEmpty()
-                    if (tag.isNotBlank()) {
-                        proxy.box.selectOutbound(tag)
+                    val proxy = data.proxy
+                    if (data.state == State.Connected && proxy != null && proxy.isInitialized()) {
+                        val tag = proxy.config.profileTagMap[reason.profileId].orEmpty()
+                        if (tag.isNotBlank()) {
+                            proxy.box.selectOutbound(tag)
+                        }
+                        return@launch
                     }
-                    return@launch
                 }
                 val s = data.state
                 when {
@@ -243,7 +250,9 @@ class BaseService {
         }
 
         suspend fun canReloadSelector(profileId: Long): Boolean {
-            val runningGroupId = data.proxy?.config?.selectorGroupId ?: return false
+            val proxy = data.proxy ?: return false
+            if (data.state != State.Connected || !proxy.isInitialized()) return false
+            val runningGroupId = proxy.config.selectorGroupId
             if (runningGroupId < 0L) return false
             val ent = withContext(Dispatchers.IO) { SagerDatabase.proxyDao.getById(profileId) } ?: return false
             return ent.groupId == runningGroupId

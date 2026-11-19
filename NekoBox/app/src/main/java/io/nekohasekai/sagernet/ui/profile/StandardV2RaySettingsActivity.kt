@@ -6,6 +6,7 @@ import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
@@ -54,17 +55,37 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
     private val muxType = pbm.add(PreferenceBinding(Type.TextToInt, "muxType"))
     private val muxConcurrency = pbm.add(PreferenceBinding(Type.TextToInt, "muxConcurrency"))
 
-    override fun StandardV2RayBean.init() {
-        if (this is TrojanBean) {
+    private fun configureBeanBindings(bean: StandardV2RayBean) {
+        if (bean is TrojanBean) {
             this@StandardV2RaySettingsActivity.uuid.fieldName = "password"
             this@StandardV2RaySettingsActivity.password.disable = true
         }
+    }
 
+    private fun ensureBeanState(): StandardV2RayBean {
+        tmpBean?.let {
+            configureBeanBindings(it)
+            return it
+        }
+        val restored = (if (DataStore.editingId != 0L) {
+            proxyEntity?.requireBean() as? StandardV2RayBean
+        } else {
+            null
+        } ?: createEntity()).also { bean ->
+            configureBeanBindings(bean)
+            tmpBean = bean
+        }
+        return restored
+    }
+
+    override fun StandardV2RayBean.init() {
+        configureBeanBindings(this)
         tmpBean = this // copy bean
         pbm.writeToCacheAll(this)
     }
 
     override fun StandardV2RayBean.serialize() {
+        configureBeanBindings(this)
         pbm.fromCacheAll(this)
     }
 
@@ -88,11 +109,12 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
         xhttpCategory = findPreference(Key.SERVER_XHTTP_CATEGORY)!!
         muxCategory = findPreference(Key.SERVER_MUX_CATEGORY)!!
 
-
+        // Restore bean metadata after configuration changes (e.g., screen rotation).
+        val bean = ensureBeanState()
         // vmess/vless/http/trojan
-        val isHttp = tmpBean is HttpBean
-        val isVmess = tmpBean is VMessBean && tmpBean?.isVLESS == false
-        val isVless = tmpBean?.isVLESS == true
+        val isHttp = bean is HttpBean
+        val isVmess = bean is VMessBean && !bean.isVLESS
+        val isVless = bean.isVLESS
 
         serverPort.preference.apply {
             this as EditTextPreference
@@ -114,7 +136,7 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
         username.preference.isVisible = isHttp
         password.preference.isVisible = isHttp
 
-        if (tmpBean is TrojanBean) {
+        if (bean is TrojanBean) {
             uuid.preference.title = resources.getString(R.string.password)
         }
 

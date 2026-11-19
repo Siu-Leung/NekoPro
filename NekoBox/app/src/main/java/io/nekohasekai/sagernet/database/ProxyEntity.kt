@@ -559,7 +559,9 @@ data class ProxyEntity(
             """UPDATE proxy_entities SET
                 speedTestMode = :mode,
                 speedTestDownloadBitsPerSecond = :downloadBitsPerSecond,
-                speedTestUploadBitsPerSecond = :uploadBitsPerSecond
+                speedTestUploadBitsPerSecond = :uploadBitsPerSecond,
+                status = CASE WHEN status = 1 THEN 1 ELSE 0 END,
+                error = CASE WHEN status = 1 THEN error ELSE NULL END
                 WHERE id = :proxyId"""
         )
         fun updateSpeedTestResult(
@@ -567,6 +569,27 @@ data class ProxyEntity(
             mode: String,
             downloadBitsPerSecond: Long,
             uploadBitsPerSecond: Long,
+        ): Int
+
+        @Query(
+            """UPDATE proxy_entities SET
+                speedTestMode = '',
+                speedTestDownloadBitsPerSecond = 0,
+                speedTestUploadBitsPerSecond = 0,
+                status = CASE WHEN status = 1 THEN 1 ELSE 2 END,
+                error = CASE WHEN status = 1 THEN error ELSE :error END
+                WHERE id = :proxyId"""
+        )
+        fun updateSpeedTestFailure(
+            proxyId: Long,
+            error: String,
+        ): Int
+
+        @Query("UPDATE proxy_entities SET tx = :tx, rx = :rx WHERE id = :proxyId")
+        fun updateTraffic(
+            proxyId: Long,
+            tx: Long,
+            rx: Long,
         ): Int
 
         @Query(

@@ -99,9 +99,9 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
             setHomeAsUpIndicator(R.drawable.ic_navigation_close)
         }
 
+        isSubscription = intent.getBooleanExtra(EXTRA_IS_SUBSCRIPTION, false)
         if (savedInstanceState == null) {
             val editingId = intent.getLongExtra(EXTRA_PROFILE_ID, 0L)
-            isSubscription = intent.getBooleanExtra(EXTRA_IS_SUBSCRIPTION, false)
             DataStore.editingId = editingId
             runOnDefaultDispatcher {
                 if (editingId == 0L) {
@@ -234,7 +234,9 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
 
             activity?.apply {
                 viewCreated(view, savedInstanceState)
-                DataStore.dirty = false
+                if (savedInstanceState == null) {
+                    DataStore.dirty = false
+                }
                 DataStore.profileCacheStore.registerChangeListener(this)
             }
         }
