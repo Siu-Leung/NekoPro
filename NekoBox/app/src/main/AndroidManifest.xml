@@ -138,6 +138,7 @@
                 <data android:scheme="juicity" />
                 <data android:scheme="anytls" />
                 <data android:scheme="snell" />
+                <data android:scheme="mieru" />
 
             </intent-filter>
 

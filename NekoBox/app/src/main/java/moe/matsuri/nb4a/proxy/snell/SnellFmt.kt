@@ -17,6 +17,8 @@ fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_Snel
         server = bean.serverAddress?.trim()?.removeSurrounding("[", "]")
         server_port = bean.serverPort
         psk = bean.psk
+        val uk = bean.userkey?.trim()
+        if (!uk.isNullOrEmpty()) userkey = uk
         version = nativeVersion
         reuse = true
         if (nativeVersion == 6) {
@@ -46,6 +48,7 @@ fun SnellBean.toUri(): String {
         builder.encodedFragment(beanName.urlSafe())
     }
     builder.addQueryParameter("version", clampedVersion.toString())
+    if (!userkey.isNullOrBlank()) builder.addQueryParameter("userkey", userkey!!.trim())
     if (clampedVersion == 6) builder.addQueryParameter("mode", mode?.takeIf { it.isNotBlank() } ?: "default")
     val obfsMode = this.obfsMode
     if (!obfsMode.isNullOrBlank() && obfsMode != "none") {
@@ -93,6 +96,7 @@ fun parseSnell(url: String): SnellBean {
             obfsMode = link.queryParameter("obfs")?.takeIf { it.isNotBlank() } ?: "none"
             obfsHost = link.queryParameter("obfs-host") ?: ""
             clientFingerprint = link.queryParameter("fp") ?: ""
+            userkey = link.queryParameter("userkey") ?: ""
         }
     }
 
@@ -120,5 +124,6 @@ fun parseSnell(url: String): SnellBean {
         obfsMode = queryParams["obfs"]?.takeIf { it.isNotBlank() } ?: "none"
         obfsHost = queryParams["obfs-host"] ?: ""
         clientFingerprint = queryParams["fp"] ?: ""
+        userkey = queryParams["userkey"] ?: ""
     }
 }

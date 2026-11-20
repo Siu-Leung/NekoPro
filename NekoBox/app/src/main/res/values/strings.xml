@@ -644,4 +644,8 @@
     <string name="speed_test_upload_format">Upload: %1$s (%2$s)</string>
     <string name="speed_test_rate_mbps">%1$.2f Mbps</string>
     <string name="speed_test_finished_summary">Finished: %1$d, failed: %2$d, cancelled: %3$d</string>
+    <string name="subscription_node_dns">Node Domain DNS</string>
+    <string name="subscription_node_dns_sum">Optional DNS used only to resolve proxy server hostnames in this group</string>
+    <string name="subscription_auto_adopt_node_dns">Auto-adopt Node DNS from Clash YAML</string>
+    <string name="subscription_auto_adopt_node_dns_sum">Fetch full Clash YAML (clash-meta / FlClash) and adopt dns.proxy-server-nameserver for this group only</string>
 </resources>

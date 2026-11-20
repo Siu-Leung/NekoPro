@@ -29,10 +29,23 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.3.1`
+`Neko-Pro-1.4.0`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.3.1)
-- 核心 APK：`NekoBox-Neko-Pro-1.3.1-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.0)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.0-arm64-v8a.apk`
+
+### v1.4.0 改动日志 (2026-11-20)
+
+- **订阅组专属「节点域名 DNS」（手动绑定 + Clash 自动采纳）**
+  - **分组隔离绑定**：在订阅组设置新增可选「节点域名 DNS」与「自动采用订阅节点 DNS」开关（Kryo v2 向后兼容）；`ConfigBuilder` 为配置了节点 DNS 的订阅组注册独立 `dns-group-<id>` 解析器并逐出站绑定 `domain_resolver`（支持链式代理各跳按所属组独立解析、测速与正常连接一致），不接管普通网站、规则集与 FakeIP。
+  - **Clash 自动采纳与 UA 协商**：开启自动模式后按 `clash-meta` → `FlClash/v0.9.4 clash-verge Platform/android` 顺序协商完整 Clash YAML，严格校验 `dns.proxy-server-nameserver`（拒绝 `#PROXY` 后缀、多服务器截断与 `?query` 失真）并要求与节点来自同一份响应；刷新失败保留旧节点与旧 DNS 快照。
+- **协议参数保真与清理（WireGuard / Mieru / Snell）**
+  - **WireGuard**：`WireGuardBean` 与 `.conf` 导入保留 `AllowedIPs` 与 `PersistentKeepalive`（已有节点默认行为不变），并接入编辑页与 sing-box Endpoint 生成。
+  - **Mieru**：补全 `port_range`、`multiplexing`、`handshake_mode` 字段、`mieru://` 分享链接导入导出与 Clash YAML `type: mieru` 解析，移除已不可达的外部 `mieru-plugin` 启动与导出残支。
+  - **Snell**：补全 `userkey` 编辑页、`snell://` 链接与 Clash YAML 导入导出并接入原生 `sing-snell` 出站。
+- **工程维护与 CI 修复**
+  - 新增 [`docs/VENDORED_PATCHES.md`](docs/VENDORED_PATCHES.md) 记录 `sing-box` 与 `mihomo` 的全部私有补丁边界。
+  - 修复 `android-emulator-runner` 多行脚本拆分子 shell 导致升级测试变量丢失的问题。
 
 ### v1.3.1 改动日志 (2026-11-20)
 

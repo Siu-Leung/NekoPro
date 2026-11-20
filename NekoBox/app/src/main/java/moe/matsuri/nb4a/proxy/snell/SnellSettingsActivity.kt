@@ -20,6 +20,7 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
     private val serverAddress = pbm.add(PreferenceBinding(Type.Text, "serverAddress"))
     private val serverPort = pbm.add(PreferenceBinding(Type.TextToInt, "serverPort"))
     private val psk = pbm.add(PreferenceBinding(Type.Text, "psk"))
+    private val userkey = pbm.add(PreferenceBinding(Type.Text, "userkey"))
     private val version = pbm.add(PreferenceBinding(Type.TextToInt, "version"))
     private val mode = pbm.add(PreferenceBinding(Type.Text, "mode"))
     private val obfsMode = pbm.add(PreferenceBinding(Type.Text, "obfsMode"))
@@ -48,6 +49,9 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         }
         findPreference<EditTextPreference>("psk")!!.apply {
+            summaryProvider = PasswordSummaryProvider
+        }
+        findPreference<EditTextPreference>("userkey")?.apply {
             summaryProvider = PasswordSummaryProvider
         }
         mode.preference.isVisible = version.readStringToIntFromCache() == 6

@@ -48,6 +48,17 @@
             app:key="reserved"
             app:title="Reserved"
             app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:icon="@drawable/ic_baseline_add_road_24"
+            app:key="allowedIps"
+            app:title="AllowedIPs (default 0.0.0.0/0, ::/0)"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="0"
+            app:icon="@drawable/ic_baseline_timelapse_24"
+            app:key="persistentKeepalive"
+            app:title="Persistent Keepalive (seconds)"
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
 </PreferenceScreen>

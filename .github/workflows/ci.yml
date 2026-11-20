@@ -171,9 +171,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-linux-hw-accel: false
-          script: |
-            ver="$(grep -E '^VERSION_NAME=' NekoBox/nb4a.properties | head -n1 | cut -d= -f2- | tr -d '\r\n ')"
-            bash .github/scripts/check-android-upgrade.sh "$RUNNER_TEMP/nekopro-v1.2.2-x86_64.apk" "NekoBox/app/build/outputs/apk/oss/release/NekoBox-${ver}-x86_64.apk" "$ver"
+          script: bash .github/scripts/check-android-upgrade.sh "$RUNNER_TEMP/nekopro-v1.2.2-x86_64.apk"
       - name: Resolve release metadata
         id: release_meta
         env:

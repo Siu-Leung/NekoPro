@@ -27,9 +27,21 @@ class SubscriptionBean : Serializable() {
     @JvmField var protocols: MutableList<String>? = null
 
     @JvmField var subscriptionUserinfo: String? = null
+    @JvmField var nodeDns: String? = null
+    @JvmField var autoAdoptNodeDns: Boolean? = null
+    @JvmField var adoptedNodeDns: String? = null
+
+    fun effectiveNodeDns(): String? {
+        val manual = nodeDns?.trim()
+        if (!manual.isNullOrEmpty()) return manual
+        if (autoAdoptNodeDns == true) {
+            return adoptedNodeDns?.trim()?.takeIf { it.isNotEmpty() }
+        }
+        return null
+    }
 
     override fun serializeToBuffer(output: ByteBufferOutput) {
-        output.writeInt(1)
+        output.writeInt(2)
         output.writeInt(type ?: 0)
         output.writeString(link)
         output.writeBoolean(forceResolve ?: false)
@@ -40,6 +52,9 @@ class SubscriptionBean : Serializable() {
         output.writeInt(autoUpdateDelay ?: 1440)
         output.writeInt(lastUpdated ?: 0)
         output.writeString(subscriptionUserinfo)
+        output.writeString(nodeDns)
+        output.writeBoolean(autoAdoptNodeDns ?: false)
+        output.writeString(adoptedNodeDns)
     }
 
     fun serializeForShare(output: ByteBufferOutput) {
@@ -67,6 +82,11 @@ class SubscriptionBean : Serializable() {
         }
         if (version >= 1 && input.limit() - input.position() > 0) {
             subscriptionUserinfo = input.readString()
+        }
+        if (version >= 2 && input.limit() - input.position() > 0) {
+            nodeDns = input.readString()
+            autoAdoptNodeDns = input.readBoolean()
+            adoptedNodeDns = input.readString()
         }
     }
 
@@ -96,6 +116,9 @@ class SubscriptionBean : Serializable() {
         if (username == null) username = ""
         if (expiryDate == null) expiryDate = 0
         if (protocols == null) protocols = mutableListOf()
+        if (nodeDns == null) nodeDns = ""
+        if (autoAdoptNodeDns == null) autoAdoptNodeDns = false
+        if (adoptedNodeDns == null) adoptedNodeDns = ""
     }
 
     companion object {

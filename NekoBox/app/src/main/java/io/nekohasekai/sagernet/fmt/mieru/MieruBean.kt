@@ -11,6 +11,9 @@ class MieruBean : AbstractBean() {
     @JvmField var username: String? = null
     @JvmField var password: String? = null
     @JvmField var mtu: Int? = null
+    @JvmField var portRange: String? = null
+    @JvmField var multiplexing: String? = null
+    @JvmField var handshakeMode: String? = null
 
     override fun initializeDefaultValues() {
         super.initializeDefaultValues()
@@ -18,15 +21,21 @@ class MieruBean : AbstractBean() {
         if (username == null) username = ""
         if (password == null) password = ""
         if (mtu == null) mtu = 1400
+        if (portRange == null) portRange = ""
+        if (multiplexing == null) multiplexing = ""
+        if (handshakeMode == null) handshakeMode = ""
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(0)
+        output.writeInt(1)
         super.serialize(output)
         output.writeString(protocol)
         output.writeString(username)
         output.writeString(password)
-        if (protocol == "UDP") output.writeInt(mtu!!)
+        if (protocol == "UDP") output.writeInt(mtu ?: 1400)
+        output.writeString(portRange)
+        output.writeString(multiplexing)
+        output.writeString(handshakeMode)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -36,6 +45,11 @@ class MieruBean : AbstractBean() {
         username = input.readString()
         password = input.readString()
         if (protocol == "UDP") mtu = input.readInt()
+        if (version >= 1 && input.limit() - input.position() > 0) {
+            portRange = input.readString()
+            multiplexing = input.readString()
+            handshakeMode = input.readString()
+        }
     }
 
     override fun clone(): MieruBean =

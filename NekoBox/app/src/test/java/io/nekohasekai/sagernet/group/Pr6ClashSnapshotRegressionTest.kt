@@ -31,4 +31,48 @@ class Pr6ClashSnapshotRegressionTest {
     fun completeSnapshotIsAccepted() = runBlocking<Unit> {
         assertEquals(listOf("kept"), RawUpdater.parseSubscription(valid)?.map { it.name })
     }
+
+    @Test
+    fun extractClashProxyServerNameserverValidatesStrictRules() {
+        val validYaml = """
+            dns:
+              proxy-server-nameserver:
+                - https://dns.example.com/dns-query/token
+            proxies:
+              - {name: kept, type: socks5, server: example.com, port: 1080}
+        """.trimIndent()
+        assertEquals(
+            "https://dns.example.com/dns-query/token",
+            RawUpdater.extractClashProxyServerNameserver(validYaml),
+        )
+
+        val suffixYaml = """
+            dns:
+              proxy-server-nameserver:
+                - https://dns.example.com/dns-query#PROXY
+            proxies:
+              - {name: kept, type: socks5, server: example.com, port: 1080}
+        """.trimIndent()
+        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(suffixYaml))
+
+        val queryYaml = """
+            dns:
+              proxy-server-nameserver:
+                - https://dns.example.com/dns-query?token=1
+            proxies:
+              - {name: kept, type: socks5, server: example.com, port: 1080}
+        """.trimIndent()
+        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(queryYaml))
+    }
+
+    @Test
+    fun clashYamlImportsMieruAndSnellUserkey() = runBlocking<Unit> {
+        val yaml = """
+            proxies:
+              - {name: m1, type: mieru, server: mieru.example.com, port-range: 20000-20100, transport: UDP, username: u, password: p, mtu: 1360}
+              - {name: s6, type: snell, server: snell.example.com, port: 8443, psk: k, userkey: uk1, version: 6}
+        """.trimIndent()
+        val parsed = RawUpdater.parseSubscription(yaml)
+        assertEquals(listOf("m1", "s6"), parsed?.map { it.name })
+    }
 }

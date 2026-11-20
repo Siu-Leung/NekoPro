@@ -560,4 +560,8 @@
     <string name="route_mode_rule">智能分流 (Rule)</string>
     <string name="route_mode_global">全局代理 (Global)</string>
     <string name="route_mode_switched">已切换至：%1$s</string>
+    <string name="subscription_node_dns">节点域名 DNS</string>
+    <string name="subscription_node_dns_sum">可选，仅用于解析本订阅组内代理节点入口域名（不影响网站与分流规则）</string>
+    <string name="subscription_auto_adopt_node_dns">自动采用订阅节点 DNS</string>
+    <string name="subscription_auto_adopt_node_dns_sum">刷新时按 clash-meta / FlClash 协商完整 Clash YAML，仅采纳 dns.proxy-server-nameserver</string>
 </resources>

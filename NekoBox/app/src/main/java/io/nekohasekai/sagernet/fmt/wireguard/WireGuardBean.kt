@@ -13,6 +13,8 @@ class WireGuardBean : AbstractBean() {
     @JvmField var peerPreSharedKey: String? = null
     @JvmField var mtu: Int? = null
     @JvmField var reserved: String? = null
+    @JvmField var allowedIps: String? = null
+    @JvmField var persistentKeepalive: Int? = null
 
     override fun canTCPing(): Boolean = false
 
@@ -24,13 +26,16 @@ class WireGuardBean : AbstractBean() {
         if (peerPreSharedKey == null) peerPreSharedKey = ""
         if (mtu == null) mtu = 1420
         if (reserved == null) reserved = ""
+        if (allowedIps == null) allowedIps = ""
+        if (persistentKeepalive == null) persistentKeepalive = 0
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(2); super.serialize(output)
+        output.writeInt(3); super.serialize(output)
         output.writeString(localAddress); output.writeString(privateKey)
         output.writeString(peerPublicKey); output.writeString(peerPreSharedKey)
         output.writeInt(mtu ?: 1420); output.writeString(reserved)
+        output.writeString(allowedIps); output.writeInt(persistentKeepalive ?: 0)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -40,6 +45,10 @@ class WireGuardBean : AbstractBean() {
         mtu = input.readInt()
         if (version >= 2) {
             reserved = input.readString()
+        }
+        if (version >= 3 && input.limit() - input.position() > 0) {
+            allowedIps = input.readString()
+            persistentKeepalive = input.readInt()
         }
     }
 

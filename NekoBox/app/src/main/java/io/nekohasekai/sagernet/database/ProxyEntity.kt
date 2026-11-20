@@ -12,7 +12,7 @@ import io.nekohasekai.sagernet.fmt.http.toUri
 import io.nekohasekai.sagernet.fmt.hysteria.*
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
-import io.nekohasekai.sagernet.fmt.mieru.buildMieruConfig
+import io.nekohasekai.sagernet.fmt.mieru.toUri
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.naive.buildNaiveConfig
 import io.nekohasekai.sagernet.fmt.naive.toUri
@@ -291,6 +291,7 @@ data class ProxyEntity(
             is JuicityBean -> toUri()
             is MASQUEBean -> toUri()
             is moe.matsuri.nb4a.proxy.snell.SnellBean -> toUri()
+            is MieruBean -> toUri()
             is NekoBean -> ""
             else -> toUniversalLink()
         }
@@ -314,11 +315,6 @@ data class ProxyEntity(
                             is TrojanGoBean -> {
                                 append("\n\n")
                                 append(bean.buildTrojanGoConfig(port))
-                            }
-
-                            is MieruBean -> {
-                                append("\n\n")
-                                append(bean.buildMieruConfig(port))
                             }
 
                             is NaiveBean -> {

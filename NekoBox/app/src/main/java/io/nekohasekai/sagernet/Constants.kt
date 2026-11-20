@@ -80,6 +80,7 @@ object Key {
 
     const val SERVER_ADDRESS = "serverAddress"
     const val SERVER_PORT = "serverPort"
+    const val SERVER_PORT_RANGE = "serverPortRange"
     const val SERVER_USERNAME = "serverUsername"
     const val SERVER_PASSWORD = "serverPassword"
     const val SERVER_METHOD = "serverMethod"
@@ -158,6 +159,8 @@ object Key {
     const val SUBSCRIPTION_USER_AGENT = "subscriptionUserAgent"
     const val SUBSCRIPTION_AUTO_UPDATE = "subscriptionAutoUpdate"
     const val SUBSCRIPTION_AUTO_UPDATE_DELAY = "subscriptionAutoUpdateDelay"
+    const val SUBSCRIPTION_NODE_DNS = "subscriptionNodeDns"
+    const val SUBSCRIPTION_AUTO_ADOPT_NODE_DNS = "subscriptionAutoAdoptNodeDns"
 
     //
 

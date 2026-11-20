@@ -63,6 +63,19 @@
             app:summary="@string/deduplication_sum"
             app:title="@string/deduplication" />
 
+        <EditTextPreference
+            app:icon="@drawable/ic_action_dns"
+            app:key="subscriptionNodeDns"
+            app:summary="@string/subscription_node_dns_sum"
+            app:title="@string/subscription_node_dns"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreference
+            app:icon="@drawable/ic_action_dns"
+            app:key="subscriptionAutoAdoptNodeDns"
+            app:summary="@string/subscription_auto_adopt_node_dns_sum"
+            app:title="@string/subscription_auto_adopt_node_dns" />
+
     </PreferenceCategory>
 
     <PreferenceCategory
