@@ -29,7 +29,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import org.yaml.snakeyaml.LoaderOptions
-import org.yaml.snakeyaml.TypeDescription
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
 import org.yaml.snakeyaml.error.YAMLException
@@ -320,9 +319,8 @@ object RawUpdater : GroupUpdater() {
                 val loaderOptions = LoaderOptions().apply {
                     codePointLimit = 8 * 1024 * 1024 // 8 MiB YAML bomb guard
                 }
-                val yaml = Yaml(SafeConstructor(loaderOptions)).apply {
-                    addTypeDescription(TypeDescription(String::class.java, "str"))
-                }.loadAs(text, Map::class.java)
+                val yaml = Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<*, *>
+                    ?: throw YAMLException("Clash YAML root must be a mapping")
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""
 
