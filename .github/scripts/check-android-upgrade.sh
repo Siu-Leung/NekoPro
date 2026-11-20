@@ -50,7 +50,11 @@ wait_for_view text "$marker" >/dev/null
 # Keep the same application data directory: never uninstall or use pm clear.
 "${adb_cmd[@]}" shell am force-stop "$pkg"
 "${adb_cmd[@]}" install -r -g "$new_apk"
-"${adb_cmd[@]}" shell dumpsys package "$pkg" | tr -d '\r' | grep -Eq '^ +versionName=Neko-Pro-1\.3\.0$'
+package_info=$("${adb_cmd[@]}" shell dumpsys package "$pkg")
+if ! grep -Eq '^[[:space:]]+versionName=Neko-Pro-1\.3\.0[[:space:]]*$' <<< "$package_info"; then
+  echo 'Installed version is not Neko-Pro-1.3.0.' >&2
+  exit 1
+fi
 "${adb_cmd[@]}" shell am start -W -n "$activity"
 wait_for_view text "$marker" >/dev/null
 printf '%s\n' 'Signed v1.2.2 → v1.3.0 in-place upgrade preserved the imported test profile.'
