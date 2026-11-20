@@ -86,15 +86,23 @@ object RawUpdater : GroupUpdater() {
             var lastDisposition = ""
             proxies = emptyList()
 
+            val forceProxy = DataStore.serviceState.connected ||
+                (!byUser && subscription.updateWhenConnectedOnly == true)
+
             for (candidate in candidateUserAgents) {
-                try {
-                    val response = Libcore.newHttpClient().apply {
+                val client = Libcore.newHttpClient().apply {
+                    if (forceProxy) {
+                        forceSocks5(DataStore.mixedPort)
+                    } else {
                         trySocks5(DataStore.mixedPort)
                         tryH3Direct()
-                        when (DataStore.appTLSVersion) {
-                            "1.3" -> restrictedTLS()
-                        }
-                    }.newRequest().apply {
+                    }
+                    when (DataStore.appTLSVersion) {
+                        "1.3" -> restrictedTLS()
+                    }
+                }
+                try {
+                    val response = client.newRequest().apply {
                         if (DataStore.allowInsecureOnRequest) {
                             allowInsecure()
                         }
@@ -123,6 +131,8 @@ object RawUpdater : GroupUpdater() {
                 } catch (e: Throwable) {
                     lastError = e
                     Logs.d("Subscription download failed with UA $candidate: ${e.message}")
+                } finally {
+                    client.close()
                 }
             }
 
@@ -910,7 +920,9 @@ object RawUpdater : GroupUpdater() {
 
         try {
             val json = JSONTokener(text).nextValue()
-            return parseJSON(json)
+            return parseJSON(json, forSubscription = forSubscription)
+        } catch (e: IllegalStateException) {
+            if (forSubscription) throw e
         } catch (ignored: Exception) {
         }
 
@@ -999,7 +1011,9 @@ object RawUpdater : GroupUpdater() {
         return beans
     }
 
-    fun parseJSON(json: Any): List<AbstractBean> {
+    fun parseJSON(json: Any): List<AbstractBean> = parseJSON(json, forSubscription = false)
+
+    internal fun parseJSON(json: Any, forSubscription: Boolean): List<AbstractBean> {
         val proxies = ArrayList<AbstractBean>()
 
         if (json is JSONObject) {
@@ -1008,12 +1022,24 @@ object RawUpdater : GroupUpdater() {
                     // SIP008 Shadowsocks subscription format
                     val servers = json.getJSONArray("servers")
                     for (i in 0 until servers.length()) {
-                        val item = servers.optJSONObject(i) ?: continue
+                        val item = servers.optJSONObject(i)
+                        if (item == null) {
+                            if (forSubscription) error("Malformed SIP008 server entry at index $i")
+                            continue
+                        }
                         runCatching {
                             if (item.has("method") && item.has("server")) {
                                 proxies.add(item.parseShadowsocks())
+                            } else if (forSubscription) {
+                                error("Incomplete SIP008 server entry at index $i")
                             }
-                        }.onFailure { Logs.w(it) }
+                        }.onFailure {
+                            if (forSubscription) throw it
+                            Logs.w(it)
+                        }
+                    }
+                    if (forSubscription && proxies.size != servers.length()) {
+                        error("Incomplete SIP008 subscription: parsed ${proxies.size} of ${servers.length()} entries")
                     }
                     proxies.forEach { it.initializeDefaultValues() }
                     return proxies

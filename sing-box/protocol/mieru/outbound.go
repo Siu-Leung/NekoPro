@@ -3,9 +3,11 @@ package mieru
 import (
 	"context"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 
+	mierucommon "github.com/enfein/mieru/v3/apis/common"
 	"github.com/metacubex/mihomo/adapter/outbound"
 	C "github.com/metacubex/mihomo/constant"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service"
 )
 
 func RegisterOutbound(registry *outboundAdapter.Registry) {
@@ -70,6 +73,19 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Multiplexing:   strings.TrimSpace(options.Multiplexing),
 		HandshakeMode:  strings.TrimSpace(options.HandshakeMode),
 		TrafficPattern: strings.TrimSpace(options.TrafficPattern),
+	}
+
+	if options.DomainResolver != nil && options.DomainResolver.Server != "" {
+		if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
+			mieruOpt.Resolver = &singBoxMieruResolver{
+				router:     dnsRouter,
+				transports: service.FromContext[adapter.DNSTransportManager](ctx),
+				serverTag:  options.DomainResolver.Server,
+				queryOptions: adapter.DNSQueryOptions{
+					Strategy: boxConstant.DomainStrategy(options.DomainResolver.Strategy),
+				},
+			}
+		}
 	}
 
 	release := mihomo_adapter.InstallProtectHook(ctx)
@@ -152,4 +168,36 @@ func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 func (h *Outbound) Close() error {
 	h.release()
 	return h.proxy.Close()
+}
+
+type singBoxMieruResolver struct {
+	router       adapter.DNSRouter
+	transports   adapter.DNSTransportManager
+	serverTag    string
+	queryOptions adapter.DNSQueryOptions
+}
+
+var _ mierucommon.DNSResolver = (*singBoxMieruResolver)(nil)
+
+func (r *singBoxMieruResolver) LookupIP(ctx context.Context, network, host string) ([]net.IP, error) {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []net.IP{ip.Unmap().AsSlice()}, nil
+	}
+	queryOptions := r.queryOptions
+	if r.serverTag != "" && r.transports != nil {
+		tr, loaded := r.transports.Transport(r.serverTag)
+		if !loaded {
+			return nil, os.ErrNotExist
+		}
+		queryOptions.Transport = tr
+	}
+	addrs, err := r.router.Lookup(ctx, host, queryOptions)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		ips = append(ips, addr.Unmap().AsSlice())
+	}
+	return ips, nil
 }

@@ -1,6 +1,8 @@
 package io.nekohasekai.sagernet.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DashboardUrlTest {
@@ -18,5 +20,14 @@ class DashboardUrlTest {
             "https://example.com/dashboard",
             buildDashboardUrl("https://example.com/dashboard", "secret"),
         )
+    }
+
+    @Test
+    fun localDashboardOriginChecksMatchStrictly() {
+        assertTrue(isSameLocalDashboardOrigin("http://127.0.0.1:9090/ui/#/proxies"))
+        assertFalse(isSameLocalDashboardOrigin("http://127.0.0.1:8080/ui/"))
+        assertFalse(isSameLocalDashboardOrigin("https://127.0.0.1:9090/ui/"))
+        assertFalse(isSameLocalDashboardOrigin("https://example.com/steal"))
+        assertFalse(isSameLocalDashboardOrigin("javascript:alert(1)"))
     }
 }
