@@ -112,11 +112,10 @@ class SagerNet : Application(),
         updateNotificationChannels()
     }
 
-    override fun getWorkManagerConfiguration(): WorkConfiguration {
-        return WorkConfiguration.Builder()
+    override val workManagerConfiguration: WorkConfiguration
+        get() = WorkConfiguration.Builder()
             .setDefaultProcessName("${BuildConfig.APPLICATION_ID}:bg")
             .build()
-    }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
