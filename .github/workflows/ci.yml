@@ -124,8 +124,18 @@ jobs:
           test "${#apks[@]}" -eq 4
           for apk in "${apks[@]}"; do
             certs=$(LC_ALL=C "$apksigner" verify --verbose --print-certs "$apk")
-            signer_count=$(rg '^Number of signers: (\d+)\s*$' -r '$1' <<< "$certs" || true)
-            cert_sha256=$(rg '^Signer #[0-9]+ certificate SHA-256 digest: ([0-9A-Fa-f]{64})\s*$' -r '$1' <<< "$certs" || true)
+            signer_count=0
+            digest_count=0
+            cert_sha256=''
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^Number\ of\ signers:\ ([0-9]+)[[:space:]]*$ ]]; then
+                signer_count=${BASH_REMATCH[1]}
+              elif [[ "$line" =~ ^Signer\ \#[0-9]+\ certificate\ SHA-256\ digest:\ ([0-9A-Fa-f]{64})[[:space:]]*$ ]]; then
+                digest_count=$((digest_count + 1))
+                cert_sha256=${BASH_REMATCH[1]}
+              fi
+            done <<< "$certs"
+            test "$digest_count" -eq 1 || { echo "Expected exactly one certificate digest for $apk." >&2; exit 1; }
             if [[ "$signer_count" != 1 || "${cert_sha256,,}" != "$expected_cert_sha256" ]]; then
               if [[ "$signer_count" == 1 && "$cert_sha256" =~ ^[0-9A-Fa-f]{64}$ ]]; then
                 echo "Unexpected certificate SHA-256 for $apk: $cert_sha256" >&2
