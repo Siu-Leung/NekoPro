@@ -54,7 +54,13 @@ fun buildSingBoxEndpointWireGuardBean(bean: WireGuardBean): SingBoxOptions.Endpo
                 if (!bean.peerPreSharedKey.isNullOrBlank()) {
                     pre_shared_key = bean.peerPreSharedKey
                 }
-                allowed_ips = listOf("0.0.0.0/0", "::/0")
+                allowed_ips = normalizeWireGuardAddresses(bean.allowedIps).ifEmpty {
+                    listOf("0.0.0.0/0", "::/0")
+                }
+                val keepalive = bean.persistentKeepalive ?: 0
+                if (keepalive > 0) {
+                    persistent_keepalive_interval = keepalive
+                }
                 val rawReserved = bean.reserved ?: ""
                 if (rawReserved.isNotBlank()) {
                     reserved = parseReservedBytes(rawReserved)

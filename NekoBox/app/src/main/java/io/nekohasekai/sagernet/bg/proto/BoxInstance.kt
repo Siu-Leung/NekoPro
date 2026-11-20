@@ -10,8 +10,6 @@ import io.nekohasekai.sagernet.fmt.ConfigBuildResult
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.hysteria.buildHysteria1Config
-import io.nekohasekai.sagernet.fmt.mieru.MieruBean
-import io.nekohasekai.sagernet.fmt.mieru.buildMieruConfig
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.naive.buildNaiveConfig
 import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
@@ -70,11 +68,6 @@ abstract class BoxInstance(
                         pluginConfigs[port] = profile.type to bean.buildTrojanGoConfig(port)
                     }
 
-                    is MieruBean -> {
-                        initPlugin("mieru-plugin")
-                        pluginConfigs[port] = profile.type to bean.buildMieruConfig(port)
-                    }
-
                     is NaiveBean -> {
                         initPlugin("naive-plugin")
                         pluginConfigs[port] = profile.type to bean.buildNaiveConfig(port)
@@ -126,26 +119,6 @@ abstract class BoxInstance(
                         )
 
                         processes.start(commands)
-                    }
-
-                    bean is MieruBean -> {
-                        val configFile = File(
-                            cacheDir, uniqueTempName("mieru", "json")
-                        )
-
-                        configFile.parentFile?.mkdirs()
-                        configFile.writeText(config)
-                        cacheFiles.add(configFile)
-
-                        val envMap = mutableMapOf<String, String>()
-                        envMap["MIERU_CONFIG_JSON_FILE"] = configFile.absolutePath
-                        envMap["MIERU_PROTECT_PATH"] = "protect_path"
-
-                        val commands = mutableListOf(
-                            initPlugin("mieru-plugin").path, "run",
-                        )
-
-                        processes.start(commands, envMap)
                     }
 
                     bean is NaiveBean -> {

@@ -224,6 +224,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serverALPN by profileCacheStore.string(Key.SERVER_ALPN)
     var serverCertificates by profileCacheStore.string(Key.SERVER_CERTIFICATES)
     var serverMTU by profileCacheStore.stringToInt(Key.SERVER_MTU)
+    var serverPortRange by profileCacheStore.string(Key.SERVER_PORT_RANGE)
     var serverHeaders by profileCacheStore.string(Key.SERVER_HEADERS)
     var serverAllowInsecure by profileCacheStore.boolean(Key.SERVER_ALLOW_INSECURE)
 
@@ -281,6 +282,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionUserAgent by profileCacheStore.string(Key.SUBSCRIPTION_USER_AGENT)
     var subscriptionAutoUpdate by profileCacheStore.boolean(Key.SUBSCRIPTION_AUTO_UPDATE)
     var subscriptionAutoUpdateDelay by profileCacheStore.stringToInt(Key.SUBSCRIPTION_AUTO_UPDATE_DELAY) { 360 }
+    var subscriptionNodeDns by profileCacheStore.string(Key.SUBSCRIPTION_NODE_DNS)
+    var subscriptionAutoAdoptNodeDns by profileCacheStore.boolean(Key.SUBSCRIPTION_AUTO_ADOPT_NODE_DNS)
 
     var rulesFirstCreate by configurationStore.boolean("rulesFirstCreate")
 

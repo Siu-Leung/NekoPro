@@ -28,6 +28,7 @@ import org.ini4j.Ini
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import moe.matsuri.nb4a.SingBoxDnsServerParser
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
@@ -72,18 +73,25 @@ object RawUpdater : GroupUpdater() {
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
         } else {
 
-            // 候选 UA 链：订阅自定义 UA 优先，其后依次尝试常见客户端 UA，直到成功解析出非空节点
+            val autoAdoptNodeDns = subscription.autoAdoptNodeDns == true
+            // 候选 UA 链：自动采用节点 DNS 模式优先协商完整 Clash YAML（clash-meta -> FlClash），否则沿用常规回退链
             val candidateUserAgents = buildList {
                 subscription.customUserAgent?.takeIf { it.isNotBlank() }?.let { add(it) }
-                add(USER_AGENT)
-                add("clash-meta")
-                add("v2rayN/7.8.2")
-                add("sing-box/1.14.0")
+                if (autoAdoptNodeDns) {
+                    add("clash-meta")
+                    add("FlClash/v0.9.4 clash-verge Platform/android")
+                } else {
+                    add(USER_AGENT)
+                    add("clash-meta")
+                    add("v2rayN/7.8.2")
+                    add("sing-box/1.14.0")
+                }
             }.distinct()
 
             var lastError: Throwable? = null
             var lastUserinfo = ""
             var lastDisposition = ""
+            var adoptedNodeDnsCandidate: String? = null
             proxies = emptyList()
 
             val forceProxy = DataStore.serviceState.connected ||
@@ -109,9 +117,15 @@ object RawUpdater : GroupUpdater() {
                         setURL(subscription.link)
                         setUserAgent(candidate)
                     }.execute()
-                    val parsed = parseSubscription(Util.getStringBox(response.contentString))
+                    val responseText = Util.getStringBox(response.contentString)
+                    val parsed = parseSubscription(responseText)
                     if (parsed.isNullOrEmpty()) {
                         throw IllegalStateException("no proxies found with UA: $candidate")
+                    }
+                    if (autoAdoptNodeDns) {
+                        val extractedDns = extractClashProxyServerNameserver(responseText)
+                            ?: throw IllegalStateException("no supported dns.proxy-server-nameserver with UA: $candidate")
+                        adoptedNodeDnsCandidate = extractedDns
                     }
                     proxies = parsed
 
@@ -141,6 +155,9 @@ object RawUpdater : GroupUpdater() {
             }
 
             subscription.subscriptionUserinfo = lastUserinfo
+            if (autoAdoptNodeDns && !adoptedNodeDnsCandidate.isNullOrBlank()) {
+                subscription.adoptedNodeDns = adoptedNodeDnsCandidate
+            }
 
             // 修改默认名字
             if (proxyGroup.name?.startsWith("Subscription #") == true && lastDisposition.isNotBlank()) {
@@ -304,6 +321,38 @@ object RawUpdater : GroupUpdater() {
 
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? =
         parseRaw(text, fileName, forSubscription = false)
+
+    internal fun extractClashProxyServerNameserver(text: String): String? {
+        if (!clashProxiesKey.containsMatchIn(text)) return null
+        val loaderOptions = LoaderOptions().apply {
+            codePointLimit = 8 * 1024 * 1024
+        }
+        val yaml = runCatching {
+            Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<*, *>
+        }.getOrNull() ?: return null
+        val dns = yaml["dns"] as? Map<*, *> ?: return null
+        val raw = dns["proxy-server-nameserver"] ?: return null
+        val entries = when (raw) {
+            is String -> listOf(raw.trim()).filter { it.isNotEmpty() }
+            is List<*> -> raw.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+            else -> return null
+        }.distinct()
+        if (entries.size != 1) return null
+        val candidate = entries[0]
+        // Reject Mihomo-specific proxy suffix modifiers (#PROXY, #DIRECT) or query params not faithfully supported by sing-box DoH path.
+        if (candidate.contains('#') || candidate.contains('?')) return null
+        val lower = candidate.lowercase()
+        if (lower == "system" || lower == "local" || lower.startsWith("dhcp://")) return null
+        return runCatching {
+            SingBoxDnsServerParser.parse(
+                rawAddress = candidate,
+                tag = "probe-node-dns",
+                defaultDetour = null,
+                domainResolver = "dns-direct",
+            )
+            candidate
+        }.getOrNull()
+    }
 
     internal suspend fun parseSubscription(text: String): List<AbstractBean>? {
         currentCoroutineContext().ensureActive()
@@ -635,6 +684,7 @@ object RawUpdater : GroupUpdater() {
                                         "server" -> bean.serverAddress = rawVal.toString().trim().removeSurrounding("[", "]")
                                         "port" -> bean.serverPort = rawVal.toString().toIntOrNull() ?: 443
                                         "psk" -> bean.psk = rawVal.toString()
+                                        "userkey" -> bean.userkey = rawVal.toString()
                                         "version" -> bean.version = rawVal.toString().toIntOrNull() ?: 4
                                         "mode" -> bean.mode = rawVal.toString()
                                         "obfs-opts" -> {
@@ -646,6 +696,28 @@ object RawUpdater : GroupUpdater() {
                                     }
                                 }
                                 if (bean.version != null && bean.version !in 4..6) return@runCatching
+                                proxies.add(bean)
+                            }
+
+                            "mieru" -> {
+                                val bean = io.nekohasekai.sagernet.fmt.mieru.MieruBean()
+                                for ((rawKey, rawVal) in proxy) {
+                                    if (rawVal == null) continue
+                                    when (rawKey?.toString()?.replace("_", "-")) {
+                                        "name" -> bean.name = rawVal.toString()
+                                        "server" -> bean.serverAddress = rawVal.toString().trim().removeSurrounding("[", "]")
+                                        "port" -> bean.serverPort = rawVal.toString().toIntOrNull() ?: 0
+                                        "port-range" -> bean.portRange = rawVal.toString().trim()
+                                        "transport" -> bean.protocol = rawVal.toString().trim().uppercase()
+                                        "username" -> bean.username = rawVal.toString()
+                                        "password" -> bean.password = rawVal.toString()
+                                        "mtu" -> bean.mtu = rawVal.toString().toIntOrNull() ?: 1400
+                                        "multiplexing" -> bean.multiplexing = rawVal.toString().trim()
+                                        "handshake-mode" -> bean.handshakeMode = rawVal.toString().trim()
+                                    }
+                                }
+                                if (bean.serverAddress.isNullOrBlank()) return@runCatching
+                                if ((bean.serverPort ?: 0) <= 0 && bean.portRange.isNullOrBlank()) return@runCatching
                                 proxies.add(bean)
                             }
 
@@ -1005,6 +1077,10 @@ object RawUpdater : GroupUpdater() {
             peerBean.serverPort = endpoint.substringAfterLast(":").trim().toIntOrNull() ?: continue
             peerBean.peerPublicKey = peer["PublicKey"] ?: continue
             peerBean.peerPreSharedKey = peer["PresharedKey"]
+            peer["AllowedIPs"]?.trim()?.takeIf { it.isNotEmpty() }?.let { peerBean.allowedIps = it }
+            peer["PersistentKeepalive"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let {
+                peerBean.persistentKeepalive = it
+            }
             beans.add(peerBean.applyDefaultValues())
         }
         if (beans.isEmpty()) error("Empty available peer list")

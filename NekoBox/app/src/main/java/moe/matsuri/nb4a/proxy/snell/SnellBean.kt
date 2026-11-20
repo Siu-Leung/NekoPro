@@ -8,6 +8,7 @@ import io.nekohasekai.sagernet.fmt.KryoConverters
 class SnellBean : AbstractBean() {
 
     @JvmField var psk: String? = null
+    @JvmField var userkey: String? = null
     @JvmField var version: Int? = null
     @JvmField var mode: String? = null
     @JvmField var obfsHost: String? = null
@@ -18,6 +19,7 @@ class SnellBean : AbstractBean() {
         if (serverPort == null) serverPort = 443
         super.initializeDefaultValues()
         if (psk == null) psk = ""
+        if (userkey == null) userkey = ""
         version = (version ?: 4).coerceIn(4, 6)
         if (mode.isNullOrBlank()) mode = "default"
         if (obfsHost == null) obfsHost = ""
@@ -26,11 +28,12 @@ class SnellBean : AbstractBean() {
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(2); super.serialize(output)
+        output.writeInt(3); super.serialize(output)
         output.writeString(psk); output.writeInt(version ?: 4)
         output.writeString(obfsHost); output.writeString(obfsMode)
         output.writeString(clientFingerprint)
         output.writeString(mode)
+        output.writeString(userkey)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -41,6 +44,7 @@ class SnellBean : AbstractBean() {
             clientFingerprint = input.readString()
         }
         if (v >= 2) mode = input.readString()
+        if (v >= 3 && input.limit() - input.position() > 0) userkey = input.readString()
     }
 
     override fun clone(): SnellBean =

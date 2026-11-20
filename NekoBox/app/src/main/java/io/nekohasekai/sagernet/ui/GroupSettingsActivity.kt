@@ -60,6 +60,8 @@ class GroupSettingsActivity(
         DataStore.subscriptionUserAgent = subscription.customUserAgent!!
         DataStore.subscriptionAutoUpdate = subscription.autoUpdate!!
         DataStore.subscriptionAutoUpdateDelay = subscription.autoUpdateDelay!!
+        DataStore.subscriptionNodeDns = subscription.nodeDns ?: ""
+        DataStore.subscriptionAutoAdoptNodeDns = subscription.autoAdoptNodeDns == true
     }
 
     fun ProxyGroup.serialize() {
@@ -81,6 +83,8 @@ class GroupSettingsActivity(
                 customUserAgent = DataStore.subscriptionUserAgent
                 autoUpdate = DataStore.subscriptionAutoUpdate
                 autoUpdateDelay = DataStore.subscriptionAutoUpdateDelay
+                nodeDns = DataStore.subscriptionNodeDns.trim()
+                autoAdoptNodeDns = DataStore.subscriptionAutoAdoptNodeDns
             }
         }
     }

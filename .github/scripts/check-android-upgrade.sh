@@ -6,8 +6,8 @@ serial=emulator-5554
 adb_cmd=(adb -s "$serial")
 [[ $("${adb_cmd[@]}" shell getprop ro.kernel.qemu | tr -d '\r') == 1 ]]
 old_apk=${1:?previous signed APK required}
-new_apk=${2:?candidate signed APK required}
-expected_version=${3:-Neko-Pro-1.3.0}
+expected_version=${3:-$(grep -E '^VERSION_NAME=' NekoBox/nb4a.properties | head -n1 | cut -d= -f2- | tr -d '\r\n ')}
+new_apk=${2:-NekoBox/app/build/outputs/apk/oss/release/NekoBox-${expected_version}-x86_64.apk}
 pkg=moe.nb4a.siu
 activity=$pkg/io.nekohasekai.sagernet.ui.MainActivity
 marker=NekoPro-Upgrade-Smoke

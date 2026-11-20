@@ -22,6 +22,11 @@
             app:icon="@drawable/ic_settings_password"
             app:key="psk"
             app:title="@string/password" />
+        <EditTextPreference
+            app:dialogLayout="@layout/layout_password_dialog"
+            app:icon="@drawable/ic_baseline_vpn_key_24"
+            app:key="userkey"
+            app:title="User Key (optional)" />
         <moe.matsuri.nb4a.ui.SimpleMenuPreference
             app:defaultValue="4"
             app:entries="@array/snell_version_entries"

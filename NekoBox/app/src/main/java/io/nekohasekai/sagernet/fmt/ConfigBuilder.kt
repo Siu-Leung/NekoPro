@@ -89,6 +89,8 @@ fun buildConfig(
     val trafficMap = HashMap<String, List<ProxyEntity>>()
     val tagMap = HashMap<Long, String>()
     val globalOutbounds = HashMap<Long, String>()
+    val groupNodeDnsTags = LinkedHashMap<Long, String>()
+    val groupNodeDnsServers = ArrayList<DNSServerOptions>()
     val selectorNames = ArrayList<String>()
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
 
@@ -450,6 +452,31 @@ fun buildConfig(
                     _hack_config_map["domain_strategy"] =
                         if (forTest) "" else defaultServerDomainStrategy
 
+                    // Per-group node DNS: resolves only this group's proxy entry server hostnames.
+                    val entityGroup = SagerDatabase.groupDao.getById(proxyEntity.groupId)
+                    val groupNodeDns = entityGroup?.subscription?.effectiveNodeDns()
+                    if (!groupNodeDns.isNullOrBlank()) {
+                        val nodeDnsTag = groupNodeDnsTags.getOrPut(proxyEntity.groupId) {
+                            val tag = "dns-group-${proxyEntity.groupId}"
+                            runCatching {
+                                SingBoxDnsServerParser.parse(
+                                    rawAddress = groupNodeDns,
+                                    tag = tag,
+                                    defaultDetour = null,
+                                    domainResolver = "dns-direct",
+                                )
+                            }.onSuccess { serverOpt ->
+                                groupNodeDnsServers.add(serverOpt)
+                            }.onFailure { err ->
+                                Logs.w("Invalid group node DNS for group ${proxyEntity.groupId}: ${err.message}")
+                            }
+                            tag
+                        }
+                        if (groupNodeDnsServers.any { it.tag == nodeDnsTag }) {
+                            _hack_config_map["domain_resolver"] = nodeDnsTag
+                        }
+                    }
+
                     _hack_config_map["tag"] = tagOut
 
                     _hack_custom_config = bean.customOutboundJson
@@ -745,6 +772,8 @@ fun buildConfig(
                 )
             )
         }
+
+        groupNodeDnsServers.forEach { dns.servers.add(it) }
 
         dns.strategy = autoDnsDomainStrategy(
             SingBoxOptionsUtil.domainStrategy(if (forTest) "dns-direct" else "dns-remote")
