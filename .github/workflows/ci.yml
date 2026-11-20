@@ -117,15 +117,21 @@ jobs:
         run: |
           # Public signer fingerprint verified from the approved v1.2.2 arm64-v8a APK.
           expected_cert_sha256='cc5b759e7e8fe92a23d218d86629d430859d87f14a98a9bbc15e4d39baf5f37c'
-          apksigner="$(printf '%s\n' "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/apksigner"
+          apksigner="$ANDROID_HOME/build-tools/35.0.1/apksigner"
+          test -x "$apksigner"
           shopt -s nullglob
           apks=(./*.apk)
           test "${#apks[@]}" -eq 4
           for apk in "${apks[@]}"; do
-            certs=$("$apksigner" verify --print-certs "$apk")
-            cert_sha256=$(awk '/^Signer #[0-9]+ certificate SHA-256 digest: / {print $NF}' <<< "$certs")
-            if [[ "$cert_sha256" != "$expected_cert_sha256" ]]; then
-              echo "Unexpected signing certificate for $apk (expected the v1.2.2 signer)." >&2
+            certs=$(LC_ALL=C "$apksigner" verify --verbose --print-certs "$apk")
+            signer_count=$(rg '^Number of signers: (\d+)\s*$' -r '$1' <<< "$certs" || true)
+            cert_sha256=$(rg '^Signer #[0-9]+ certificate SHA-256 digest: ([0-9A-Fa-f]{64})\s*$' -r '$1' <<< "$certs" || true)
+            if [[ "$signer_count" != 1 || "${cert_sha256,,}" != "$expected_cert_sha256" ]]; then
+              if [[ "$signer_count" == 1 && "$cert_sha256" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+                echo "Unexpected certificate SHA-256 for $apk: $cert_sha256" >&2
+              else
+                echo "Could not establish exactly one signer and its SHA-256 for $apk." >&2
+              fi
               exit 1
             fi
           done
