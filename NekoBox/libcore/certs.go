@@ -4,16 +4,16 @@ import (
 	"crypto/x509"
 	"log"
 	"sync"
-	_ "unsafe" // for go:linkname
+
+	mihomoCA "github.com/metacubex/mihomo/component/ca"
 )
 
-//go:linkname systemRoots crypto/x509.systemRoots
-var systemRoots *x509.CertPool
-
 var (
-	systemRootsUpdateMu sync.Mutex
+	customCertMu        sync.RWMutex
 	baseSystemRootsOnce sync.Once
 	baseSystemRoots     *x509.CertPool
+	customRootPool      *x509.CertPool
+	customCertPEM       string
 )
 
 func cloneBaseSystemRoots() *x509.CertPool {
@@ -31,20 +31,39 @@ func cloneBaseSystemRoots() *x509.CertPool {
 	return baseSystemRoots.Clone()
 }
 
+func currentRootCAs() *x509.CertPool {
+	customCertMu.RLock()
+	pool := customRootPool
+	customCertMu.RUnlock()
+	if pool != nil {
+		return pool
+	}
+	return nil
+}
+
+func currentCustomCAPEM() string {
+	customCertMu.RLock()
+	pem := customCertPEM
+	customCertMu.RUnlock()
+	return pem
+}
+
 func updateRootCACerts(pem []byte) {
 	_ = UpdateRootCACerts(pem)
 }
 
 // UpdateRootCACerts appends PEM-encoded certificates onto a fresh clone of the
-// unmodified system root pool, or resets back to the unmodified system root
-// pool when pem is empty.
+// unmodified system root pool (without mutating crypto/x509 internals via
+// go:linkname), or resets back to the unmodified system root pool when pem is empty.
 func UpdateRootCACerts(pem []byte) bool {
-	systemRootsUpdateMu.Lock()
-	defer systemRootsUpdateMu.Unlock()
+	customCertMu.Lock()
+	defer customCertMu.Unlock()
 
 	roots := cloneBaseSystemRoots()
 	if len(pem) == 0 {
-		systemRoots = roots
+		customRootPool = nil
+		customCertPEM = ""
+		mihomoCA.ResetCertificate()
 		log.Println("system root CAs restored")
 		return true
 	}
@@ -52,7 +71,10 @@ func UpdateRootCACerts(pem []byte) bool {
 		log.Println("failed to append certificates from pem")
 		return false
 	}
-	systemRoots = roots
+	customRootPool = roots
+	customCertPEM = string(pem)
+	mihomoCA.ResetCertificate()
+	_ = mihomoCA.AddCertificate(customCertPEM)
 	log.Println("internal ca.pem was loaded")
 	return true
 }

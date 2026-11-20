@@ -118,6 +118,8 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
+	injectCustomRootCA(&options)
+	injectCustomRootCA(&options)
 
 	// create box
 	instance, err := box.New(box.Options{
@@ -375,4 +377,17 @@ func goServeProtect(start bool) {
 		}
 		protectCloser = closer
 	}
+}
+
+func injectCustomRootCA(options *option.Options) {
+	pemStr := currentCustomCAPEM()
+	if pemStr == "" || options == nil {
+		return
+	}
+	if options.Certificate == nil {
+		options.Certificate = &option.CertificateOptions{
+			Store: constant.CertificateStoreSystem,
+		}
+	}
+	options.Certificate.Certificate = append(options.Certificate.Certificate, pemStr)
 }
