@@ -68,7 +68,6 @@ fun parseV2Ray(link: String): StandardV2RayBean {
         bean.name = url.fragment
 
         var protocol = url.username
-        bean.type = protocol
         bean.alterId = url.password.substringAfterLast('-').toInt()
         bean.uuid = url.password.substringBeforeLast('-')
 
@@ -82,6 +81,7 @@ fun parseV2Ray(link: String): StandardV2RayBean {
                 }
             }
         }
+        bean.type = protocol
 
         when (protocol) {
 //            "tcp" -> {
@@ -254,7 +254,7 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
 
     url.queryParameter("packetEncoding")?.let {
         when (it) {
-            "packet" -> packetEncoding = 1
+            "packet", "packetaddr" -> packetEncoding = 1
             "xudp" -> packetEncoding = 2
         }
     }
@@ -303,7 +303,11 @@ private fun tryResolveVmess4Kitsunebi(server: String): VMessBean {
         url.queryParameter("remarks")?.apply { name = this }
         url.queryParameter("alterId")?.apply { alterId = this.toInt() }
         url.queryParameter("path")?.apply { path = this }
-        url.queryParameter("tls")?.apply { security = "tls" }
+        url.queryParameter("tls")?.apply {
+            if (this == "1" || this.equals("true", ignoreCase = true) || this.equals("tls", ignoreCase = true)) {
+                security = "tls"
+            }
+        }
         url.queryParameter("allowInsecure")
             ?.apply { if (this == "1" || this == "true") allowInsecure = true }
         url.queryParameter("obfs")?.apply {
@@ -686,16 +690,34 @@ fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outbound {
                         }
                         tls = bean.security == "tls"
                         server_name = bean.sni
-                        var fp = bean.utlsFingerprint
+                        var fp = bean.utlsFingerprint?.trim()
                         if (!bean.realityPubKey.isNullOrBlank()) {
                             reality_public_key = bean.realityPubKey
                             reality_short_id = bean.realityShortId
                             if (fp.isNullOrBlank()) fp = "chrome"
                         }
-                        fingerprint = fp
-                        client_fingerprint = fp
+                        if (!fp.isNullOrBlank()) {
+                            val isCertSha256Hex = fp.length == 64 && fp.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+                            if (isCertSha256Hex) {
+                                fingerprint = fp
+                                if (!bean.realityPubKey.isNullOrBlank()) {
+                                    client_fingerprint = "chrome"
+                                }
+                            } else {
+                                client_fingerprint = fp
+                            }
+                        }
                         if (!bean.alpn.isNullOrBlank()) {
                             alpn = bean.alpn!!.listByLineOrComma()
+                        }
+                        if (!bean.certificates.isNullOrBlank()) {
+                            certificate = bean.certificates
+                        }
+                        if (bean.enableECH == true) {
+                            ech_enabled = true
+                            if (!bean.echConfig.isNullOrBlank()) {
+                                ech_config = bean.echConfig
+                            }
                         }
                         skip_cert_verify = bean.allowInsecure == true || DataStore.globalAllowInsecure
                         xhttp_path = bean.path

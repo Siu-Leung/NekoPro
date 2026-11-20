@@ -19,8 +19,22 @@
 package io.nekohasekai.sagernet.fmt.mieru
 
 import io.nekohasekai.sagernet.ktx.toStringPretty
+import moe.matsuri.nb4a.SingBoxOptions
 import org.json.JSONArray
 import org.json.JSONObject
+
+fun buildSingBoxOutboundMieruBean(bean: MieruBean): SingBoxOptions.Outbound_MieruOptions {
+    return SingBoxOptions.Outbound_MieruOptions().apply {
+        type = "mieru"
+        server = bean.serverAddress?.trim()?.removeSurrounding("[", "]")
+        server_port = bean.serverPort
+        transport = (bean.protocol?.trim()?.uppercase()).takeUnless { it.isNullOrEmpty() } ?: "TCP"
+        if (transport == "UDP") mtu = bean.mtu ?: 1400
+        udp = true
+        username = bean.username ?: ""
+        password = bean.password ?: ""
+    }
+}
 
 fun MieruBean.buildMieruConfig(port: Int): String {
     val serverInfo = JSONArray().apply {

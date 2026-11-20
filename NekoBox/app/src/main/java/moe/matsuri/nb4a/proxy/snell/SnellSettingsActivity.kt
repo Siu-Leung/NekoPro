@@ -24,7 +24,6 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
     private val mode = pbm.add(PreferenceBinding(Type.Text, "mode"))
     private val obfsMode = pbm.add(PreferenceBinding(Type.Text, "obfsMode"))
     private val obfsHost = pbm.add(PreferenceBinding(Type.Text, "obfsHost"))
-    private val clientFingerprint = pbm.add(PreferenceBinding(Type.Text, "clientFingerprint"))
 
     override fun SnellBean.init() {
         version = (version ?: 4).coerceIn(4, 6)

@@ -1,21 +1,19 @@
 package dns
 
 import (
-	"net/netip"
-
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"net/netip"
 )
 
-var _ adapter.LegacyDNSTransport = (*TransportAdapter)(nil)
-
 type TransportAdapter struct {
-	transportType string
-	transportTag  string
-	dependencies  []string
-	strategy      C.DomainStrategy
-	clientSubnet  netip.Prefix
+	transportType      string
+	transportTag       string
+	dependencies       []string
+	references         []string
+	legacyStrategy     C.DomainStrategy
+	legacyClientSubnet netip.Prefix
 }
 
 func NewTransportAdapter(transportType string, transportTag string, dependencies []string) TransportAdapter {
@@ -31,12 +29,17 @@ func NewTransportAdapterWithLocalOptions(transportType string, transportTag stri
 	if localOptions.DomainResolver != nil && localOptions.DomainResolver.Server != "" {
 		dependencies = append(dependencies, localOptions.DomainResolver.Server)
 	}
+	var references []string
+	if localOptions.Detour != "" {
+		references = []string{localOptions.Detour}
+	}
 	return TransportAdapter{
-		transportType: transportType,
-		transportTag:  transportTag,
-		dependencies:  dependencies,
-		strategy:      C.DomainStrategy(localOptions.LegacyStrategy),
-		clientSubnet:  localOptions.LegacyClientSubnet,
+		transportType:      transportType,
+		transportTag:       transportTag,
+		dependencies:       dependencies,
+		references:         references,
+		legacyStrategy:     localOptions.LegacyDNSStrategy,
+		legacyClientSubnet: localOptions.LegacyDNSClientSubnet,
 	}
 }
 
@@ -45,15 +48,17 @@ func NewTransportAdapterWithRemoteOptions(transportType string, transportTag str
 	if remoteOptions.DomainResolver != nil && remoteOptions.DomainResolver.Server != "" {
 		dependencies = append(dependencies, remoteOptions.DomainResolver.Server)
 	}
-	if remoteOptions.LegacyAddressResolver != "" {
-		dependencies = append(dependencies, remoteOptions.LegacyAddressResolver)
+	var references []string
+	if remoteOptions.Detour != "" {
+		references = []string{remoteOptions.Detour}
 	}
 	return TransportAdapter{
-		transportType: transportType,
-		transportTag:  transportTag,
-		dependencies:  dependencies,
-		strategy:      C.DomainStrategy(remoteOptions.LegacyStrategy),
-		clientSubnet:  remoteOptions.LegacyClientSubnet,
+		transportType:      transportType,
+		transportTag:       transportTag,
+		dependencies:       dependencies,
+		references:         references,
+		legacyStrategy:     remoteOptions.LegacyDNSStrategy,
+		legacyClientSubnet: remoteOptions.LegacyDNSClientSubnet,
 	}
 }
 
@@ -69,10 +74,17 @@ func (a *TransportAdapter) Dependencies() []string {
 	return a.dependencies
 }
 
-func (a *TransportAdapter) LegacyStrategy() C.DomainStrategy {
-	return a.strategy
+func (a *TransportAdapter) References() []string {
+	return a.references
 }
 
-func (a *TransportAdapter) LegacyClientSubnet() netip.Prefix {
-	return a.clientSubnet
+// ApplyLegacyDNSDefaults applies the legacy server's query options only when
+// the caller or a DNS rule did not supply an override.
+func (a *TransportAdapter) ApplyLegacyDNSDefaults(options *adapter.DNSQueryOptions) {
+	if options.Strategy == C.DomainStrategyAsIS {
+		options.Strategy = a.legacyStrategy
+	}
+	if !options.ClientSubnet.IsValid() && !options.RemoveClientSubnet {
+		options.ClientSubnet = a.legacyClientSubnet
+	}
 }

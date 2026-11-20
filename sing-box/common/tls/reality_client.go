@@ -34,6 +34,7 @@ import (
 	"github.com/sagernet/sing/common/debug"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
+	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/common/ntp"
 	aTLS "github.com/sagernet/sing/common/tls"
 
@@ -52,11 +53,18 @@ type RealityClientConfig struct {
 }
 
 func NewRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
+	return newRealityClient(ctx, logger, serverAddress, options, false)
+}
+
+func newRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool) (Config, error) {
 	if options.UTLS == nil || !options.UTLS.Enabled {
 		return nil, E.New("uTLS is required by reality client")
 	}
+	if options.Spoof != "" || options.SpoofMethod != "" {
+		return nil, E.New("spoof is unsupported in reality")
+	}
 
-	uClient, err := NewUTLSClient(ctx, logger, serverAddress, options)
+	uClient, err := newUTLSClient(ctx, logger, serverAddress, options, allowEmptyServerName)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +114,14 @@ func (e *RealityClientConfig) NextProtos() []string {
 
 func (e *RealityClientConfig) SetNextProtos(nextProto []string) {
 	e.uClient.SetNextProtos(nextProto)
+}
+
+func (e *RealityClientConfig) HandshakeTimeout() time.Duration {
+	return e.uClient.HandshakeTimeout()
+}
+
+func (e *RealityClientConfig) SetHandshakeTimeout(timeout time.Duration) {
+	e.uClient.SetHandshakeTimeout(timeout)
 }
 
 func (e *RealityClientConfig) STDConfig() (*STDConfig, error) {
@@ -239,7 +255,15 @@ func realityClientFallback(ctx context.Context, uConn net.Conn, serverName strin
 			},
 		},
 	}
-	request, _ := http.NewRequest("GET", "https://"+serverName, nil)
+	serverAddress := M.ParseSocksaddrHostPort(serverName, 0)
+	host := serverAddress.AddrString()
+	if serverAddress.IsIPv6() {
+		host = "[" + host + "]"
+	}
+	request, err := http.NewRequest("GET", "https://"+host, nil)
+	if err != nil {
+		return
+	}
 	request.Header.Set("User-Agent", fingerprint.Client)
 	request.AddCookie(&http.Cookie{Name: "padding", Value: strings.Repeat("0", mRand.Intn(32)+30)})
 	response, err := client.Do(request)
@@ -328,5 +352,5 @@ func (c *realityClientConnWrapper) ReaderReplaceable() bool {
 }
 
 func (c *realityClientConnWrapper) WriterReplaceable() bool {
-	return true
+	return false
 }

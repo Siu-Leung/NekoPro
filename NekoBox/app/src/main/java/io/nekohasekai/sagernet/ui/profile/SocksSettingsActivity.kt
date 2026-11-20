@@ -54,7 +54,7 @@ class SocksSettingsActivity : ProfileSettingsActivity<SOCKSBean>() {
             password.isVisible = version == SOCKSBean.PROTOCOL_SOCKS5
         }
 
-        updateProtocol(DataStore.protocolVersion)
+        updateProtocol(DataStore.serverProtocolInt)
         protocol.setOnPreferenceChangeListener { _, newValue ->
             updateProtocol((newValue as String).toInt())
             true

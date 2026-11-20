@@ -83,6 +83,9 @@ class SagerNet : Application(),
             Theme.apply(this)
             Theme.applyNightTheme()
             runOnDefaultDispatcher {
+                runCatching {
+                    java.io.File(cacheDir, "share_backup").listFiles()?.forEach { it.delete() }
+                }
                 DefaultNetworkListener.start(this) {
                     underlyingNetwork = it
                 }
@@ -195,9 +198,9 @@ class SagerNet : Application(),
             application, Intent(application, SagerConnection.serviceClass)
         )
 
-        fun reloadService(reason: BaseService.ReloadReason = BaseService.ReloadReason.CoreConfigChanged) =
+        fun reloadService(reason: io.nekohasekai.sagernet.bg.ReloadReason = io.nekohasekai.sagernet.bg.ReloadReason.CoreConfigChanged) =
             application.sendBroadcast(
-                BaseService.ReloadReason.put(
+                BaseService.putReloadReason(
                     Intent(Action.RELOAD).setPackage(application.packageName), reason
                 )
             )

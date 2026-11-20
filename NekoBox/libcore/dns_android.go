@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -79,7 +80,10 @@ func init() {
 	}
 
 	// set rawQueryFunc
-	rawQueryFunc = func(networkHandle int64, request []byte) ([]byte, error) {
+	rawQueryFunc = func(ctx context.Context, networkHandle int64, request []byte) ([]byte, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fd, err := callAndroidResNSend(uint64(networkHandle), request)
 		if err != nil {
 			return nil, err
@@ -89,14 +93,38 @@ func init() {
 		}
 		defer unix.Close(fd)
 
-		// wait for response (timeout 5000 ms)
-		pfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLERR}}
-		nReady, err := unix.Poll(pfds, 5000)
-		if err != nil {
-			return nil, err
+		deadline := time.Now().Add(5 * time.Second)
+		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+			deadline = ctxDeadline
 		}
-		if nReady == 0 {
-			return nil, context.DeadlineExceeded
+
+		pfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLERR}}
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return nil, context.DeadlineExceeded
+			}
+			sliceMs := int(remaining.Milliseconds())
+			if sliceMs > 200 {
+				sliceMs = 200
+			}
+			if sliceMs < 1 {
+				sliceMs = 1
+			}
+			pfds[0].Revents = 0
+			nReady, err := unix.Poll(pfds, sliceMs)
+			if err != nil {
+				if errors.Is(err, unix.EINTR) {
+					continue
+				}
+				return nil, err
+			}
+			if nReady > 0 {
+				break
+			}
 		}
 
 		// read response into buffer

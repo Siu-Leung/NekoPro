@@ -1,6 +1,7 @@
 package libcore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -77,6 +79,10 @@ func (w *boxPlatformInterfaceWrapper) OpenInterface(options *tun.Options, platfo
 	return tunDev, nil
 }
 
+func (w *boxPlatformInterfaceWrapper) ProcessPlatformOptions(options option.TunPlatformOptions) error {
+	return nil
+}
+
 func (w *boxPlatformInterfaceWrapper) UsePlatformDefaultInterfaceMonitor() bool {
 	return true
 }
@@ -108,7 +114,7 @@ func (w *boxPlatformInterfaceWrapper) RequestPermissionForWIFIState() error {
 	return nil
 }
 
-func (w *boxPlatformInterfaceWrapper) ReadWIFIState() adapter.WIFIState {
+func (w *boxPlatformInterfaceWrapper) ReadWIFIState(ctx context.Context) adapter.WIFIState {
 	state := strings.Split(intfBox.WIFIState(), ",")
 	if len(state) < 2 {
 		return adapter.WIFIState{}
@@ -117,10 +123,6 @@ func (w *boxPlatformInterfaceWrapper) ReadWIFIState() adapter.WIFIState {
 		SSID:  state[0],
 		BSSID: state[1],
 	}
-}
-
-func (w *boxPlatformInterfaceWrapper) SystemCertificates() []string {
-	return nil
 }
 
 func (w *boxPlatformInterfaceWrapper) UsePlatformConnectionOwnerFinder() bool {
@@ -179,8 +181,60 @@ func (w *boxPlatformInterfaceWrapper) SendNotification(notification *adapter.Not
 	return nil
 }
 
+func (w *boxPlatformInterfaceWrapper) CancelNotification(identifier string, typeID int32) error {
+	return nil
+}
+
 func (w *boxPlatformInterfaceWrapper) MyInterfaceAddress() []netip.Addr {
 	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformNeighborResolver() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) StartNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) CloseNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformShell() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) CheckPlatformShell() error {
+	return os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) OpenShellSession(user *adapter.PlatformUser, command string, env []string, term string, rows int32, cols int32) (adapter.ShellSession, error) {
+	return nil, os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) LookupUser(username string) (*adapter.PlatformUser, error) {
+	return nil, os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) LookupSFTPServer() (string, error) {
+	return "", os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) ReadSystemSSHHostKey() ([]byte, error) {
+	return nil, os.ErrInvalid
+}
+
+func (w *boxPlatformInterfaceWrapper) TailscaleHostname() string {
+	return ""
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformBridge() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) CreateBridge(options adapter.BridgeOptions) (adapter.BridgeSession, error) {
+	return nil, os.ErrInvalid
 }
 
 // io.Writer

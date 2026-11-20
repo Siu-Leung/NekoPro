@@ -128,8 +128,9 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
 
     val entities = ArrayList<AbstractBean>()
     val entitiesByLine = ArrayList<AbstractBean>()
+    var pendingSubscriptionLink: String? = null
 
-    fun String.parseLink(entities: ArrayList<AbstractBean>) {
+    fun String.parseLink(entities: ArrayList<AbstractBean>, allowHttpSubscription: Boolean) {
         if (startsWith("clash://install-config?") || startsWith("sn://subscription?")) {
             throw SubscriptionFoundException(this)
         }
@@ -157,14 +158,15 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
                 entities.add(parseHttp(this))
             }.onFailure {
                 Logs.w(it)
-                val clashUrl = HttpUrl.Builder()
-                    .scheme("https")
-                    .host("install-config")
-                    .addQueryParameter("url", this)
-                    .build()
-                    .toString()
-                    .replaceFirst("https://", "clash://")
-                throw (SubscriptionFoundException(clashUrl))
+                if (allowHttpSubscription && pendingSubscriptionLink == null) {
+                    pendingSubscriptionLink = HttpUrl.Builder()
+                        .scheme("https")
+                        .host("install-config")
+                        .addQueryParameter("url", this)
+                        .build()
+                        .toString()
+                        .replaceFirst("https://", "clash://")
+                }
             }
         } else if (startsWith("vmess://")) {
             Logs.d("Try parse v2ray link")
@@ -261,10 +263,10 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
     }
 
     for (link in links) {
-        link.parseLink(entities)
+        link.parseLink(entities, allowHttpSubscription = false)
     }
     for (link in linksByLine) {
-        link.parseLink(entitiesByLine)
+        link.parseLink(entitiesByLine, allowHttpSubscription = true)
     }
 //    var isBadLink = false
     if (entities.onEach { it.initializeDefaultValues() }.size == entitiesByLine.onEach { it.initializeDefaultValues() }.size) run test@{
@@ -276,7 +278,11 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
             }
         }
     }
-    return if (entities.size > entitiesByLine.size) entities else entitiesByLine
+    val result = if (entities.size > entitiesByLine.size) entities else entitiesByLine
+    if (result.isEmpty() && pendingSubscriptionLink != null) {
+        throw SubscriptionFoundException(pendingSubscriptionLink!!)
+    }
+    return result
 }
 
 fun <T : Serializable> T.applyDefaultValues(): T {

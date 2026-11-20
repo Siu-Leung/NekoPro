@@ -23,10 +23,18 @@ import libcore.BoxInstance
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 abstract class BoxInstance(
     val profile: ProxyEntity
 ) : AbstractInstance {
+
+    companion object {
+        private val tempFileCounter = AtomicLong(0L)
+        private fun uniqueTempName(prefix: String, ext: String): String {
+            return "${prefix}_${SystemClock.elapsedRealtime()}_${tempFileCounter.incrementAndGet()}.$ext"
+        }
+    }
 
     lateinit var config: ConfigBuildResult
     lateinit var box: BoxInstance
@@ -76,7 +84,7 @@ abstract class BoxInstance(
                         initPlugin("hysteria-plugin")
                         pluginConfigs[port] = profile.type to bean.buildHysteria1Config(port) {
                             File(
-                                app.cacheDir, "hysteria_" + SystemClock.elapsedRealtime() + ".ca"
+                                app.cacheDir, uniqueTempName("hysteria", "ca")
                             ).apply {
                                 parentFile?.mkdirs()
                                 cacheFiles.add(this)
@@ -107,7 +115,7 @@ abstract class BoxInstance(
 
                     bean is TrojanGoBean -> {
                         val configFile = File(
-                            cacheDir, "trojan_go_" + SystemClock.elapsedRealtime() + ".json"
+                            cacheDir, uniqueTempName("trojan_go", "json")
                         )
                         configFile.parentFile?.mkdirs()
                         configFile.writeText(config)
@@ -122,7 +130,7 @@ abstract class BoxInstance(
 
                     bean is MieruBean -> {
                         val configFile = File(
-                            cacheDir, "mieru_" + SystemClock.elapsedRealtime() + ".json"
+                            cacheDir, uniqueTempName("mieru", "json")
                         )
 
                         configFile.parentFile?.mkdirs()
@@ -142,7 +150,7 @@ abstract class BoxInstance(
 
                     bean is NaiveBean -> {
                         val configFile = File(
-                            cacheDir, "naive_" + SystemClock.elapsedRealtime() + ".json"
+                            cacheDir, uniqueTempName("naive", "json")
                         )
 
                         configFile.parentFile?.mkdirs()
@@ -154,7 +162,7 @@ abstract class BoxInstance(
                         val certificates = bean.certificates ?: ""
                         if (certificates.isNotBlank()) {
                             val certFile = File(
-                                cacheDir, "naive_" + SystemClock.elapsedRealtime() + ".crt"
+                                cacheDir, uniqueTempName("naive", "crt")
                             )
 
                             certFile.parentFile?.mkdirs()
@@ -173,7 +181,7 @@ abstract class BoxInstance(
 
                     bean is HysteriaBean -> {
                         val configFile = File(
-                            cacheDir, "hysteria_" + SystemClock.elapsedRealtime() + ".json"
+                            cacheDir, uniqueTempName("hysteria", "json")
                         )
 
                         configFile.parentFile?.mkdirs()
@@ -192,6 +200,10 @@ abstract class BoxInstance(
                         )
 
                         if (bean.protocol == HysteriaBean.PROTOCOL_FAKETCP) {
+                            // Never invoke su implicitly from imported profiles without explicit user opt-in.
+                            check(DataStore.allowFakeTcpRoot) {
+                                "FakeTCP requires Root access; enable 'Allow Root for FakeTCP' in Settings first"
+                            }
                             // Never run a third-party provided binary as root.
                             check(plugin.info.applicationInfo == null) {
                                 "FakeTCP requires the built-in hysteria plugin"

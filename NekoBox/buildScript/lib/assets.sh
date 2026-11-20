@@ -1,28 +1,26 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 DIR=app/src/main/assets/sing-box
-rm -rf $DIR
-mkdir -p $DIR
-cd $DIR
+mkdir -p "$DIR"
+work=$(mktemp -d "$DIR/.download.XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
 
-get_latest_release() {
-  curl --silent "https://api.github.com/repos/$1/releases/latest" | # Get latest release from GitHub api
-    grep '"tag_name":' |                                            # Get tag line
-    sed -E 's/.*"([^"]+)".*/\1/'                                    # Pluck JSON value
+fetch_asset() {
+  local name=$1 version=$2 sha256=$3
+  printf 'Downloading %s %s\n' "$name" "$version"
+  curl --fail --location --silent --show-error --retry 3 --max-time 90 \
+    -o "$work/$name.db" "https://github.com/SagerNet/sing-$name/releases/download/$version/$name.db"
+  printf '%s  %s\n' "$sha256" "$work/$name.db" | sha256sum -c
+  xz -9 "$work/$name.db"
+  printf '%s' "$version" > "$work/$name.version.txt"
 }
 
-####
-VERSION_GEOIP=`get_latest_release "SagerNet/sing-geoip"`
-echo VERSION_GEOIP=$VERSION_GEOIP
-echo -n $VERSION_GEOIP > geoip.version.txt
-curl -fLSsO https://github.com/SagerNet/sing-geoip/releases/download/$VERSION_GEOIP/geoip.db
-xz -9 geoip.db
+# Pin public upstream assets so clean and repeated builds use the same rules.
+fetch_asset geoip 20261112 0da32148f688ba65c0c6b2e2e0b1e6261802534819545d6fd2e3c8e71322825e
+fetch_asset geosite 20261118141523 c4b1a17003dbe8e5326ecfcd036528740c07e5c776d138f8b034080be81b660e
 
-####
-VERSION_GEOSITE=`get_latest_release "SagerNet/sing-geosite"`
-echo VERSION_GEOSITE=$VERSION_GEOSITE
-echo -n $VERSION_GEOSITE > geosite.version.txt
-curl -fLSsO https://github.com/SagerNet/sing-geosite/releases/download/$VERSION_GEOSITE/geosite.db
-xz -9 geosite.db
+for asset in "$work"/*; do
+  mv -f -- "$asset" "$DIR/"
+done

@@ -64,6 +64,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		PortRange:      portRange,
 		Transport:      transport,
 		UDP:            udpEnabled,
+		MTU:            options.MTU,
 		UserName:       options.UserName,
 		Password:       options.Password,
 		Multiplexing:   strings.TrimSpace(options.Multiplexing),
@@ -136,6 +137,16 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	// mihomo resolved a domain destination into meta.DstIP and the returned
 	// connection only accepts IP addresses; translate between them.
 	return mihomo_adapter.WrapResolvedPacketConn(pc, meta, destination), nil
+}
+
+var _ adapter.Lifecycle = (*Outbound)(nil)
+
+func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage != adapter.StartStateInitialize {
+		return nil
+	}
+	scope.Add(h.Close)
+	return nil
 }
 
 func (h *Outbound) Close() error {

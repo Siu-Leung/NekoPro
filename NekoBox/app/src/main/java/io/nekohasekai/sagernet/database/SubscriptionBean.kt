@@ -60,10 +60,14 @@ class SubscriptionBean : Serializable() {
         deduplication = input.readBoolean()
         updateWhenConnectedOnly = input.readBoolean()
         customUserAgent = input.readString()
-        autoUpdate = input.readBoolean()
-        autoUpdateDelay = input.readInt()
-        lastUpdated = input.readInt()
-        subscriptionUserinfo = input.readString()
+        if (input.limit() - input.position() > 0) {
+            autoUpdate = input.readBoolean()
+            autoUpdateDelay = input.readInt()
+            lastUpdated = input.readInt()
+        }
+        if (version >= 1 && input.limit() - input.position() > 0) {
+            subscriptionUserinfo = input.readString()
+        }
     }
 
     fun deserializeFromShare(input: ByteBufferInput) {

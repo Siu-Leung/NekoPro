@@ -7,6 +7,7 @@ import androidx.preference.SwitchPreference
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 
@@ -51,6 +52,10 @@ class TuicSettingsActivity : ProfileSettingsActivity<TuicBean>() {
         rootKey: String?,
     ) {
         addPreferencesFromResource(R.xml.tuic_preferences)
+
+        findPreference<EditTextPreference>(Key.SERVER_PORT)!!.apply {
+            setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
+        }
 
         val disableSNI = findPreference<SwitchPreference>(Key.SERVER_DISABLE_SNI)!!
         val sni = findPreference<EditTextPreference>(Key.SERVER_SNI)!!

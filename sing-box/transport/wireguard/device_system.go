@@ -93,6 +93,7 @@ func (w *systemDevice) Start() error {
 		MTU:            w.options.MTU,
 		GSO:            true,
 		InterfaceScope: true,
+		DNSMode:        tun.DNSModeDisabled,
 		Inet4RouteAddress: common.Filter(w.options.AllowedAddress, func(it netip.Prefix) bool {
 			return it.Addr().Is4()
 		}),
@@ -134,6 +135,7 @@ func (w *systemDevice) Read(bufs [][]byte, sizes []int, offset int) (count int, 
 	} else {
 		sizes[0], err = w.device.Read(bufs[0][offset-tun.PacketOffset:])
 		if err == nil {
+			sizes[0] -= tun.PacketOffset
 			count = 1
 		} else if errors.Is(err, tun.ErrTooManySegments) {
 			err = wgTun.ErrTooManySegments

@@ -19,7 +19,7 @@ func extractAssets() {
 	extract := func(name string) {
 		err := extractAssetName(name, useOfficialAssets)
 		if err != nil {
-			log.Println("Extract", geoipDat, "failed:", err)
+			log.Println("Extract", name, "failed:", err)
 		}
 	}
 
@@ -88,7 +88,7 @@ func extractAssetName(name string, useOfficialAssets bool) error {
 		if err != nil {
 			// versionFileMissing
 			doExtract = true
-			_ = os.RemoveAll(version)
+			_ = os.RemoveAll(dir + version)
 		} else {
 			localVersion = string(b)
 			if localVersion == "Custom" {

@@ -3,6 +3,7 @@ package direct
 import (
 	"context"
 	"net"
+	"os"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -69,22 +70,31 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	return inbound, nil
 }
 
-func (i *Inbound) Start(stage adapter.StartStage) error {
+func (i *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	return i.listener.Start()
+	err := i.listener.Start()
+	if err != nil {
+		return err
+	}
+	scope.Add(i.listener.Close)
+	return nil
 }
 
-func (i *Inbound) Close() error {
-	return i.listener.Close()
+func (i *Inbound) InterfaceUpdated(ctx context.Context) {
+	i.udpNat.Purge()
 }
 
-func (i *Inbound) NewPacketEx(buffer *buf.Buffer, source M.Socksaddr) {
+func (i *Inbound) NewPacket(buffer *buf.Buffer, source M.Socksaddr) {
 	i.udpNat.NewPacket([][]byte{buffer.Bytes()}, source, i.listener.UDPAddr(), nil)
 }
 
-func (i *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (i *Inbound) NewPacketBatch(buffers []*buf.Buffer, sources []M.Socksaddr) {
+	i.udpNat.NewPacketBatch(buffers, sources, i.listener.UDPAddr(), nil)
+}
+
+func (i *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	metadata.Inbound = i.Tag()
 	metadata.InboundType = i.Type()
 	destination := metadata.OriginDestination
@@ -141,4 +151,32 @@ type directPacketWriter struct {
 
 func (w *directPacketWriter) WritePacket(buffer *buf.Buffer, addr M.Socksaddr) error {
 	return w.writer.WritePacket(buffer, w.source)
+}
+
+func (w *directPacketWriter) CreatePacketBatchWriter() (N.PacketBatchWriter, bool) {
+	writer, created := bufio.CreatePacketBatchWriter(w.writer)
+	if !created {
+		return nil, false
+	}
+	return &directPacketBatchWriter{
+		writer: writer,
+		source: w.source,
+	}, true
+}
+
+type directPacketBatchWriter struct {
+	writer N.PacketBatchWriter
+	source M.Socksaddr
+}
+
+func (w *directPacketBatchWriter) WritePacketBatch(buffers []*buf.Buffer, destinations []M.Socksaddr) error {
+	if len(buffers) == 0 || len(buffers) != len(destinations) {
+		buf.ReleaseMulti(buffers)
+		return os.ErrInvalid
+	}
+	sources := make([]M.Socksaddr, len(destinations))
+	for index := range sources {
+		sources[index] = w.source
+	}
+	return w.writer.WritePacketBatch(buffers, sources)
 }

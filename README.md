@@ -12,12 +12,13 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 主要特性
 
-- sing-box `1.13.19` 加固版主内核
-- Mihomo `1.19.34` 协议桥接（升级 `uTLS v1.9.0-alpha.1` Chrome 155+ 指纹）
+- sing-box `1.14.4` 加固版主内核（原生 Snell v4–v6 / 原生 AnyTLS / 新版 Typed DNS Schema / 乐观 DNS 缓存 / `quic-go v0.61`）
+- Mihomo `1.19.34` 协议桥接（升级 `uTLS v1.9.0-alpha.1` Chrome 155+ 指纹，合入上游 XHTTP 复用连接池过期修复）
 - **MASQUE (CONNECT-IP / CONNECT-UDP / Cloudflare WARP)** 协议集成
-- **VLESS-XHTTP + REALITY** 完整支持（兼容 `splithttp`、`mode` 与 `extra` XMUX 配置）
-- Snell 原生集成（基于 `sing-snell`，全面支持 v4/v5/v6 与连接池复用）
-- **Juicity 协议原生集成**（基于 `sing-juicity`）
+- **VLESS-XHTTP + REALITY** 完整支持（兼容 `splithttp`、`mode`、`extra` XMUX、自定义证书与 ECH）
+- **Mieru 协议内置原生出站**（无需外部 `mieru-plugin`）
+- **Snell 原生集成**（采用 `sing-box 1.14.4` 上游原生 `protocol/snell` 与 `sing-snell`，支持 v4/v5 兼容客户端与 v6）
+- **Juicity 协议原生集成**（升级 `sing-juicity v0.3.1`，支持拥塞控制算法配置）
 - **真·速度测试模块**（支持按下载/上传速度排序与一键重测失败节点）
 - **候选 UA 智能轮询回退链**（解决复杂订阅源对未知 UA 的阻断与降级）
 - IPv4 / IPv6 双栈
@@ -28,12 +29,32 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.2.2`
+`Neko-Pro-1.3.0`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.2)
-- 核心 APK：`NekoBox-Neko-Pro-1.2.2-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.3.0)
+- 核心 APK：`NekoBox-Neko-Pro-1.3.0-arm64-v8a.apk`
 
-### v1.2.2 改动日志 (2026-11-19)
+### v1.3.0 改动日志 (2026-11-20)
+
+- **内核跨代升级（原生优先）**
+  - **主内核升级至 `sing-box 1.14.4`**：采用「原生优先」策略，Snell（v4/v5/v6）与 AnyTLS（含 `client_metadata` 安全保护）全面切回上游原生实现并移除历史魔改；仅保留上游尚未提供的 `vless_xhttp`、`masque`、`mieru` 与 `juicity`（升级至 `sing-juicity v0.3.1` 并接入拥塞控制）适配器；同步启用 `no_tailscale` 裁除未使用的 mihomo Tailscale 代码。
+  - **应用生成的 DNS 配置迁移至 `sing-box 1.14` Typed DNS Schema**：使用 `local`、`fakeip`、`predefined NOERROR`、`route.default_domain_resolver` 与 `query_type`。DNS 服务器地址为域名时，即使同时设置了 `detour`，也保留指定的 `domain_resolver`；IP 字面量不需要域名解析器。
+  - **旧完整配置**：常用旧 DNS 服务器写法（如 UDP、系统 DNS、DoH）、FakeIP 和引用固定响应的 DNS 规则在启动时转换；不改已保存的 JSON，导出仍为原文。带有不支持的旧选项时会指出相应字段，而不是猜测出口或解析行为。
+  - **Mihomo XHTTP 连接复用修复**：合入 `MetaCubeX/mihomo@2be2f08`（#3479），避免 XHTTP 复用池挑到已过期或关闭的底层连接。
+  - **Mieru UDP MTU**：应用生成的 Mieru 出站在 UDP 传输时使用节点配置的 MTU（默认 1400），并传递给 Mihomo 客户端；TCP 传输不应用该设置。
+  - **版本命名**：应用显示名为 `Neko Pro`，应用版本标识为 `Neko-Pro-1.3.0`；内核统一显示 `sing-box 1.14.4` 和 `mihomo 1.19.34`。
+- **高优先级安全与数据保护修复**
+  - **数据库迁移与防数据丢失（H16）**：补齐 Room `MIGRATION_1_2` / `MIGRATION_2_3` 手写迁移，移除无条件 `fallbackToDestructiveMigration()`，改为仅降级回退。
+  - **跨进程日志锁与 Protect 错误传播（H1 / H7）**：`libneko/neko_log` 增加跨进程 `flock` 锁与轮转后 `os.SameFile` 自动重开；`protect_server` 真实回传 `AutoDetectInterfaceControl` 错误码并在客户端校验。
+  - **隐私隔离与解压炸弹防护（H12 / H17 / H6）**：收窄 FileProvider `cache_paths.xml` 仅暴露 `share_backup/` 与 `log/` 并启动自动清理残留明文备份；`libcore/io.go` `Unxz`/`Unzip` 增加 512 MiB 上限、4096 条目上限、符号链接拦截与隐式父目录创建；`assets_update.go` 改用 `os.CreateTemp` 并支持代理。
+  - **Root / 插件 / 自定义根证书治理（C1 / C10）**：Hysteria FakeTCP Root 执行增加默认关闭的显式开关；插件校验支持同签名免打扰 + 白名单与 TOFU；新增应用私有目录自定义 Root CA PEM 导入/清除管理入口。
+- **订阅、协议与稳定性修复**
+  - **Clash 订阅刷新**：如果 YAML 或任一节点解析失败，不用仅解析成功的部分覆盖现有订阅；没有候选返回完整可用列表时，保留已有节点。手动导入可跳过坏节点，与订阅刷新不同。另修复订阅节点重排和选中节点清理，以及 WireGuard IPv6、SIP008 JSON、VLESS-XHTTP 等格式的部分解析问题。
+  - **协议与 `libcore`**：AnyTLS 遵循全局 `globalAllowInsecure`；Mieru 不再依赖外部插件；修复 DNS 解析协程的取消、测速超时与并发、资源解压和 Android Q 以下本地解析回落等问题。
+  - **序列化、WebView 与服务**：修复 `SubscriptionBean` 按版本反序列化、`AbstractBean` 并发序列化、部分 WebView URL 跳转和后台服务取消/重启问题；生成的 WireGuard 配置使用 `endpoints[]`。
+- **正式发布检查**：CI 通过 `libneko`（含竞态检测）、Mihomo 的 XHTTP 与 outbound 包（含 Mieru MTU 回归测试）、`sing-box`（指定构建标签，不含 `common/netns`）及 `libcore` 的 Go 测试后，才进行 Android 发布构建。发布前还须通过 `ossRelease` JVM 单元测试和 Lint，并验证四个 APK 均使用 v1.2.2 的签名证书。v1.3.0 另在隔离模拟器上检查从 v1.2.2 覆盖安装后，原先保存的测试节点仍在。这些检查不代表所有协议已在真机验证。
+
+### v1.2.2 改动日志 (2026-11-20)
 
 - **更新与自动发布链路闭环**
   - **「关于」页接入正式版检查更新**：新增 `AppUpdatePolicy` 语义化版本比对（修复子串匹配导致 `1.2.1` 漏检 `1.2.10` 或反向提示降级的问题），修复 `Libcore.newHttpClient()` 未关闭资源泄漏、GitHub API 限流/异常 JSON 报错与防连点，校验官方 Release 链接后安全跳转下载页。

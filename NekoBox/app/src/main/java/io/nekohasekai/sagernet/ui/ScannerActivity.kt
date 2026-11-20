@@ -78,11 +78,11 @@ class ScannerActivity : ThemedActivity(),
                         )
                     }
                     val result = CodeUtils.parseCodeResult(bitmap)
-                    onMainDispatcher {
-                        onScanResultCallback(result, true)
-                    }
+                    importScanResult(result)
                 }
-                finish()
+                onMainDispatcher {
+                    finish()
+                }
             } catch (e: Exception) {
                 Logs.w(e)
                 onMainDispatcher {
@@ -113,39 +113,52 @@ class ScannerActivity : ThemedActivity(),
         return onScanResultCallback(result, false)
     }
 
-    fun onScanResultCallback(result: Result?, multi: Boolean): Boolean {
-        if (!multi && finished.getAndSet(true)) return true
-        if (!multi) finish()
-        runOnDefaultDispatcher {
-            try {
-                val text = result?.text ?: throw Exception("QR code not found")
-                val results = RawUpdater.parseRaw(text)
-                if (!results.isNullOrEmpty()) {
-                    val currentGroupId = DataStore.selectedGroupForImport()
-                    if (DataStore.selectedGroup != currentGroupId) {
-                        DataStore.selectedGroup = currentGroupId
-                    }
-
-                    for (profile in results) {
-                        ProfileManager.createProfile(currentGroupId, profile)
-                        importedN.addAndGet(1)
-                    }
-                } else {
-                    onMainDispatcher {
-                        Toast.makeText(app, R.string.action_import_err, Toast.LENGTH_SHORT).show()
-                    }
+    private suspend fun importScanResult(result: Result?) {
+        try {
+            val text = result?.text ?: throw Exception("QR code not found")
+            val results = RawUpdater.parseRaw(text)
+            if (!results.isNullOrEmpty()) {
+                val currentGroupId = DataStore.selectedGroupForImport()
+                if (DataStore.selectedGroup != currentGroupId) {
+                    DataStore.selectedGroup = currentGroupId
                 }
-            } catch (e: SubscriptionFoundException) {
+
+                for (profile in results) {
+                    ProfileManager.createProfile(currentGroupId, profile)
+                    importedN.addAndGet(1)
+                }
+            } else {
+                onMainDispatcher {
+                    Toast.makeText(app, R.string.action_import_err, Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: SubscriptionFoundException) {
+            onMainDispatcher {
                 startActivity(Intent(this@ScannerActivity, MainActivity::class.java).apply {
                     action = Intent.ACTION_VIEW
                     data = e.link.toUri()
                 })
-            } catch (e: Throwable) {
-                Logs.w(e)
-                onMainDispatcher {
-                    var text = getString(R.string.action_import_err)
-                    text += "\n" + e.readableMessage
-                    Toast.makeText(app, text, Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Throwable) {
+            Logs.w(e)
+            onMainDispatcher {
+                var text = getString(R.string.action_import_err)
+                text += "\n" + e.readableMessage
+                Toast.makeText(app, text, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun onScanResultCallback(result: Result?, multi: Boolean): Boolean {
+        if (!multi && finished.getAndSet(true)) return true
+        runOnDefaultDispatcher {
+            try {
+                importScanResult(result)
+            } finally {
+                if (!multi) {
+                    onMainDispatcher {
+                        finish()
+                    }
                 }
             }
         }

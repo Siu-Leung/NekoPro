@@ -30,37 +30,53 @@ jobs:
     name: Go tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26.7'
           cache-dependency-path: |
+            mihomo/go.sum
             sing-box/go.sum
             NekoBox/libcore/go.sum
       - name: Test libneko
         working-directory: libneko
-        run: go test ./...
+        run: go test -race ./...
+      - name: Test mihomo XHTTP and outbound (Mieru MTU)
+        working-directory: mihomo
+        run: go test ./transport/xhttp/... ./adapter/outbound
       - name: Test sing-box
         working-directory: sing-box
-        run: go test ./...
+        shell: bash
+        run: |
+          tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,no_tailscale'
+          listed_packages=$(go list -tags="$tags" ./...)
+          packages=()
+          while IFS= read -r pkg; do
+            if [[ -n "$pkg" && "$pkg" != */common/netns ]]; then
+              packages+=("$pkg")
+            fi
+          done <<< "$listed_packages"
+          test "${#packages[@]}" -gt 0
+          go test -ldflags='-checklinkname=0' -tags="$tags" "${packages[@]}"
       - name: Test libcore
         working-directory: NekoBox/libcore
-        run: go test ./...
+        run: go test -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,no_tailscale' ./...
 
   android-build:
     name: Android build
+    needs: go-tests
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26.7'
           cache-dependency-path: NekoBox/libcore/go.sum
@@ -85,7 +101,7 @@ jobs:
           test -n "$RELEASE_KEYSTORE_B64"
           printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/nekopro-release.keystore"
           chmod 600 "$RUNNER_TEMP/nekopro-release.keystore"
-      - name: Test and build signed APKs
+      - name: Test, lint, and build signed APKs
         working-directory: NekoBox
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/nekopro-release.keystore
@@ -94,23 +110,68 @@ jobs:
           ALIAS_PASS: ${{ secrets.RELEASE_KEY_PASS }}
         run: |
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
-          bash ./gradlew :app:testOssReleaseUnitTest assembleOssRelease --no-daemon
-          mkdir -p app/build/outputs/apk/oss/release/checksums
-          cd app/build/outputs/apk/oss/release
-          test "$(find . -maxdepth 1 -name '*.apk' | wc -l)" -eq 4
-          for apk in ./*.apk; do
-            APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
-            "$APKSIGNER" verify --verbose "$apk"
+          bash ./gradlew :app:testOssReleaseUnitTest :app:lintVitalOssRelease assembleOssRelease --no-daemon
+      - name: Verify APK signatures and generate checksums
+        working-directory: NekoBox/app/build/outputs/apk/oss/release
+        shell: bash
+        run: |
+          # Public signer fingerprint verified from the approved v1.2.2 arm64-v8a APK.
+          expected_cert_sha256='cc5b759e7e8fe92a23d218d86629d430859d87f14a98a9bbc15e4d39baf5f37c'
+          apksigner="$ANDROID_HOME/build-tools/35.0.1/apksigner"
+          test -x "$apksigner"
+          shopt -s nullglob
+          apks=(./*.apk)
+          test "${#apks[@]}" -eq 4
+          for apk in "${apks[@]}"; do
+            certs=$(LC_ALL=C "$apksigner" verify --verbose --print-certs "$apk")
+            signer_count=0
+            digest_count=0
+            cert_sha256=''
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^Number\ of\ signers:\ ([0-9]+)[[:space:]]*$ ]]; then
+                signer_count=${BASH_REMATCH[1]}
+              elif [[ "$line" =~ ^Signer\ \#[0-9]+\ certificate\ SHA-256\ digest:\ ([0-9A-Fa-f]{64})[[:space:]]*$ ]]; then
+                digest_count=$((digest_count + 1))
+                cert_sha256=${BASH_REMATCH[1]}
+              fi
+            done <<< "$certs"
+            test "$digest_count" -eq 1 || { echo "Expected exactly one certificate digest for $apk." >&2; exit 1; }
+            if [[ "$signer_count" != 1 || "${cert_sha256,,}" != "$expected_cert_sha256" ]]; then
+              if [[ "$signer_count" == 1 && "$cert_sha256" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+                echo "Unexpected certificate SHA-256 for $apk: $cert_sha256" >&2
+              else
+                echo "Could not establish exactly one signer and its SHA-256 for $apk." >&2
+              fi
+              exit 1
+            fi
           done
-          md5sum ./*.apk > checksums/MD5SUMS.txt
-          sha256sum ./*.apk > checksums/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+          mkdir -p checksums
+          md5sum "${apks[@]}" > checksums/MD5SUMS.txt
+          sha256sum "${apks[@]}" > checksums/SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: NekoPro-signed-apks
           path: |
             NekoBox/app/build/outputs/apk/oss/release/*.apk
             NekoBox/app/build/outputs/apk/oss/release/checksums/*.txt
           if-no-files-found: error
+      - name: Prepare v1.2.2 upgrade baseline
+        if: startsWith(github.ref, 'refs/heads/feat/') || github.ref == 'refs/heads/main' || github.ref == 'refs/tags/v1.3.0'
+        run: |
+          curl --fail --location --retry 3 --max-time 90 -o "$RUNNER_TEMP/nekopro-v1.2.2-x86_64.apk" \
+            'https://github.com/Siu-Leung/NekoPro/releases/download/v1.2.2/NekoBox-Neko-Pro-1.2.2-x86_64.apk'
+          printf '%s  %s\n' 'c4c1a02a19ce248e21bd2670e8ef00974be306e69bb7fe9252b65e9a4e6fd4f9' "$RUNNER_TEMP/nekopro-v1.2.2-x86_64.apk" | sha256sum --check
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
+      - name: Verify signed v1.2.2 upgrade preserves saved profile
+        if: startsWith(github.ref, 'refs/heads/feat/') || github.ref == 'refs/heads/main' || github.ref == 'refs/tags/v1.3.0'
+        uses: ReactiveCircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-linux-hw-accel: false
+          script: bash .github/scripts/check-android-upgrade.sh "$RUNNER_TEMP/nekopro-v1.2.2-x86_64.apk" NekoBox/app/build/outputs/apk/oss/release/NekoBox-Neko-Pro-1.3.0-x86_64.apk
       - name: Resolve release metadata
         id: release_meta
         env:
@@ -196,7 +257,7 @@ jobs:
           echo "Resolved release metadata: should_release=${should_release} tag_name=${tag_name} has_notes=${has_notes}"
       - name: Publish GitHub Release
         if: steps.release_meta.outputs.should_release == 'true' && steps.release_meta.outputs.tag_name != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.release_meta.outputs.tag_name }}
           target_commitish: ${{ github.sha }}

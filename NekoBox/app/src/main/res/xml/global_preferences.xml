@@ -252,6 +252,15 @@
         <SwitchPreference
             app:key="allowInsecureOnRequest"
             app:title="@string/allow_insecure_on_request_sum" />
+        <SwitchPreference
+            app:defaultValue="false"
+            app:key="allowFakeTcpRoot"
+            app:summary="@string/allow_faketcp_root_sum"
+            app:title="@string/allow_faketcp_root" />
+        <Preference
+            app:key="customRootCa"
+            app:summary="@string/custom_root_ca_empty"
+            app:title="@string/custom_root_ca" />
         <moe.matsuri.nb4a.ui.SimpleMenuPreference
             app:defaultValue="1.2"
             app:entries="@array/app_tls_version"

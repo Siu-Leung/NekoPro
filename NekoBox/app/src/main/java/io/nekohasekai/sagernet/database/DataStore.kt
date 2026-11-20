@@ -97,7 +97,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         val current = currentGroup()
         if (current.type == GroupType.BASIC) return current.id
         val groups = SagerDatabase.groupDao.allGroups()
-        return groups.find { it.type == GroupType.BASIC }!!.id
+        return groups.find { it.type == GroupType.BASIC }?.id
+            ?: ProxyGroup(ungrouped = true).apply {
+                id = SagerDatabase.groupDao.createGroup(this)
+            }.id
     }
 
     var appTLSVersion by configurationStore.string(Key.APP_TLS_VERSION)
@@ -127,7 +130,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var bypassLanInCore by configurationStore.boolean(Key.BYPASS_LAN_IN_CORE)
 
     var allowAccess by configurationStore.boolean(Key.ALLOW_ACCESS)
-    var speedInterval by configurationStore.stringToInt(Key.SPEED_INTERVAL)
+    var speedInterval by configurationStore.stringToInt(Key.SPEED_INTERVAL) { 1000 }
     var showGroupInNotification by configurationStore.boolean("showGroupInNotification")
 
     var globalCustomConfig by configurationStore.string(Key.GLOBAL_CUSTOM_CONFIG) { "" }
@@ -192,6 +195,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     // protocol
 
     var globalAllowInsecure by configurationStore.boolean(Key.GLOBAL_ALLOW_INSECURE) { false }
+    var allowFakeTcpRoot by configurationStore.boolean(Key.ALLOW_FAKETCP_ROOT) { false }
 
     // old cache, DO NOT ADD
 
@@ -278,7 +282,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionAutoUpdate by profileCacheStore.boolean(Key.SUBSCRIPTION_AUTO_UPDATE)
     var subscriptionAutoUpdateDelay by profileCacheStore.stringToInt(Key.SUBSCRIPTION_AUTO_UPDATE_DELAY) { 360 }
 
-    var rulesFirstCreate by profileCacheStore.boolean("rulesFirstCreate")
+    var rulesFirstCreate by configurationStore.boolean("rulesFirstCreate")
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
     }

@@ -122,14 +122,22 @@
                 <data android:scheme="ssr" />
                 <data android:scheme="socks" />
                 <data android:scheme="socks4" />
-                <data android:scheme="socksa" />
-                <data android:scheme="sock5" />
+                <data android:scheme="socks4a" />
+                <data android:scheme="socks5" />
                 <data android:scheme="vmess" />
+                <data android:scheme="vless" />
                 <data android:scheme="trojan" />
                 <data android:scheme="trojan-go" />
                 <data android:scheme="naive+https" />
                 <data android:scheme="naive+quic" />
                 <data android:scheme="hysteria" />
+                <data android:scheme="hysteria2" />
+                <data android:scheme="hy2" />
+                <data android:scheme="tuic" />
+                <data android:scheme="masque" />
+                <data android:scheme="juicity" />
+                <data android:scheme="anytls" />
+                <data android:scheme="snell" />
 
             </intent-filter>
 
@@ -216,8 +224,7 @@
         <activity
             android:name=".QuickToggleShortcut"
             android:excludeFromRecents="true"
-            android:exported="true"
-            android:permission="${applicationId}.SERVICE"
+            android:exported="false"
             android:label="@string/quick_toggle"
             android:launchMode="singleTask"
             android:process=":bg"
@@ -235,8 +242,7 @@
         <activity
             android:name="io.nekohasekai.sagernet.ui.QuickEnableShortcut"
             android:excludeFromRecents="true"
-            android:exported="true"
-            android:permission="${applicationId}.SERVICE"
+            android:exported="false"
             android:label="@string/quick_enable"
             android:launchMode="singleTask"
             android:process=":bg"
@@ -245,8 +251,7 @@
         <activity
             android:name="io.nekohasekai.sagernet.ui.QuickDisableShortcut"
             android:excludeFromRecents="true"
-            android:exported="true"
-            android:permission="${applicationId}.SERVICE"
+            android:exported="false"
             android:label="@string/quick_disable"
             android:launchMode="singleTask"
             android:process=":bg"

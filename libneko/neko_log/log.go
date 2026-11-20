@@ -102,9 +102,62 @@ type logWriter struct {
 	maxSize        int64
 	maxFiles       int
 	file           *os.File
+	lockFile       *os.File
 	redirectStderr bool
 	mu             sync.Mutex
 	closed         bool
+}
+
+func (w *logWriter) lockProcessLocked() func() {
+	if w.path == "" {
+		return func() {}
+	}
+	if w.lockFile == nil {
+		lf, err := os.OpenFile(w.path+".lock", os.O_RDWR|os.O_CREATE, 0600)
+		if err != nil {
+			return func() {}
+		}
+		w.lockFile = lf
+	}
+	fd := int(w.lockFile.Fd())
+	_ = syscallw.Flock(fd, syscallw.LOCK_EX)
+	return func() {
+		_ = syscallw.Flock(fd, syscallw.LOCK_UN)
+	}
+}
+
+func (w *logWriter) ensureActiveFileLocked() error {
+	if w.path == "" {
+		if w.file == nil {
+			return os.ErrInvalid
+		}
+		return nil
+	}
+	if w.file != nil {
+		curStat, err1 := w.file.Stat()
+		pathStat, err2 := os.Stat(w.path)
+		if err1 == nil && err2 == nil && os.SameFile(curStat, pathStat) {
+			return nil
+		}
+		// Another process rotated or replaced w.path: reopen the current path.
+		oldFile := w.file
+		file, err := os.OpenFile(w.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
+		if err != nil {
+			return err
+		}
+		w.file = file
+		w.replaceWriterLocked(oldFile, file)
+		w.dupStderrLocked(file)
+		_ = oldFile.Close()
+		return nil
+	}
+	file, err := os.OpenFile(w.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	w.file = file
+	w.dupStderrLocked(file)
+	return nil
 }
 
 func (w *logWriter) Write(p []byte) (int, error) {
@@ -180,16 +233,11 @@ func (w *logWriter) dupStderrLocked(file *os.File) {
 }
 
 func (w *logWriter) writeFileLocked(p []byte) error {
-	if w.file == nil {
-		if w.path == "" {
-			return os.ErrInvalid
-		}
-		file, err := os.OpenFile(w.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
-		if err != nil {
-			return err
-		}
-		w.file = file
-		w.dupStderrLocked(file)
+	unlock := w.lockProcessLocked()
+	defer unlock()
+
+	if err := w.ensureActiveFileLocked(); err != nil {
+		return err
 	}
 	if w.maxSize <= 0 {
 		_, err := w.file.Write(p)
@@ -271,6 +319,11 @@ func (w *logWriter) Truncate() {
 	if w.closed || w.file == nil {
 		return
 	}
+	unlock := w.lockProcessLocked()
+	defer unlock()
+	if err := w.ensureActiveFileLocked(); err != nil {
+		return
+	}
 	_ = w.file.Truncate(0)
 	_, _ = w.file.Seek(0, io.SeekStart)
 }
@@ -285,11 +338,18 @@ func (w *logWriter) Close() error {
 		return nil
 	}
 	w.closed = true
+	var firstErr error
 	if w.file != nil {
 		oldFile := w.file
 		w.file = nil
 		w.replaceWriterLocked(oldFile, nil)
-		return oldFile.Close()
+		firstErr = oldFile.Close()
 	}
-	return nil
+	if w.lockFile != nil {
+		if err := w.lockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		w.lockFile = nil
+	}
+	return firstErr
 }

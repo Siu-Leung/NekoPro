@@ -77,7 +77,7 @@ func ResetAllConnections(system bool) {
 		if instance != nil {
 			instance.access.Lock()
 			defer instance.access.Unlock()
-			instance.Box.Network().ResetNetwork()
+			instance.Box.Network().ResetNetwork(context.Background())
 			log.Println("Reset all connections done")
 		} else {
 			log.Println("Reset all connections skipped (no instance)")
@@ -107,13 +107,13 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
 		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidCertificateProviderRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
 
 	// parse options
-	var options option.Options
-	err = options.UnmarshalJSONContext(ctx, []byte(config))
+	options, err := decodeLegacyDNSConfig(ctx, config)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
@@ -154,6 +154,7 @@ func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b 
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
 		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidCertificateProviderRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
@@ -161,8 +162,7 @@ func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b 
 	// mihomo protect/DNS hooks from the main instance
 	ctx = mihomo_adapter.ContextWithTestInstance(ctx)
 
-	var options option.Options
-	err = options.UnmarshalJSONContext(ctx, []byte(config))
+	options, err := decodeLegacyDNSConfig(ctx, config)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
@@ -296,28 +296,41 @@ func (b *BoxInstance) SelectOutbound(tag string) bool {
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer device.DeferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
 	var connectionTracker adapter.ConnectionTracker
+	timeoutDur := time.Duration(timeout) * time.Millisecond
+	if timeoutDur <= 0 {
+		timeoutDur = 5 * time.Second
+	}
 	// test i
 	if i != nil {
 		if i.statsService != nil {
 			connectionTracker = i.statsService
 		}
-		return speedtest.UrlTest(createProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+		client := createProxyHttpClient(i.Box, connectionTracker, timeoutDur)
+		defer client.CloseIdleConnections()
+		return speedtest.UrlTest(client, link, timeout, speedtest.UrlTestStandard_RTT)
 	}
 	// test direct
 	mainInstanceAccess.RLock()
 	instance := mainInstance
 	mainInstanceAccess.RUnlock()
 	if instance == nil {
-		return speedtest.UrlTest(createProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
+		client := createProxyHttpClient(nil, nil, timeoutDur)
+		defer client.CloseIdleConnections()
+		return speedtest.UrlTest(client, link, timeout, speedtest.UrlTestStandard_RTT)
 	}
 	// test mainInstance
 	if instance.statsService != nil {
 		connectionTracker = instance.statsService
 	}
-	return speedtest.UrlTest(createProxyHttpClient(instance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	client := createProxyHttpClient(instance.Box, connectionTracker, timeoutDur)
+	defer client.CloseIdleConnections()
+	return speedtest.UrlTest(client, link, timeout, speedtest.UrlTestStandard_RTT)
 }
 
-func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker) *http.Client {
+func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker, timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if instance == nil {
@@ -327,9 +340,11 @@ func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker)
 			detour := dialer.NewDetour(instance.Outbound(), instance.Outbound().Default().Tag(), true)
 			return detour.DialContext(ctx, network, M.ParseSocksaddr(addr))
 		},
-		TLSHandshakeTimeout:   time.Second * 3,
-		ResponseHeaderTimeout: time.Second * 3,
-		DisableKeepAlives:     true,
+		TLSHandshakeTimeout:   timeout,
+		ResponseHeaderTimeout: timeout,
+		DisableKeepAlives:     false,
+		MaxIdleConns:          2,
+		IdleConnTimeout:       timeout,
 	}
 	client := &http.Client{
 		Transport: transport,
@@ -351,8 +366,8 @@ func goServeProtect(start bool) {
 		protectCloser = nil
 	}
 	if start {
-		closer, err := protect_server.ServeProtect("protect_path", false, 0, func(fd int) {
-			_ = intfBox.AutoDetectInterfaceControl(int32(fd))
+		closer, err := protect_server.ServeProtect("protect_path", false, 0, func(fd int) error {
+			return intfBox.AutoDetectInterfaceControl(int32(fd))
 		})
 		if err != nil {
 			log.Println("goServeProtect error:", err)

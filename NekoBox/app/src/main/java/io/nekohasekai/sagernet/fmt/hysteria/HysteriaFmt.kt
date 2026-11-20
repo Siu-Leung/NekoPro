@@ -264,7 +264,11 @@ fun isMultiPort(hyAddr: String): Boolean {
 }
 
 fun getFirstPort(portStr: String): Int {
-    return portStr.substringBefore(":").substringBefore(",").toIntOrNull() ?: 443
+    return portStr.substringBefore(",")
+        .substringBefore("-")
+        .substringBefore(":")
+        .trim()
+        .toIntOrNull() ?: 443
 }
 
 fun HysteriaBean.canUseSingBox(): Boolean {
@@ -357,10 +361,22 @@ fun buildSingBoxOutboundHysteriaBean(bean: HysteriaBean): SingBoxOptions.SingBox
 }
 
 fun hopPortsToSingboxList(s: String): List<String> {
-    return s.split(",").mapNotNull {
-        val pRange = it.replace("-", ":")
-        if (pRange.split(":").size == 2) {
-            pRange
+    return s.split(",").mapNotNull { raw ->
+        val token = raw.trim()
+        if (token.isEmpty()) return@mapNotNull null
+        val singlePort = token.toIntOrNull()
+        if (singlePort != null && singlePort in 1..65535) {
+            return@mapNotNull "$singlePort:$singlePort"
+        }
+        val parts = token.replace("-", ":").split(":")
+        if (parts.size == 2) {
+            val start = parts[0].trim().toIntOrNull()
+            val end = parts[1].trim().toIntOrNull()
+            if (start != null && end != null && start in 1..65535 && end in start..65535) {
+                "$start:$end"
+            } else {
+                null
+            }
         } else {
             null
         }

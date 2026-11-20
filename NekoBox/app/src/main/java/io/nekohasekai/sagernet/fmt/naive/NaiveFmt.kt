@@ -26,8 +26,10 @@ fun parseNaive(link: String): NaiveBean {
     }
 }
 
-fun NaiveBean.toUri(proxyOnly: Boolean = false): String {
-    val builder = linkBuilder().host(finalAddress!!).port(finalPort)
+fun NaiveBean.toUri(proxyOnly: Boolean = false, hostOverride: String? = null): String {
+    val host = hostOverride ?: finalAddress ?: serverAddress!!
+    val port = if (proxyOnly) finalPort else (serverPort ?: finalPort)
+    val builder = linkBuilder().host(host).port(port)
     if (username!!.isNotBlank()) {
         builder.username(username!!)
         if (password!!.isNotBlank()) {
@@ -56,27 +58,28 @@ fun NaiveBean.toUri(proxyOnly: Boolean = false): String {
 
 fun NaiveBean.buildNaiveConfig(port: Int): String {
     return JSONObject().apply {
-        // process ipv6
-        finalAddress = finalAddress!!.wrapIPV6Host()
-        serverAddress = serverAddress!!.wrapIPV6Host()
+        // process ipv6 using local variables without mutating the bean
+        val resolvedFinalAddress = finalAddress!!.wrapIPV6Host()
+        val rawServerAddress = serverAddress!!
+        var proxyHost = resolvedFinalAddress
 
         // process sni
         if (sni!!.isNotBlank()) {
-            put("host-resolver-rules", "MAP $sni $finalAddress")
-            finalAddress = sni
+            put("host-resolver-rules", "MAP $sni $resolvedFinalAddress")
+            proxyHost = sni!!
         } else {
-            if (serverAddress!!.isIpAddress()) {
+            if (rawServerAddress.isIpAddress()) {
                 // for naive, using IP as SNI name hardly happens
                 // and host-resolver-rules cannot resolve the SNI problem
                 // so do nothing
             } else {
-                put("host-resolver-rules", "MAP $serverAddress $finalAddress")
-                finalAddress = serverAddress
+                put("host-resolver-rules", "MAP $rawServerAddress $resolvedFinalAddress")
+                proxyHost = rawServerAddress
             }
         }
 
         put("listen", "socks://$LOCALHOST:$port")
-        put("proxy", toUri(true))
+        put("proxy", toUri(proxyOnly = true, hostOverride = proxyHost))
         if (extraHeaders!!.isNotBlank()) {
             put("extra-headers", extraHeaders!!.split("\n").joinToString("\r\n"))
         }

@@ -518,6 +518,8 @@ func decodeSpeedTestServers(body []byte) (speedtest.Servers, error) {
 	return document.Servers, nil
 }
 
+const maxSpeedTestProbeServers = 32
+
 func selectLowestLatencyServer(
 	ctx context.Context,
 	client *http.Client,
@@ -529,13 +531,21 @@ func selectLowestLatencyServer(
 		err     error
 	}
 
-	results := make(chan latencyResult, len(servers))
-	sem := make(chan struct{}, 16)
-	var waitGroup sync.WaitGroup
+	candidates := make(speedtest.Servers, 0, min(len(servers), maxSpeedTestProbeServers))
 	for _, candidate := range servers {
 		if candidate == nil || candidate.URL == "" {
 			continue
 		}
+		candidates = append(candidates, candidate)
+		if len(candidates) >= maxSpeedTestProbeServers {
+			break
+		}
+	}
+
+	results := make(chan latencyResult, len(candidates))
+	sem := make(chan struct{}, 16)
+	var waitGroup sync.WaitGroup
+	for _, candidate := range candidates {
 		server := candidate
 		waitGroup.Add(1)
 		go func() {
@@ -645,11 +655,11 @@ func isBenignTransferError(err error) bool {
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "EOF") || strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded")
+	return strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded")
 }
 
 func runTransferPhase(

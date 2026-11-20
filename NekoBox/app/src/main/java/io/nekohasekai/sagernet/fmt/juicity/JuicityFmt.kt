@@ -75,6 +75,9 @@ fun buildSingBoxOutboundJuicityBean(bean: JuicityBean): Outbound_JuicityOptions 
         server_port = bean.serverPort
         uuid = bean.uuid
         password = bean.password
+        bean.congestionControl?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            congestion_control = it
+        }
 
         val normalizedPin = bean.pinnedCertchainSha256
             ?.takeIf { it.isNotBlank() }

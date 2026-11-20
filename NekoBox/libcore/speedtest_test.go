@@ -353,3 +353,17 @@ func TestNewSpeedTestConfigDefaultsAndValidation(t *testing.T) {
 		t.Fatal("expected non-HTTP simple download URL to be rejected")
 	}
 }
+
+func TestIsBenignTransferError(t *testing.T) {
+	if !isBenignTransferError(nil) || !isBenignTransferError(io.EOF) ||
+		!isBenignTransferError(context.Canceled) || !isBenignTransferError(context.DeadlineExceeded) {
+		t.Fatal("expected nil/EOF/canceled/deadline to be benign")
+	}
+	if isBenignTransferError(io.ErrUnexpectedEOF) {
+		t.Fatal("expected io.ErrUnexpectedEOF not to be masked as benign")
+	}
+	if isBenignTransferError(errors.New("unexpected EOF from proxy")) {
+		t.Fatal("expected arbitrary EOF error string not to be masked as benign")
+	}
+}
+

@@ -197,3 +197,34 @@ func TestManagerRotateOnConnReuseLimit(t *testing.T) {
 	transport3.Close()
 	manager.Close()
 }
+
+func TestManagerSkipExpiredBusyEntry(t *testing.T) {
+	var created atomic.Int64
+
+	manager, err := NewReuseManager(&ReuseConfig{
+		MaxConcurrency:   "2",
+		MaxConnections:   "1",
+		HMaxRequestTimes: "100",
+		HMaxReusableSecs: "1",
+	}, makeTestTransportFactory(&created))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	transport1 := manager.GetTransport().(*ReuseTransport)
+	id1 := transportID(transport1)
+
+	// Keep transport1 open past its reusable window so cleanupLocked cannot close it.
+	time.Sleep(1100 * time.Millisecond)
+
+	transport2 := manager.GetTransport().(*ReuseTransport)
+	id2 := transportID(transport2)
+
+	if id1 == id2 {
+		t.Fatalf("expected new transport when busy entry expired, got same id %d", id1)
+	}
+
+	transport1.Close()
+	transport2.Close()
+	manager.Close()
+}

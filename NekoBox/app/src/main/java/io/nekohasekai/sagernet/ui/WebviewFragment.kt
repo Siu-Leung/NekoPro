@@ -103,6 +103,26 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             }
         }
         mWebView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?, request: WebResourceRequest?
+            ): Boolean {
+                val targetUrl = request?.url?.toString() ?: return true
+                if (!isAllowedDashboardUrl(targetUrl)) {
+                    Logs.w("Blocked non-HTTP(S) WebView navigation")
+                    return true
+                }
+                return false
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                if (url == null || !isAllowedDashboardUrl(url)) {
+                    Logs.w("Blocked non-HTTP(S) WebView navigation")
+                    return true
+                }
+                return false
+            }
+
             override fun onReceivedError(
                 view: WebView?, request: WebResourceRequest?, error: WebResourceError?
             ) {

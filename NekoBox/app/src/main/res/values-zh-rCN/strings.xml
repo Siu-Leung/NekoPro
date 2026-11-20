@@ -492,6 +492,17 @@
     <string name="group_not_subscription">组类型不是订阅</string>
     <string name="allow_insecure_on_request_sum">更新订阅的时候允许不安全的连接</string>
     <string name="global_allow_insecure">总是跳过 TLS 证书验证</string>
+    <string name="allow_faketcp_root">允许 Hysteria FakeTCP 使用 Root</string>
+    <string name="allow_faketcp_root_sum">显式授权内置 Hysteria 插件通过 su 以 Root 权限运行 FakeTCP</string>
+    <string name="custom_root_ca">自定义根证书 (ca.pem)</string>
+    <string name="custom_root_ca_empty">未配置（仅使用系统根证书）</string>
+    <string name="custom_root_ca_installed">已安装到应用私有目录（%1$d 字节）</string>
+    <string name="custom_root_ca_dialog_msg">将 PEM 根证书导入应用私有目录并追加到系统证书池。为保证安全，已不再读取外部存储中的 ca.pem。</string>
+    <string name="custom_root_ca_import">导入 PEM</string>
+    <string name="custom_root_ca_clear">清除</string>
+    <string name="custom_root_ca_imported">自定义根证书已导入</string>
+    <string name="custom_root_ca_cleared">自定义根证书已清除</string>
+    <string name="custom_root_ca_invalid">PEM 证书无效：%1$s</string>
     <string name="network_change_reset_connections">当网络发生变化时重置出站连接</string>
     <string name="wake_reset_connections">当设备从睡眠状态唤醒时重置出站连接</string>
     <string name="preview_version_hint">本应用为预览版，可能存在诸多问题。若您不愿参与测试，请前往GitHub下载正式发布版本！</string>
@@ -543,4 +554,10 @@
     <string name="speed_test_upload_format">上传：%1$s（%2$s）</string>
     <string name="speed_test_rate_mbps">%1$.2f Mbps</string>
     <string name="speed_test_finished_summary">已完成：%1$d，失败：%2$d，已取消：%3$d</string>
+    <string name="branch_info">Neko Pro 版本信息</string>
+    <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.14.4 加固版主内核（原生 Snell / AnyTLS 与 1.14 新版 DNS），并内置 mihomo 1.19.34 与 sing-juicity 现代协议适配。</string>
+    <string name="supported_protocols">实际支持协议</string>
+    <string name="route_mode_rule">智能分流 (Rule)</string>
+    <string name="route_mode_global">全局代理 (Global)</string>
+    <string name="route_mode_switched">已切换至：%1$s</string>
 </resources>

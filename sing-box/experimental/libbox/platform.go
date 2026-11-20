@@ -7,7 +7,6 @@ type PlatformInterface interface {
 	UsePlatformAutoDetectInterfaceControl() bool
 	AutoDetectInterfaceControl(fd int32) error
 	OpenTun(options TunOptions) (int32, error)
-	UseProcFS() bool
 	FindConnectionOwner(ipProtocol int32, sourceAddress string, sourcePort int32, destinationAddress string, destinationPort int32) (*ConnectionOwner, error)
 	StartDefaultInterfaceMonitor(listener InterfaceUpdateListener) error
 	CloseDefaultInterfaceMonitor(listener InterfaceUpdateListener) error
@@ -15,9 +14,61 @@ type PlatformInterface interface {
 	UnderNetworkExtension() bool
 	IncludeAllNetworks() bool
 	ReadWIFIState() *WIFIState
-	SystemCertificates() StringIterator
 	ClearDNSCache()
 	SendNotification(notification *Notification) error
+	CancelNotification(identifier string, typeID int32) error
+	StartNeighborMonitor(listener NeighborUpdateListener) error
+	CloseNeighborMonitor(listener NeighborUpdateListener) error
+	RegisterMyInterface(name string)
+	UsePlatformShell() bool
+	CheckPlatformShell() error
+	OpenShellSession(user *PlatformUser, command string, environ StringIterator, term string, rows int32, cols int32) (ShellSession, error)
+	LookupUser(username string) (*PlatformUser, error)
+	LookupSFTPServer() (string, error)
+	ReadSystemSSHHostKey() (string, error)
+	TailscaleHostname() string
+	UsePlatformBridge() bool
+	CreateBridge(options *BridgeOptions) (BridgeSession, error)
+}
+
+type BridgeOptions struct {
+	BridgeName string
+	MTU        int32
+	Inet4Port  string
+	Inet6Port  string
+	Interface  string
+	RuleIndex  int32
+	RouteTable int32
+}
+
+type BridgeSession interface {
+	FileDescriptor() int32
+	Name() string
+	Inet6Active() bool
+	SetEgress(interfaceName string) error
+	Close() error
+}
+
+type PlatformUser struct {
+	Username string
+	Uid      int32
+	Gid      int32
+	HomeDir  string
+	Shell    string
+
+	groups []int32
+}
+
+func (u *PlatformUser) SetGroups(groups Int32Iterator) {
+	u.groups = iteratorToArray[int32](groups)
+}
+
+func (u *PlatformUser) Groups() Int32Iterator {
+	return newIterator(u.groups)
+}
+
+type NeighborUpdateListener interface {
+	UpdateNeighborTable(entries NeighborEntryIterator)
 }
 
 type ConnectionOwner struct {
@@ -37,6 +88,7 @@ func (c *ConnectionOwner) AndroidPackageNames() StringIterator {
 
 type InterfaceUpdateListener interface {
 	UpdateDefaultInterface(interfaceName string, interfaceIndex int32, isExpensive bool, isConstrained bool)
+	UpdateNetworkPath(networkPath string)
 }
 
 const (
@@ -55,6 +107,7 @@ type NetworkInterface struct {
 
 	Type      int32
 	DNSServer StringIterator
+	Gateway   StringIterator
 	Metered   bool
 }
 

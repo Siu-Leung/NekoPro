@@ -44,12 +44,16 @@ class AnyTLSSettingsActivity : ProfileSettingsActivity<AnyTLSBean>() {
         rootKey: String?
     ) {
         addPreferencesFromResource(R.xml.anytls_preferences)
+        pbm.setPreferenceFragment(this)
 
         findPreference<EditTextPreference>(Key.SERVER_PORT)!!.apply {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         }
         findPreference<EditTextPreference>("password")!!.apply {
             summaryProvider = PasswordSummaryProvider
+        }
+        findPreference<EditTextPreference>("minIdleSession")?.apply {
+            setOnBindEditTextListener(EditTextPreferenceModifiers.Number)
         }
     }
 }
