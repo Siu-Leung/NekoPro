@@ -46,6 +46,8 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 - **工程维护与 CI 修复**
   - 新增 [`docs/VENDORED_PATCHES.md`](docs/VENDORED_PATCHES.md) 记录 `sing-box` 与 `mihomo` 的全部私有补丁边界。
   - 修复 `android-emulator-runner` 多行脚本拆分子 shell 导致升级测试变量丢失的问题。
+  - 彻底移除 `libcore/certs.go` 对 `//go:linkname crypto/x509.systemRoots` 的依赖，改为线程安全自定义证书池并分别注入 `httpClient`、sing-box `options.Certificate` 与 `mihomo/component/ca`。
+  - 关闭 `android.enableJetifier`，并将 Coroutines（`1.9.0`）、AndroidX Core/AppCompat/Fragment/Navigation/Work 与 Material（`1.12.0`）、Gson（`2.11.0`）升级至现代版本。
 
 ### v1.3.1 改动日志 (2026-11-20)
 

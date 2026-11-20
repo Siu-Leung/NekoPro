@@ -267,6 +267,9 @@ func (r *httpRequest) requestTLSConfig() *tls.Config {
 	r.mu.Lock()
 	cfg := r.tls.Clone()
 	r.mu.Unlock()
+	if cfg.RootCAs == nil {
+		cfg.RootCAs = currentRootCAs()
+	}
 	if r.allowInsecure {
 		cfg.InsecureSkipVerify = true
 	}
@@ -277,9 +280,13 @@ func (r *httpRequest) prepareH1H2Client() (*http.Client, io.Closer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.allowInsecure || r.tlsChangedAfterUse {
+	customRoots := currentRootCAs()
+	if r.allowInsecure || r.tlsChangedAfterUse || customRoots != nil {
 		tr := r.h1h2Transport.Clone()
 		tr.TLSClientConfig = r.tls.Clone()
+		if tr.TLSClientConfig.RootCAs == nil {
+			tr.TLSClientConfig.RootCAs = customRoots
+		}
 		if r.allowInsecure {
 			tr.TLSClientConfig.InsecureSkipVerify = true
 			tr.DisableKeepAlives = true

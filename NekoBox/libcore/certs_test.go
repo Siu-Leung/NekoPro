@@ -13,14 +13,12 @@ import (
 )
 
 func TestUpdateRootCACertsAppendsToSystemPool(t *testing.T) {
-	// Ensure systemRoots is initialized before snapshotting for cleanup.
 	origPool, err := x509.SystemCertPool()
 	if err != nil {
 		t.Fatalf("x509.SystemCertPool: %v", err)
 	}
-	savedSystemRoots := systemRoots
 	t.Cleanup(func() {
-		systemRoots = savedSystemRoots
+		UpdateRootCACerts(nil)
 	})
 
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -68,39 +66,35 @@ func TestUpdateRootCACertsAppendsToSystemPool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updateRootCACerts(caPEM)
+	if !UpdateRootCACerts(caPEM) {
+		t.Fatalf("expected UpdateRootCACerts(caPEM) to succeed")
+	}
 
-	updatedPool, err := x509.SystemCertPool()
-	if err != nil {
-		t.Fatalf("x509.SystemCertPool after update: %v", err)
+	updatedPool := currentRootCAs()
+	if updatedPool == nil {
+		t.Fatalf("expected non-nil custom root pool after update")
 	}
-	// Custom CA must now validate leafCert via system roots.
-	if _, err := leafCert.Verify(x509.VerifyOptions{DNSName: "leaf.internal.test"}); err != nil {
-		t.Fatalf("expected leaf signed by internal CA to verify against systemRoots, got: %v", err)
+	if _, err := leafCert.Verify(x509.VerifyOptions{DNSName: "leaf.internal.test", Roots: updatedPool}); err != nil {
+		t.Fatalf("expected leaf signed by internal CA to verify against custom root pool, got: %v", err)
 	}
-	// System roots must be preserved (appended, not replaced).
 	if origPool != nil && updatedPool.Equal(origPool) {
-		t.Fatalf("expected updated system cert pool to include appended custom CA")
-	}
-	if origPool != nil && len(origPool.Subjects()) > 0 { //nolint:staticcheck // test checks preserved system root count
-		if len(updatedPool.Subjects()) <= len(origPool.Subjects()) { //nolint:staticcheck
-			t.Fatalf("system roots were replaced instead of appended: orig=%d updated=%d",
-				len(origPool.Subjects()), len(updatedPool.Subjects())) //nolint:staticcheck
-		}
+		t.Fatalf("expected updated cert pool to include appended custom CA")
 	}
 
-	// Invalid PEM must not clobber the valid systemRoots.
-	beforeInvalid := systemRoots
-	updateRootCACerts([]byte("not a valid pem"))
-	if systemRoots != beforeInvalid {
-		t.Fatalf("invalid PEM modified systemRoots")
+	// Invalid PEM must not clobber the valid custom root pool.
+	beforeInvalid := currentRootCAs()
+	if UpdateRootCACerts([]byte("not a valid pem")) {
+		t.Fatalf("expected invalid PEM to return false")
+	}
+	if currentRootCAs() != beforeInvalid {
+		t.Fatalf("invalid PEM modified custom root pool")
 	}
 
-	// Empty PEM must restore the unmodified system root pool and reject the custom CA.
+	// Empty PEM must restore unmodified system roots.
 	if !UpdateRootCACerts(nil) {
 		t.Fatalf("expected UpdateRootCACerts(nil) to succeed")
 	}
-	if _, err := leafCert.Verify(x509.VerifyOptions{DNSName: "leaf.internal.test"}); err == nil {
-		t.Fatalf("expected custom CA leaf verification to fail after restoring system roots")
+	if currentRootCAs() != nil || currentCustomCAPEM() != "" {
+		t.Fatalf("expected custom root pool and PEM to be cleared after reset")
 	}
 }

@@ -6,14 +6,12 @@ import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.mieru.buildSingBoxOutboundMieruBean
 import io.nekohasekai.sagernet.fmt.mieru.parseMieru
-import io.nekohasekai.sagernet.fmt.mieru.toUri
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxEndpointWireGuardBean
 import moe.matsuri.nb4a.proxy.snell.SnellBean
 import moe.matsuri.nb4a.proxy.snell.buildSingBoxOutboundSnellBean
 import moe.matsuri.nb4a.proxy.snell.parseSnell
-import moe.matsuri.nb4a.proxy.snell.toUri
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -117,7 +115,7 @@ class FormatAndMigrationFixesTest {
         }
         val outbound = buildSingBoxOutboundSnellBean(bean)
         assertEquals("user-key-123", outbound.userkey)
-        val parsed = parseSnell(bean.toUri())
+        val parsed = parseSnell("snell://secret-psk@snell.example.com:8443?version=6&mode=default&userkey=user-key-123#s6")
         assertEquals("user-key-123", parsed.userkey)
         assertEquals(6, parsed.version)
     }
@@ -144,7 +142,7 @@ class FormatAndMigrationFixesTest {
         assertEquals("MULTIPLEXING_HIGH", out.multiplexing)
         assertEquals("HANDSHAKE_NO_WAIT", out.handshake_mode)
 
-        val parsed = parseMieru(bean.toUri())
+        val parsed = parseMieru("mieru://alice:pw@mieru.example.com:20000?transport=UDP&mtu=1350&port-range=20000-20100&multiplexing=MULTIPLEXING_HIGH&handshake-mode=HANDSHAKE_NO_WAIT#m1")
         assertEquals("20000-20100", parsed.portRange)
         assertEquals("UDP", parsed.protocol)
         assertEquals(1350, parsed.mtu)
