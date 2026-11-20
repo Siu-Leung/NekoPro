@@ -192,6 +192,10 @@ abstract class BoxInstance(
                         )
 
                         if (bean.protocol == HysteriaBean.PROTOCOL_FAKETCP) {
+                            // Never invoke su implicitly from imported profiles without explicit user opt-in.
+                            check(DataStore.allowFakeTcpRoot) {
+                                "FakeTCP requires Root access; enable 'Allow Root for FakeTCP' in Settings first"
+                            }
                             // Never run a third-party provided binary as root.
                             check(plugin.info.applicationInfo == null) {
                                 "FakeTCP requires the built-in hysteria plugin"

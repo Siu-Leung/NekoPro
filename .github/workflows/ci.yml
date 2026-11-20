@@ -39,13 +39,18 @@ jobs:
             NekoBox/libcore/go.sum
       - name: Test libneko
         working-directory: libneko
-        run: go test ./...
+        run: go test -race ./...
+      - name: Test mihomo xhttp
+        working-directory: mihomo
+        run: go test ./transport/xhttp/...
       - name: Test sing-box
         working-directory: sing-box
-        run: go test ./...
+        run: |
+          PKGS=$(go list -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' ./... | grep -v '/common/netns$')
+          go test -ldflags='-checklinkname=0' -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' $PKGS
       - name: Test libcore
         working-directory: NekoBox/libcore
-        run: go test ./...
+        run: go test -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' ./...
 
   android-build:
     name: Android build

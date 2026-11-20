@@ -51,11 +51,12 @@ func sendFds(t *testing.T, sockPath string, payload []byte, fds ...int) byte {
 func TestServeProtectPermissionsAndSingleFd(t *testing.T) {
 	sockPath := filepath.Join(t.TempDir(), "protect_path")
 	var calls atomic.Int32
-	closer, err := ServeProtect(sockPath, false, 0, func(fd int) {
+	closer, err := ServeProtect(sockPath, false, 0, func(fd int) error {
 		calls.Add(1)
 		if fd < 0 {
 			t.Errorf("received invalid fd %d", fd)
 		}
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("ServeProtect: %v", err)
@@ -89,11 +90,34 @@ func TestServeProtectPermissionsAndSingleFd(t *testing.T) {
 	}
 }
 
+func TestServeProtectPropagatesCtlError(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "protect_path")
+	closer, err := ServeProtect(sockPath, false, 0, func(fd int) error {
+		return os.ErrPermission
+	})
+	if err != nil {
+		t.Fatalf("ServeProtect: %v", err)
+	}
+	defer closer.Close()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	if reply := sendFds(t, sockPath, []byte{0}, int(r.Fd())); reply != 0 {
+		t.Fatalf("expected reply 0 when protectCtl fails, got %d", reply)
+	}
+}
+
 func TestServeProtectRejectsMultipleFdsWithoutLeaking(t *testing.T) {
 	sockPath := filepath.Join(t.TempDir(), "protect_path")
 	var calls atomic.Int32
-	closer, err := ServeProtect(sockPath, false, 0, func(fd int) {
+	closer, err := ServeProtect(sockPath, false, 0, func(fd int) error {
 		calls.Add(1)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("ServeProtect: %v", err)
@@ -140,8 +164,9 @@ func TestServeProtectRejectsMultipleFdsWithoutLeaking(t *testing.T) {
 func TestServeProtectRejectsNoRights(t *testing.T) {
 	sockPath := filepath.Join(t.TempDir(), "protect_path")
 	var calls atomic.Int32
-	closer, err := ServeProtect(sockPath, false, 0, func(fd int) {
+	closer, err := ServeProtect(sockPath, false, 0, func(fd int) error {
 		calls.Add(1)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("ServeProtect: %v", err)

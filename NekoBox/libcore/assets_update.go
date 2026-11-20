@@ -23,7 +23,11 @@ const (
 // Returns a summary string on success, or an error. If the VPN is not connected
 // and the source is unreachable, the caller should retry after connecting.
 func UpdateGeoIP() (string, error) {
-	return downloadGeoAsset("geoip.db", GeoIPDownloadURL, func() {
+	return UpdateGeoIPWithProxy(0)
+}
+
+func UpdateGeoIPWithProxy(socksPort int32) (string, error) {
+	return downloadGeoAsset("geoip.db", GeoIPDownloadURL, socksPort, func() {
 		ResetGeoipCache()
 	})
 }
@@ -31,20 +35,39 @@ func UpdateGeoIP() (string, error) {
 // UpdateGeoSite downloads the latest geosite.db from the official source and
 // atomically replaces the local asset, then resets the geosite cache.
 func UpdateGeoSite() (string, error) {
-	return downloadGeoAsset("geosite.db", GeoSiteDownloadURL, func() {
+	return UpdateGeoSiteWithProxy(0)
+}
+
+func UpdateGeoSiteWithProxy(socksPort int32) (string, error) {
+	return downloadGeoAsset("geosite.db", GeoSiteDownloadURL, socksPort, func() {
 		ResetGeositeCache()
 	})
 }
 
-func downloadGeoAsset(fileName, url string, onSuccess func()) (string, error) {
+func downloadGeoAsset(fileName, url string, socksPort int32, onSuccess func()) (string, error) {
 	dst := filepath.Join(externalAssetsPath, fileName)
-	tmp := dst + ".tmp"
 	if err := os.MkdirAll(externalAssetsPath, 0755); err != nil {
 		return "", err
 	}
 
+	tmpFile, err := os.CreateTemp(externalAssetsPath, fileName+".*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temp for %s: %w", fileName, err)
+	}
+	tmp := tmpFile.Name()
+	_ = tmpFile.Close()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmp)
+		}
+	}()
+
 	client := NewHttpClient()
 	client.KeepAlive()
+	if socksPort > 0 && socksPort <= 65535 {
+		client.TrySocks5(socksPort)
+	}
 	defer client.Close()
 
 	request := client.NewRequest()
@@ -56,22 +79,19 @@ func downloadGeoAsset(fileName, url string, onSuccess func()) (string, error) {
 		return "", fmt.Errorf("download %s: %w", fileName, err)
 	}
 	if err := response.WriteToWithLimit(tmp, 1<<30); err != nil {
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("save %s: %w", fileName, err)
 	}
 	stat, err := os.Stat(tmp)
 	if err != nil {
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("stat %s: %w", fileName, err)
 	}
 	if stat.Size() < geoAssetMinSize {
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("downloaded %s too small: %d bytes", fileName, stat.Size())
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("replace %s: %w", fileName, err)
 	}
+	renamed = true
 	if onSuccess != nil {
 		onSuccess()
 	}

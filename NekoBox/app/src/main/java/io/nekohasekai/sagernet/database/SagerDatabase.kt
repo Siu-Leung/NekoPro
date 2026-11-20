@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.matrix.roomigrant.GenerateRoomMigrations
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
@@ -31,16 +33,31 @@ import kotlinx.coroutines.launch
 abstract class SagerDatabase : RoomDatabase() {
 
     companion object {
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `proxy_entities` ADD COLUMN `shadowTLSBean` BLOB")
+                database.execSQL("ALTER TABLE `proxy_groups` ADD COLUMN `isSelector` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE `proxy_groups` ADD COLUMN `frontProxy` INTEGER NOT NULL DEFAULT -1")
+                database.execSQL("ALTER TABLE `proxy_groups` ADD COLUMN `landingProxy` INTEGER NOT NULL DEFAULT -1")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `proxy_entities` ADD COLUMN `mieruBean` BLOB")
+            }
+        }
+
         @OptIn(DelicateCoroutinesApi::class)
         @Suppress("EXPERIMENTAL_API_USAGE")
         val instance by lazy {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
-//                .addMigrations(*SagerDatabase_Migrations.build())
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .setJournalMode(JournalMode.TRUNCATE)
                 .allowMainThreadQueries()
                 .enableMultiInstanceInvalidation()
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigrationOnDowngrade()
                 .setQueryExecutor { GlobalScope.launch { it.run() } }
                 .build()
         }

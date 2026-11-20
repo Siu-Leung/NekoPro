@@ -66,6 +66,8 @@ object Key {
     const val SHOW_BOTTOM_BAR = "showBottomBar"
 
     const val ALLOW_INSECURE_ON_REQUEST = "allowInsecureOnRequest"
+    const val ALLOW_FAKETCP_ROOT = "allowFakeTcpRoot"
+    const val CUSTOM_ROOT_CA = "customRootCa"
 
     const val TUN_IMPLEMENTATION = "tunImplementation"
     const val PROFILE_TRAFFIC_STATISTICS = "profileTrafficStatistics"

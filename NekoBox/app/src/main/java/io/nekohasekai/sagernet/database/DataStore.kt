@@ -192,6 +192,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     // protocol
 
     var globalAllowInsecure by configurationStore.boolean(Key.GLOBAL_ALLOW_INSECURE) { false }
+    var allowFakeTcpRoot by configurationStore.boolean(Key.ALLOW_FAKETCP_ROOT) { false }
 
     // old cache, DO NOT ADD
 

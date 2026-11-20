@@ -570,7 +570,18 @@
     <string name="allow_insecure_on_request_sum">Disable certificate checking when updating
         subscriptions</string>
     <string name="global_allow_insecure">Always allow insecure</string>
-    <string name="mux_preference">Mulitplex</string>
+    <string name="allow_faketcp_root">Allow Root for Hysteria FakeTCP</string>
+    <string name="allow_faketcp_root_sum">Explicitly allow running the built-in Hysteria plugin via su for FakeTCP profiles</string>
+    <string name="custom_root_ca">Custom Root CA Certificate</string>
+    <string name="custom_root_ca_empty">Not configured (using system CAs only)</string>
+    <string name="custom_root_ca_installed">Installed in private storage (%1$d bytes)</string>
+    <string name="custom_root_ca_dialog_msg">Import a PEM certificate into app-private storage to append to system root CAs. External storage ca.pem is ignored for security.</string>
+    <string name="custom_root_ca_import">Import PEM</string>
+    <string name="custom_root_ca_clear">Clear</string>
+    <string name="custom_root_ca_imported">Custom root CA imported</string>
+    <string name="custom_root_ca_cleared">Custom root CA cleared</string>
+    <string name="custom_root_ca_invalid">Invalid PEM certificate: %1$s</string>
+    <string name="mux_preference">Multiplex</string>
     <string name="padding">Padding</string>
     <string name="network_change_reset_connections">Reset outbound connections when network changes</string>
     <string name="wake_reset_connections">Reset outbound connections when device wake from sleep</string>

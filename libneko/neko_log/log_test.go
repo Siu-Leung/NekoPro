@@ -12,6 +12,22 @@ import (
 	"testing"
 )
 
+func listLogFiles(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []os.DirEntry
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".lock") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 func TestLogWriterRollsAtRuntimeAndKeepsThreeFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "neko.log")
@@ -39,10 +55,7 @@ func TestLogWriterRollsAtRuntimeAndKeepsThreeFiles(t *testing.T) {
 		t.Fatalf("mirror writer received %d bytes, want 200", mirror.Len())
 	}
 	_ = writer.Close()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entries := listLogFiles(t, dir)
 	if len(entries) != 3 {
 		t.Fatalf("got %d log files, want 3", len(entries))
 	}
@@ -86,10 +99,7 @@ func TestLogWriterConcurrentWritesAreBounded(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("concurrent writes failed (first error: %v, total: %d)", errs[0], len(errs))
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entries := listLogFiles(t, dir)
 	if len(entries) > 3 {
 		t.Fatalf("got %d log files, want at most 3", len(entries))
 	}
@@ -100,6 +110,64 @@ func TestLogWriterConcurrentWritesAreBounded(t *testing.T) {
 		}
 		if info.Size() > 1024 {
 			t.Fatalf("%s grew to %d bytes", entry.Name(), info.Size())
+		}
+	}
+}
+
+func TestLogWriterMultiInstanceSyncAfterRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "neko.log")
+	f1, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
+		_ = f1.Close()
+		t.Fatal(err)
+	}
+	w1 := &logWriter{path: path, maxSize: 32, maxFiles: 3, file: f1, writers: []io.Writer{f1}}
+	w2 := &logWriter{path: path, maxSize: 32, maxFiles: 3, file: f2, writers: []io.Writer{f2}}
+	defer w1.Close()
+	defer w2.Close()
+
+	var wg sync.WaitGroup
+	for _, w := range []*logWriter{w1, w2} {
+		wg.Add(1)
+		go func(lw *logWriter) {
+			defer wg.Done()
+			for i := 0; i < 20; i++ {
+				if _, err := lw.Write([]byte("0123456789\n")); err != nil {
+					t.Errorf("write failed: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	// Final write from w2 must land in active neko.log (reopened after any rotation by w1).
+	if _, err := w2.Write([]byte("TAIL\n")); err != nil {
+		t.Fatal(err)
+	}
+	active, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(active), "TAIL\n") {
+		t.Fatalf("active log = %q, expected TAIL after multi-writer rotation", string(active))
+	}
+	entries := listLogFiles(t, dir)
+	if len(entries) > 3 {
+		t.Fatalf("got %d log files, want at most 3", len(entries))
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() > 32 {
+			t.Fatalf("%s grew to %d bytes, want <= 32", entry.Name(), info.Size())
 		}
 	}
 }

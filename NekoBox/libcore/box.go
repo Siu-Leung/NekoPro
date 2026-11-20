@@ -77,7 +77,7 @@ func ResetAllConnections(system bool) {
 		if instance != nil {
 			instance.access.Lock()
 			defer instance.access.Unlock()
-			instance.Box.Network().ResetNetwork()
+			instance.Box.Network().ResetNetwork(context.Background())
 			log.Println("Reset all connections done")
 		} else {
 			log.Println("Reset all connections skipped (no instance)")
@@ -353,8 +353,8 @@ func goServeProtect(start bool) {
 		protectCloser = nil
 	}
 	if start {
-		closer, err := protect_server.ServeProtect("protect_path", false, 0, func(fd int) {
-			_ = intfBox.AutoDetectInterfaceControl(int32(fd))
+		closer, err := protect_server.ServeProtect("protect_path", false, 0, func(fd int) error {
+			return intfBox.AutoDetectInterfaceControl(int32(fd))
 		})
 		if err != nil {
 			log.Println("goServeProtect error:", err)

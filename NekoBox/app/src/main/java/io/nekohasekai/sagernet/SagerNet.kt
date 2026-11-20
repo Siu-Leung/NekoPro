@@ -83,6 +83,9 @@ class SagerNet : Application(),
             Theme.apply(this)
             Theme.applyNightTheme()
             runOnDefaultDispatcher {
+                runCatching {
+                    java.io.File(cacheDir, "share_backup").listFiles()?.forEach { it.delete() }
+                }
                 DefaultNetworkListener.start(this) {
                     underlyingNetwork = it
                 }

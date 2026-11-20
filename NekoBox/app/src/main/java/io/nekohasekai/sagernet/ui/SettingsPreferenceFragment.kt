@@ -8,6 +8,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.preference.*
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -19,7 +20,11 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.utils.Theme
+import libcore.Libcore
 import moe.matsuri.nb4a.ui.*
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.security.cert.CertificateFactory
 
 class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
@@ -27,6 +32,57 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
     private lateinit var globalCustomConfig: EditConfigPreference
 
+    private var customRootCaPref: Preference? = null
+
+    private fun customRootCaFile(): File = File(SagerNet.application.filesDir, "ca.pem")
+
+    private fun updateCustomRootCaSummary() {
+        val file = customRootCaFile()
+        customRootCaPref?.summary = if (file.isFile && file.length() > 0) {
+            getString(R.string.custom_root_ca_installed, file.length())
+        } else {
+            getString(R.string.custom_root_ca_empty)
+        }
+    }
+
+    private val importCustomRootCa =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            runOnDefaultDispatcher {
+                runCatching {
+                    val bytes = requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                        val maxBytes = 256 * 1024
+                        val buf = input.readBytes()
+                        require(buf.isNotEmpty() && buf.size <= maxBytes) {
+                            "Certificate file must be between 1 byte and 256 KiB"
+                        }
+                        buf
+                    } ?: error("Unable to read selected file")
+                    val certs = CertificateFactory.getInstance("X.509")
+                        .generateCertificates(ByteArrayInputStream(bytes))
+                    require(certs.isNotEmpty()) { "No valid X.509 PEM certificate found" }
+                    val target = customRootCaFile()
+                    val tmp = File(target.parentFile, "ca.pem.tmp")
+                    tmp.writeBytes(bytes)
+                    check(tmp.renameTo(target)) { "Failed to save ca.pem" }
+                    check(Libcore.updateRootCACerts(bytes)) { "Core rejected PEM certificates" }
+                    onMainDispatcher {
+                        updateCustomRootCaSummary()
+                        Toast.makeText(requireContext(), R.string.custom_root_ca_imported, Toast.LENGTH_SHORT).show()
+                        needRestart()
+                    }
+                }.onFailure { err ->
+                    Logs.w(err)
+                    onMainDispatcher {
+                        Toast.makeText(
+                            requireContext(),
+                            getString(R.string.custom_root_ca_invalid, err.readableMessage),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -104,8 +160,8 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             MaterialAlertDialogBuilder(requireContext()).setTitle("Log buffer size (kb)")
                 .setView(view)
                 .setPositiveButton(android.R.string.ok) { _, _ ->
-                    DataStore.logBufSize = view.text.toString().toInt()
-                    if (DataStore.logBufSize <= 0) DataStore.logBufSize = 50
+                    val parsed = view.text.toString().trim().toIntOrNull()
+                    DataStore.logBufSize = if (parsed == null || parsed <= 0) 50 else parsed
                     needRestart()
                 }
                 .setNegativeButton(android.R.string.cancel, null)
@@ -118,6 +174,8 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         val metedNetwork = findPreference<Preference>(Key.METERED_NETWORK)!!
         if (Build.VERSION.SDK_INT < 28) {
             metedNetwork.remove()
+        } else {
+            metedNetwork.onPreferenceChangeListener = reloadListener
         }
         isProxyApps = findPreference(Key.PROXY_APPS)!!
         isProxyApps.setOnPreferenceChangeListener { _, newValue ->
@@ -130,6 +188,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             findPreference<SwitchPreference>(Key.PROFILE_TRAFFIC_STATISTICS)!!
         val speedInterval = findPreference<SimpleMenuPreference>(Key.SPEED_INTERVAL)!!
         profileTrafficStatistics.isEnabled = speedInterval.value.toString() != "0"
+        profileTrafficStatistics.onPreferenceChangeListener = reloadListener
         speedInterval.setOnPreferenceChangeListener { _, newValue ->
             profileTrafficStatistics.isEnabled = newValue.toString() != "0"
             needReload()
@@ -163,6 +222,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         remoteDns.onPreferenceChangeListener = reloadListener
         directDns.onPreferenceChangeListener = reloadListener
         enableDnsRouting.onPreferenceChangeListener = reloadListener
+        findPreference<Preference>("domain_strategy_for_remote")?.onPreferenceChangeListener = reloadListener
+        findPreference<Preference>("domain_strategy_for_direct")?.onPreferenceChangeListener = reloadListener
+        findPreference<Preference>("domain_strategy_for_server")?.onPreferenceChangeListener = reloadListener
+        findPreference<Preference>(Key.GLOBAL_ALLOW_INSECURE)?.onPreferenceChangeListener = reloadListener
 
         ipv6Mode.onPreferenceChangeListener = reloadListener
         allowAccess.onPreferenceChangeListener = reloadListener
@@ -171,6 +234,31 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         tunImplementation.onPreferenceChangeListener = reloadListener
         acquireWakeLock.onPreferenceChangeListener = reloadListener
         globalCustomConfig.onPreferenceChangeListener = reloadListener
+
+        customRootCaPref = findPreference<Preference>(Key.CUSTOM_ROOT_CA)?.apply {
+            updateCustomRootCaSummary()
+            setOnPreferenceClickListener {
+                val file = customRootCaFile()
+                val builder = MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.custom_root_ca)
+                    .setMessage(R.string.custom_root_ca_dialog_msg)
+                    .setPositiveButton(R.string.custom_root_ca_import) { _, _ ->
+                        startFilesForResult(importCustomRootCa, "*/*")
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                if (file.isFile) {
+                    builder.setNeutralButton(R.string.custom_root_ca_clear) { _, _ ->
+                        file.delete()
+                        Libcore.updateRootCACerts(ByteArray(0))
+                        updateCustomRootCaSummary()
+                        Toast.makeText(requireContext(), R.string.custom_root_ca_cleared, Toast.LENGTH_SHORT).show()
+                        needRestart()
+                    }
+                }
+                builder.show()
+                true
+            }
+        }
 
         val speedTestMode = findPreference<SimpleMenuPreference>(Key.SPEED_TEST_MODE)
         val speedTestTimeout = findPreference<EditTextPreference>(Key.SPEED_TEST_TIMEOUT_MS)
@@ -213,6 +301,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         if (::globalCustomConfig.isInitialized) {
             globalCustomConfig.notifyChanged()
         }
+        updateCustomRootCaSummary()
     }
 
 }

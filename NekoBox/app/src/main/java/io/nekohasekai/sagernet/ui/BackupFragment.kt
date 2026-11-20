@@ -103,11 +103,13 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                     binding.backupRules.isChecked,
                     binding.backupSettings.isChecked
                 )
-                app.cacheDir.mkdirs()
+                val shareDir = File(app.cacheDir, "share_backup").apply { mkdirs() }
+                shareDir.listFiles()?.forEach { it.delete() }
+                // Clean any legacy backup files left in root cacheDir from earlier versions.
                 app.cacheDir.listFiles { f ->
                     f.isFile && f.name.startsWith("nekobox_backup_") && f.name.endsWith(".json")
                 }?.forEach { it.delete() }
-                val cacheFile = File(app.cacheDir, backupFileName())
+                val cacheFile = File(shareDir, backupFileName())
                 cacheFile.writeText(content)
                 onMainDispatcher {
                     startActivity(

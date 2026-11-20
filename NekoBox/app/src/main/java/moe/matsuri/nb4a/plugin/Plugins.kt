@@ -112,6 +112,15 @@ object Plugins {
         return providers[0]
     }
 
+    // Known official plugin signing SHA-256 allowlist (lowercase hex) per package.
+    // Packages signed by the same certificate as this app are always trusted;
+    // any other recognized plugin package falls back to TOFU certificate pinning.
+    private val knownOfficialCertDigests: Map<String, Set<String>> = emptyMap()
+
+    private val selfSigningDigest: String? by lazy {
+        signingDigest(SagerNet.application.packageName)
+    }
+
     private fun isTrustedProvider(pluginId: String, provider: ProviderInfo): Boolean {
         val pkg = provider.packageName ?: return false
         val expectedPkg = PluginEntry.find(pluginId)?.packageName
@@ -125,15 +134,23 @@ object Plugins {
         }
         val key = KEY_CERT_PIN_PREFIX + pkg
         val pinned = DataStore.configurationStore.getString(key)
-        if (pinned.isNullOrBlank()) {
-            // Trust on first use, later updates must keep the same signer.
+        if (!pinned.isNullOrBlank()) {
+            if (pinned != digest) {
+                Logs.w("Rejecting plugin $pkg: signing certificate changed")
+                return false
+            }
+            return true
+        }
+        val selfDigest = selfSigningDigest
+        val allowlisted = knownOfficialCertDigests[pkg]
+        if ((selfDigest != null && digest == selfDigest) || (allowlisted != null && digest in allowlisted)) {
             DataStore.configurationStore.putString(key, digest)
             return true
         }
-        if (pinned != digest) {
-            Logs.w("Rejecting plugin $pkg: signing certificate changed")
-            return false
-        }
+        // Trust on first use for third-party official ecosystem plugins (e.g. Matsuri/SagerNet);
+        // subsequent updates must keep the exact same signing certificate.
+        Logs.i("Pinning first-use signing certificate for plugin $pkg")
+        DataStore.configurationStore.putString(key, digest)
         return true
     }
 
