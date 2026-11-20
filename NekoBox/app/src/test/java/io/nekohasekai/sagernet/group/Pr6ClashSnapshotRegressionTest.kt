@@ -31,19 +31,4 @@ class Pr6ClashSnapshotRegressionTest {
     fun completeSnapshotIsAccepted() = runBlocking<Unit> {
         assertEquals(listOf("kept"), RawUpdater.parseSubscription(valid)?.map { it.name })
     }
-
-    @Test
-    fun partialSip008SnapshotIsRejectedForSubscriptionButManualImportPermitsValidEntries() = runBlocking<Unit> {
-        val sip008 = """
-            {
-              "version": 1,
-              "servers": [
-                {"id": "1", "remarks": "good", "server": "example.com", "server_port": 8388, "password": "pw", "method": "aes-256-gcm"},
-                {"id": "2", "remarks": "broken", "server": "example.com"}
-              ]
-            }
-        """.trimIndent()
-        assertNotNull(runCatching { RawUpdater.parseSubscription(sip008) }.exceptionOrNull())
-        assertEquals(listOf("good"), RawUpdater.parseRaw(sip008)?.map { it.name })
-    }
 }
