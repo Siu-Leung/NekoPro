@@ -29,10 +29,22 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.3.0`
+`Neko-Pro-1.3.1`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.3.0)
-- 核心 APK：`NekoBox-Neko-Pro-1.3.0-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.3.1)
+- 核心 APK：`NekoBox-Neko-Pro-1.3.1-arm64-v8a.apk`
+
+### v1.3.1 改动日志 (2026-11-20)
+
+- **安全与代理隔离加固**
+  - **阻断订阅与规则库更新静默回退直连**：`libcore/http.go` 新增严格代理模式 `ForceSocks5(port)` 并补齐 `c.mu` 并发锁；订阅更新在已连接代理或后台「仅连接时更新」模式下强制走本地 SOCKS5（失败直接报错，不再回退直连 TCP 或 HTTP/3），并在请求结束后释放 HTTP 客户端；`assets_update.go` 下载 `geoip.db` / `geosite.db` 后先校验 `maxminddb` / `geosite` 结构完整性再原子替换。
+  - **堵死 mihomo 桥接 DNS 泄漏**：`sing-box/protocol/mihomo_adapter/protect.go` 将远程解析传输收窄为 `["dns-remote"]`，并在 `activeDNSRouter == nil` 时于 `Lookup*` 与 `ExchangeContext`（含 ECH）统一禁止回退系统 DNS。
+  - **自定义根证书重置修复**：`libcore/certs.go` 首次修改前快照原始系统证书池并加锁串行更新，修复清空 `ca.pem`（`UpdateRootCACerts(nil)`）后旧自定义 CA 仍残留的问题。
+  - **本地 Clash 仪表板同源隔离**：`WebviewFragment` 加载本地 `http://127.0.0.1:9090/ui` 面板时限制 WebView 仅允许同源导航，外部链接改由系统浏览器打开。
+- **订阅稳定性、协议桥接与 CI 修复**
+  - **订阅取消与防误删**：`GroupUpdater` 不再吞掉 `CancellationException`，并在 `NonCancellable` `finally` 中保证清理更新状态；`RawUpdater` 为 SIP008 JSON 订阅补齐半坏快照拒接保护。
+  - **Mieru 出站支持独立 `domain_resolver`**：在 `mihomo/adapter/outbound/mieru.go` 增加 `Resolver` 注入并在 `sing-box/protocol/mieru/outbound.go` 接入 `options.DomainResolver`，不再绕过出站 DNS 硬走全局解析器。
+  - **CI 升级回归测试去硬编码**：`.github/workflows/ci.yml` 与 `.github/scripts/check-android-upgrade.sh` 改为从 `NekoBox/nb4a.properties` 动态读取版本号并覆盖所有 `v*` 发版标签。
 
 ### v1.3.0 改动日志 (2026-11-20)
 
