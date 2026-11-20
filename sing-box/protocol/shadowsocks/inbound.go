@@ -76,11 +76,11 @@ func newInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	}
 	switch {
 	case options.Method == shadowsocks.MethodNone:
-		inbound.service = shadowsocks.NewNoneService(int64(udpTimeout.Seconds()), adapter.NewUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound))
+		inbound.service = shadowsocks.NewNoneService(int64(udpTimeout.Seconds()), adapter.NewLegacyUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound))
 	case common.Contains(shadowaead.List, options.Method):
-		inbound.service, err = shadowaead.NewService(options.Method, nil, options.Password, int64(udpTimeout.Seconds()), adapter.NewUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound))
+		inbound.service, err = shadowaead.NewService(options.Method, nil, options.Password, int64(udpTimeout.Seconds()), adapter.NewLegacyUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound))
 	case common.Contains(shadowaead_2022.List, options.Method):
-		inbound.service, err = shadowaead_2022.NewServiceWithPassword(options.Method, options.Password, int64(udpTimeout.Seconds()), adapter.NewUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound), ntp.TimeFuncFromContext(ctx))
+		inbound.service, err = shadowaead_2022.NewServiceWithPassword(options.Method, options.Password, int64(udpTimeout.Seconds()), adapter.NewLegacyUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound), ntp.TimeFuncFromContext(ctx))
 	default:
 		err = E.New("unsupported method: ", options.Method)
 	}
@@ -96,19 +96,20 @@ func newInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	return inbound, err
 }
 
-func (h *Inbound) Start(stage adapter.StartStage) error {
+func (h *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	return h.listener.Start()
-}
-
-func (h *Inbound) Close() error {
-	return h.listener.Close()
+	err := h.listener.Start()
+	if err != nil {
+		return err
+	}
+	scope.Add(h.listener.Close)
+	return nil
 }
 
 //nolint:staticcheck
-func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	err := h.service.NewConnection(ctx, conn, adapter.UpstreamMetadata(metadata))
 	N.CloseOnHandshakeFailure(conn, onClose, err)
 	if err != nil {
@@ -121,7 +122,7 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata a
 }
 
 //nolint:staticcheck
-func (h *Inbound) NewPacketEx(buffer *buf.Buffer, source M.Socksaddr) {
+func (h *Inbound) NewPacket(buffer *buf.Buffer, source M.Socksaddr) {
 	err := h.service.NewPacket(h.ctx, &stubPacketConn{h.listener.PacketWriter()}, buffer, M.Metadata{Source: source})
 	if err != nil {
 		h.logger.Error(E.Cause(err, "process packet from ", source))

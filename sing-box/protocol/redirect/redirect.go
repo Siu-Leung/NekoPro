@@ -7,10 +7,10 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/common/listener"
-	"github.com/sagernet/sing-box/common/redir"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -42,19 +42,20 @@ func NewRedirect(ctx context.Context, router adapter.Router, logger log.ContextL
 	return redirect, nil
 }
 
-func (h *Redirect) Start(stage adapter.StartStage) error {
+func (h *Redirect) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	return h.listener.Start()
+	err := h.listener.Start()
+	if err != nil {
+		return err
+	}
+	scope.Add(h.listener.Close)
+	return nil
 }
 
-func (h *Redirect) Close() error {
-	return h.listener.Close()
-}
-
-func (h *Redirect) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
-	destination, err := redir.GetOriginalDestination(conn)
+func (h *Redirect) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	destination, err := control.GetOriginalDestination(conn)
 	if err != nil {
 		conn.Close()
 		h.logger.ErrorContext(ctx, "process connection from ", conn.RemoteAddr(), ": get redirect destination: ", err)
@@ -63,6 +64,7 @@ func (h *Redirect) NewConnectionEx(ctx context.Context, conn net.Conn, metadata 
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
 	metadata.Destination = M.SocksaddrFromNetIP(destination)
+	metadata.OriginDestination = metadata.Destination
 	h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }

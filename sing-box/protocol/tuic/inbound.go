@@ -13,6 +13,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	qtls "github.com/sagernet/sing-quic"
 	"github.com/sagernet/sing-quic/tuic"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
@@ -38,7 +39,6 @@ type Inbound struct {
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TUICInboundOptions) (adapter.Inbound, error) {
-	options.UDPFragmentDefault = true
 	if options.TLS == nil || !options.TLS.Enabled {
 		return nil, C.ErrTLSRequired
 	}
@@ -64,9 +64,18 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		udpTimeout = C.UDPTimeout
 	}
 	service, err := tuic.NewService[int](tuic.ServiceOptions{
-		Context:           ctx,
-		Logger:            logger,
-		TLSConfig:         tlsConfig,
+		Context:   ctx,
+		Logger:    logger,
+		TLSConfig: tlsConfig,
+		QUICOptions: qtls.QUICOptions{
+			IdleTimeout:             options.IdleTimeout.Build(),
+			KeepAlivePeriod:         options.KeepAlivePeriod.Build(),
+			StreamReceiveWindow:     options.StreamReceiveWindow.Value(),
+			ConnectionReceiveWindow: options.ConnectionReceiveWindow.Value(),
+			MaxConcurrentStreams:    options.MaxConcurrentStreams,
+			InitialPacketSize:       options.InitialPacketSize,
+			DisablePathMTUDiscovery: options.DisablePathMTUDiscovery,
+		},
 		CongestionControl: options.CongestionControl,
 		AuthTimeout:       time.Duration(options.AuthTimeout),
 		ZeroRTTHandshake:  options.ZeroRTTHandshake,
@@ -144,7 +153,7 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }
 
-func (h *Inbound) Start(stage adapter.StartStage) error {
+func (h *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -153,18 +162,17 @@ func (h *Inbound) Start(stage adapter.StartStage) error {
 		if err != nil {
 			return err
 		}
+		scope.Add(h.tlsConfig.Close)
 	}
 	packetConn, err := h.listener.ListenUDP()
 	if err != nil {
 		return err
 	}
-	return h.server.Start(packetConn)
-}
-
-func (h *Inbound) Close() error {
-	return common.Close(
-		h.listener,
-		h.tlsConfig,
-		common.PtrOrNil(h.server),
-	)
+	scope.Add(h.listener.Close)
+	err = h.server.Start(packetConn)
+	if err != nil {
+		return err
+	}
+	scope.Add(h.server.Close)
+	return nil
 }

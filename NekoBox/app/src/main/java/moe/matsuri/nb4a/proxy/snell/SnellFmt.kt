@@ -10,30 +10,26 @@ import java.net.URLDecoder
 
 fun buildSingBoxOutboundSnellBean(bean: SnellBean): SingBoxOptions.Outbound_SnellOptions {
     val clampedVersion = (bean.version ?: 4).coerceIn(4, 6)
+    // sing-box 1.14 native snell outbound accepts version 4 (v4/v5 compatible client) or 6.
+    val nativeVersion = if (clampedVersion == 6) 6 else 4
     return SingBoxOptions.Outbound_SnellOptions().apply {
         type = "snell"
         server = bean.serverAddress?.trim()?.removeSurrounding("[", "]")
         server_port = bean.serverPort
         psk = bean.psk
-        version = clampedVersion
-        if (clampedVersion == 6) mode = bean.mode?.takeIf { it.isNotBlank() } ?: "default"
+        version = nativeVersion
         reuse = true
-        udp = true
-        // obfs-opts: only set when obfs mode is not "none"
-        val obfsMode = bean.obfsMode
-        if (!obfsMode.isNullOrBlank() && obfsMode != "none") {
-            val opts = HashMap<String, String>()
-            opts["mode"] = obfsMode
-            val obfsHost = bean.obfsHost
-            if (!obfsHost.isNullOrBlank()) {
-                opts["host"] = obfsHost
+        if (nativeVersion == 6) {
+            mode = bean.mode?.takeIf { it.isNotBlank() } ?: "default"
+        } else {
+            val obfs = bean.obfsMode?.trim()?.lowercase()
+            if (obfs == "http" || obfs == "tls") {
+                obfs_mode = obfs
+                val host = bean.obfsHost?.trim()
+                if (!host.isNullOrEmpty()) {
+                    obfs_host = host
+                }
             }
-            obfs_opts = opts
-        }
-        // client fingerprint (uTLS)
-        val clientFingerprint = bean.clientFingerprint
-        if (!clientFingerprint.isNullOrBlank()) {
-            client_fingerprint = clientFingerprint
         }
     }
 }

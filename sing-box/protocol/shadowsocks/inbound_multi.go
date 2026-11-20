@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -35,13 +36,14 @@ var (
 
 type MultiInbound struct {
 	inbound.Adapter
-	ctx      context.Context
-	router   adapter.ConnectionRouterEx
-	logger   logger.ContextLogger
-	listener *listener.Listener
-	service  shadowsocks.MultiService[int]
-	users    []option.ShadowsocksUser
-	tracker  adapter.SSMTracker
+	ctx         context.Context
+	router      adapter.ConnectionRouterEx
+	logger      logger.ContextLogger
+	listener    *listener.Listener
+	service     shadowsocks.MultiService[int]
+	usersAccess sync.RWMutex
+	users       []option.ShadowsocksUser
+	tracker     adapter.SSMTracker
 }
 
 func newMultiInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksInboundOptions) (*MultiInbound, error) {
@@ -68,14 +70,14 @@ func newMultiInbound(ctx context.Context, router adapter.Router, logger log.Cont
 			options.Method,
 			options.Password,
 			int64(udpTimeout.Seconds()),
-			adapter.NewUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound),
+			adapter.NewLegacyUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound),
 			ntp.TimeFuncFromContext(ctx),
 		)
 	} else if common.Contains(shadowaead.List, options.Method) {
 		service, err = shadowaead.NewMultiService[int](
 			options.Method,
 			int64(udpTimeout.Seconds()),
-			adapter.NewUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound),
+			adapter.NewLegacyUpstreamHandler(adapter.InboundContext{}, inbound.newConnection, inbound.newPacketConnection, inbound),
 		)
 	} else {
 		return nil, E.New("unsupported method: " + options.Method)
@@ -107,15 +109,16 @@ func newMultiInbound(ctx context.Context, router adapter.Router, logger log.Cont
 	return inbound, err
 }
 
-func (h *MultiInbound) Start(stage adapter.StartStage) error {
+func (h *MultiInbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	return h.listener.Start()
-}
-
-func (h *MultiInbound) Close() error {
-	return h.listener.Close()
+	err := h.listener.Start()
+	if err != nil {
+		return err
+	}
+	scope.Add(h.listener.Close)
+	return nil
 }
 
 func (h *MultiInbound) SetTracker(tracker adapter.SSMTracker) {
@@ -123,6 +126,8 @@ func (h *MultiInbound) SetTracker(tracker adapter.SSMTracker) {
 }
 
 func (h *MultiInbound) UpdateUsers(users []string, uPSKs []string) error {
+	h.usersAccess.Lock()
+	defer h.usersAccess.Unlock()
 	err := h.service.UpdateUsersWithPasswords(common.MapIndexed(users, func(index int, user string) int {
 		return index
 	}), uPSKs)
@@ -137,8 +142,17 @@ func (h *MultiInbound) UpdateUsers(users []string, uPSKs []string) error {
 	return nil
 }
 
+func (h *MultiInbound) userName(userIndex int) string {
+	h.usersAccess.RLock()
+	defer h.usersAccess.RUnlock()
+	if userIndex >= len(h.users) {
+		return ""
+	}
+	return h.users[userIndex].Name
+}
+
 //nolint:staticcheck
-func (h *MultiInbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (h *MultiInbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	err := h.service.NewConnection(ctx, conn, adapter.UpstreamMetadata(metadata))
 	N.CloseOnHandshakeFailure(conn, onClose, err)
 	if err != nil {
@@ -151,7 +165,7 @@ func (h *MultiInbound) NewConnectionEx(ctx context.Context, conn net.Conn, metad
 }
 
 //nolint:staticcheck
-func (h *MultiInbound) NewPacketEx(buffer *buf.Buffer, source M.Socksaddr) {
+func (h *MultiInbound) NewPacket(buffer *buf.Buffer, source M.Socksaddr) {
 	err := h.service.NewPacket(h.ctx, &stubPacketConn{h.listener.PacketWriter()}, buffer, M.Metadata{Source: source})
 	if err != nil {
 		h.logger.Error(E.Cause(err, "process packet from ", source))
@@ -163,7 +177,7 @@ func (h *MultiInbound) newConnection(ctx context.Context, conn net.Conn, metadat
 	if !loaded {
 		return os.ErrInvalid
 	}
-	user := h.users[userIndex].Name
+	user := h.userName(userIndex)
 	if user == "" {
 		user = F.ToString(userIndex)
 	} else {
@@ -186,7 +200,7 @@ func (h *MultiInbound) newPacketConnection(ctx context.Context, conn N.PacketCon
 	if !loaded {
 		return os.ErrInvalid
 	}
-	user := h.users[userIndex].Name
+	user := h.userName(userIndex)
 	if user == "" {
 		user = F.ToString(userIndex)
 	} else {

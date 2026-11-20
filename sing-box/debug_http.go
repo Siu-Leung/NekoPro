@@ -1,6 +1,7 @@
 package box
 
 import (
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"runtime"
@@ -13,19 +14,15 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/common/json/badjson"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 
 	"github.com/go-chi/chi/v5"
 )
 
-var debugHTTPServer *http.Server
-
-func applyDebugListenOption(options option.DebugOptions) {
-	if debugHTTPServer != nil {
-		debugHTTPServer.Close()
-		debugHTTPServer = nil
-	}
+func startDebugHTTPServer(options option.DebugOptions) (*http.Server, error) {
 	if options.Listen == "" {
-		return
+		return nil, nil
 	}
 	r := chi.NewMux()
 	r.Route("/debug", func(r chi.Router) {
@@ -63,14 +60,19 @@ func applyDebugListenOption(options option.DebugOptions) {
 			r.HandleFunc("/trace", pprof.Trace)
 		})
 	})
-	debugHTTPServer = &http.Server{
+	server := &http.Server{
 		Addr:    options.Listen,
 		Handler: r,
 	}
+	listener, err := net.Listen(M.NetworkFromNetAddr(N.NetworkTCP, M.ParseSocksaddr(options.Listen).Addr), options.Listen)
+	if err != nil {
+		return nil, E.Cause(err, "listen debug HTTP server")
+	}
 	go func() {
-		err := debugHTTPServer.ListenAndServe()
+		err := server.Serve(listener)
 		if err != nil && !E.IsClosed(err) {
 			log.Error(E.Cause(err, "serve debug HTTP server"))
 		}
 	}()
+	return server, nil
 }

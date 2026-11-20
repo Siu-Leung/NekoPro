@@ -1,0 +1,135 @@
+package moe.matsuri.nb4a
+
+import java.net.URI
+
+/**
+ * Parses legacy sing-box / NekoBox DNS server address strings (e.g. "local",
+ * "https://dns.google/dns-query", "tls://1.1.1.1:853", "quic://dns.adguard-dns.com",
+ * "h3://dns.google/dns-query", "tcp://8.8.8.8", "udp://223.5.5.5:53",
+ * "https+local://223.5.5.5/dns-query", "dhcp://auto", or bare IPv4/IPv6) into
+ * sing-box 1.14 typed DNSServerOptions objects.
+ */
+object SingBoxDnsServerParser {
+
+    fun parse(
+        rawAddress: String,
+        tag: String,
+        defaultDetour: String? = null,
+        domainResolver: String? = null,
+    ): SingBoxOptions.DNSServerOptions {
+        val trimmed = rawAddress.trim()
+        require(trimmed.isNotEmpty()) { "Empty DNS server address for $tag" }
+
+        val lower = trimmed.lowercase()
+        if (lower == "local" || lower == "system" || lower.startsWith("dhcp://")) {
+            return SingBoxOptions.DNSServerOptions().apply {
+                this.type = "local"
+                this.tag = tag
+            }
+        }
+
+        val hasScheme = trimmed.contains("://")
+        var forceDirect = false
+        val scheme: String
+        val uriForParse: URI
+
+        if (hasScheme) {
+            val rawScheme = trimmed.substringBefore("://").lowercase()
+            scheme = if (rawScheme.endsWith("+local")) {
+                forceDirect = true
+                rawScheme.removeSuffix("+local")
+            } else {
+                rawScheme
+            }
+            val rest = trimmed.substringAfter("://")
+            uriForParse = parseAuthorityAndPath(scheme, rest)
+        } else {
+            scheme = "udp"
+            uriForParse = parseAuthorityAndPath("udp", trimmed)
+        }
+
+        val mappedType = when (scheme) {
+            "udp", "tcp", "tls", "https", "quic", "h3" -> scheme
+            else -> throw IllegalArgumentException("Unsupported DNS server scheme '$scheme' in '$trimmed'")
+        }
+
+        val host = uriForParse.host?.trim()?.removeSurrounding("[", "]")
+        require(!host.isNullOrBlank()) { "Missing DNS server host in '$trimmed'" }
+
+        val explicitPort = uriForParse.port.takeIf { it in 1..65535 }
+        val effectiveDetour = if (forceDirect || defaultDetour.isNullOrBlank()) null else defaultDetour
+
+        return SingBoxOptions.DNSServerOptions().apply {
+            this.type = mappedType
+            this.tag = tag
+            this.server = host
+            if (explicitPort != null) {
+                this.server_port = explicitPort
+            }
+            if (mappedType == "https" || mappedType == "h3") {
+                val rawPath = uriForParse.rawPath.orEmpty()
+                val rawQuery = uriForParse.rawQuery.orEmpty()
+                val fullPath = buildString {
+                    if (rawPath.isNotEmpty() && rawPath != "/") {
+                        append(rawPath)
+                    }
+                    if (rawQuery.isNotEmpty()) {
+                        if (isEmpty()) append("/dns-query")
+                        append('?')
+                        append(rawQuery)
+                    }
+                }
+                if (fullPath.isNotEmpty()) {
+                    this.path = fullPath
+                }
+            }
+            if (effectiveDetour != null) {
+                this.detour = effectiveDetour
+            } else if (!isIpLiteral(host) && !domainResolver.isNullOrBlank()) {
+                this.domain_resolver = domainResolver
+            }
+        }
+    }
+
+    /**
+     * Extracts the bare host (without IPv6 brackets) from a DNS address string,
+     * or returns null for non-network transports ("local", "dhcp://...", invalid input).
+     */
+    fun extractHost(rawAddress: String): String? {
+        return runCatching { parse(rawAddress, "probe").server }.getOrNull()
+    }
+
+    private fun parseAuthorityAndPath(scheme: String, rest: String): URI {
+        // Bare unbracketed IPv6 literal (e.g. "2001:4860:4860::8888" or "2606:4700:4700::1111/dns-query")
+        val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }
+        val authority = if (authorityEnd >= 0) rest.substring(0, authorityEnd) else rest
+        val suffix = if (authorityEnd >= 0) rest.substring(authorityEnd) else ""
+        val normalizedAuthority = if (
+            !authority.startsWith("[") &&
+            authority.count { it == ':' } >= 2
+        ) {
+            "[$authority]"
+        } else {
+            authority
+        }
+        return URI("$scheme://$normalizedAuthority$suffix")
+    }
+
+    internal fun isIpLiteral(host: String): Boolean {
+        val clean = host.trim().removeSurrounding("[", "]")
+        if (clean.isEmpty()) return false
+        if (clean.contains(':')) {
+            // IPv6 literal: hex digits, colons, optional embedded IPv4 dots, optional zone
+            val addrPart = clean.substringBefore('%')
+            return addrPart.isNotEmpty() && addrPart.all {
+                it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.'
+            }
+        }
+        val parts = clean.split('.')
+        if (parts.size != 4) return false
+        return parts.all { part ->
+            part.isNotEmpty() && part.length <= 3 && part.all { it in '0'..'9' } &&
+                (part.toIntOrNull()?.let { it in 0..255 } == true)
+        }
+    }
+}

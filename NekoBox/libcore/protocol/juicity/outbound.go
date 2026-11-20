@@ -92,12 +92,13 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 	client, err := juicity.NewClient(juicity.ClientOptions{
-		Context:       ctx,
-		Dialer:        outboundDialer,
-		ServerAddress: options.Build(),
-		TLSConfig:     tlsConfig,
-		UUID:          [uuid.Size]byte(uuidInstance.Bytes()),
-		Password:      options.Password,
+		Context:           ctx,
+		Dialer:            outboundDialer,
+		ServerAddress:     options.Build(),
+		TLSConfig:         tlsConfig,
+		UUID:              [uuid.Size]byte(uuidInstance.Bytes()),
+		Password:          options.Password,
+		CongestionControl: strings.TrimSpace(options.CongestionControl),
 	})
 	if err != nil {
 		return nil, err
@@ -107,6 +108,16 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		logger:  logger,
 		client:  client,
 	}, nil
+}
+
+var _ adapter.Lifecycle = (*Outbound)(nil)
+
+func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage != adapter.StartStateInitialize {
+		return nil
+	}
+	scope.Add(o.Close)
+	return nil
 }
 
 func (o *Outbound) Close() error {

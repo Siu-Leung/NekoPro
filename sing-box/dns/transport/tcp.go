@@ -15,7 +15,6 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
-	"github.com/sagernet/sing/common/bufio/deadline"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -23,7 +22,10 @@ import (
 	mDNS "github.com/miekg/dns"
 )
 
-var _ adapter.DNSTransport = (*TCPTransport)(nil)
+var (
+	_ adapter.DNSTransport         = (*TCPTransport)(nil)
+	_ adapter.IdleConnectionKeeper = (*TCPTransport)(nil)
+)
 
 func RegisterTCP(registry *dns.TransportRegistry) {
 	dns.RegisterTransport[option.RemoteDNSServerOptions](registry, C.DNSTypeTCP, NewTCP)
@@ -31,8 +33,9 @@ func RegisterTCP(registry *dns.TransportRegistry) {
 
 type TCPTransport struct {
 	dns.TransportAdapter
-	dialer     N.Dialer
-	serverAddr M.Socksaddr
+	dialer      N.Dialer
+	serverAddr  M.Socksaddr
+	multiplexer *queryMultiplexer
 }
 
 func NewTCP(ctx context.Context, logger log.ContextLogger, tag string, options option.RemoteDNSServerOptions) (adapter.DNSTransport, error) {
@@ -47,43 +50,61 @@ func NewTCP(ctx context.Context, logger log.ContextLogger, tag string, options o
 	if !serverAddr.IsValid() {
 		return nil, E.New("invalid server address: ", serverAddr)
 	}
-	return &TCPTransport{
-		TransportAdapter: dns.NewTransportAdapterWithRemoteOptions(C.DNSTypeTCP, tag, options),
-		dialer:           transportDialer,
-		serverAddr:       serverAddr,
-	}, nil
+	return NewTCPRaw(dns.NewTransportAdapterWithRemoteOptions(C.DNSTypeTCP, tag, options), transportDialer, serverAddr), nil
 }
 
-func (t *TCPTransport) Start(stage adapter.StartStage) error {
+func NewTCPRaw(adapter dns.TransportAdapter, dialer N.Dialer, serverAddr M.Socksaddr) *TCPTransport {
+	t := &TCPTransport{
+		TransportAdapter: adapter,
+		dialer:           dialer,
+		serverAddr:       serverAddr,
+	}
+	t.multiplexer = newQueryMultiplexer(queryMultiplexerOptions{
+		dial: func(ctx context.Context) (net.Conn, error) {
+			conn, err := t.dialer.DialContext(ctx, N.NetworkTCP, t.serverAddr)
+			if err != nil {
+				return nil, E.Cause(err, "dial TCP connection")
+			}
+			return conn, nil
+		},
+		write: func(conn net.Conn, message *mDNS.Msg, queryId uint16) error {
+			return WriteMessage(conn, queryId, message)
+		},
+		readNext: func(conn net.Conn) (*mDNS.Msg, error) {
+			return ReadMessage(conn)
+		},
+		retryReadError: true,
+		probeReuse:     true,
+	})
+	return t
+}
+
+func (t *TCPTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
+	scope.Add(t.multiplexer.Close)
 	return dialer.InitializeDetour(t.dialer)
 }
 
-func (t *TCPTransport) Close() error {
-	return nil
+func (t *TCPTransport) Reset() {
+	t.multiplexer.Reset()
 }
 
-func (t *TCPTransport) Reset() {
+func (t *TCPTransport) SetKeepIdleConnections(keep bool) {
+	t.multiplexer.SetKeepIdleConnections(keep)
+}
+
+func (t *TCPTransport) CloseIdleConnections() {
+	t.multiplexer.CloseIdleConnections()
 }
 
 func (t *TCPTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
-	conn, err := t.dialer.DialContext(ctx, N.NetworkTCP, t.serverAddr)
-	if err != nil {
-		return nil, E.Cause(err, "dial TCP connection")
-	}
-	defer conn.Close()
-	defer setConnDeadline(ctx, conn, deadline.NeedAdditionalReadDeadline(conn))()
-	err = WriteMessage(conn, 0, message)
-	if err != nil {
-		return nil, E.Cause(err, "write request")
-	}
-	response, err := ReadMessage(conn)
-	if err != nil {
-		return nil, E.Cause(err, "read response")
-	}
-	return response, nil
+	return t.multiplexer.Exchange(ctx, message)
+}
+
+func (t *TCPTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	t.multiplexer.ExchangeAsync(ctx, message, callback)
 }
 
 func setConnDeadline(ctx context.Context, conn net.Conn, needClose bool) func() {

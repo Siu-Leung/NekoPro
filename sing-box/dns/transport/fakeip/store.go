@@ -106,7 +106,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Create(domain string, isIPv6 bool) (netip.Addr, error) {
-	if s.closed.Load() {
+	if s.closed.Load() || s.storage == nil {
 		return netip.Addr{}, E.New("fakeip store is not started")
 	}
 	if address, loaded := s.storage.FakeIPLoadDomain(domain, isIPv6); loaded {
@@ -115,6 +115,10 @@ func (s *Store) Create(domain string, isIPv6 bool) (netip.Addr, error) {
 
 	s.addressAccess.Lock()
 	defer s.addressAccess.Unlock()
+
+	if s.closed.Load() || s.storage == nil {
+		return netip.Addr{}, E.New("fakeip store is not started")
+	}
 
 	// Double-check after acquiring lock
 	if address, loaded := s.storage.FakeIPLoadDomain(domain, isIPv6); loaded {
@@ -164,6 +168,8 @@ func (s *Store) Lookup(address netip.Addr) (string, bool) {
 }
 
 func (s *Store) Reset() error {
+	s.addressAccess.Lock()
+	defer s.addressAccess.Unlock()
 	if s.closed.Load() || s.storage == nil {
 		return nil
 	}

@@ -139,13 +139,16 @@ func (entry *reuseEntry) release() {
 	}
 }
 
-func (m *ReuseManager) pickLocked() *reuseEntry {
+func (m *ReuseManager) pickLocked(now time.Time) *reuseEntry {
 	var best *reuseEntry
 	for _, entry := range m.entries {
 		if entry.isClosed() {
 			continue
 		}
 		if entry.leftRequests.Load() <= 0 {
+			continue
+		}
+		if !entry.unreusableAt.IsZero() && now.After(entry.unreusableAt) {
 			continue
 		}
 		if entry.maxReuseTimes > 0 && entry.reuseCount.Load() >= entry.maxReuseTimes {
@@ -200,7 +203,7 @@ func (m *ReuseManager) GetTransport() http.RoundTripper {
 
 	var entry *reuseEntry
 	if !m.shouldCreateLocked() {
-		entry = m.pickLocked()
+		entry = m.pickLocked(now)
 	}
 	reused := entry != nil
 

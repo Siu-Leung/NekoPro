@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -19,7 +20,6 @@ import (
 	"github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/block"
 	"github.com/sagernet/sing-box/protocol/direct"
-	protocolDns "github.com/sagernet/sing-box/protocol/dns"
 	"github.com/sagernet/sing-box/protocol/group"
 	"github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/hysteria"
@@ -69,7 +69,6 @@ func nekoboxAndroidOutboundRegistry() *outbound.Registry {
 	direct.RegisterOutbound(registry)
 
 	block.RegisterOutbound(registry)
-	protocolDns.RegisterOutbound(registry)
 
 	group.RegisterSelector(registry)
 	group.RegisterURLTest(registry)
@@ -134,4 +133,8 @@ func nekoboxAndroidServiceRegistry() *service.Registry {
 	registry := service.NewRegistry()
 
 	return registry
+}
+
+func nekoboxAndroidCertificateProviderRegistry() *certificate.Registry {
+	return certificate.NewRegistry()
 }

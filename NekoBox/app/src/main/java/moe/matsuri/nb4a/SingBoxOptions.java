@@ -331,7 +331,23 @@ public class SingBoxOptions {
 
     public static class DNSServerOptions extends SingBoxOption {
 
+        public String type;
+
         public String tag;
+
+        public String server;
+
+        public Integer server_port;
+
+        public String path;
+
+        public String domain_resolver;
+
+        public String inet4_range;
+
+        public String inet6_range;
+
+        public Boolean prefer_go;
 
         public String address;
 
@@ -1064,6 +1080,8 @@ public class SingBoxOptions {
         public String default_interface;
 
         public Integer default_mark;
+
+        public String default_domain_resolver;
 
     }
 
@@ -4542,6 +4560,10 @@ public class SingBoxOptions {
 
         public Boolean invert;
 
+        public String action;
+
+        public String rcode;
+
         public String server;
 
         public Boolean disable_cache;
@@ -4704,14 +4726,13 @@ public class SingBoxOptions {
         public String server;
         public Integer server_port;
         public String psk;
+        public String userkey;
         public Integer version;
         public String mode;
         public Boolean reuse;
-        public Boolean udp;
-        @SerializedName("obfs-opts")
-        public Map<String, String> obfs_opts;
-        @SerializedName("client-fingerprint")
-        public String client_fingerprint;
+        public String network;
+        public String obfs_mode;
+        public String obfs_host;
     }
 
     public static class Outbound_VLESSXHTTPOptions extends Outbound {
@@ -4727,6 +4748,9 @@ public class SingBoxOptions {
         public String client_fingerprint;
         public List<String> alpn;
         public Boolean skip_cert_verify;
+        public String certificate;
+        public Boolean ech_enabled;
+        public String ech_config;
         public String reality_public_key;
         public String reality_short_id;
 
@@ -4761,9 +4785,37 @@ public class SingBoxOptions {
 
         public String uuid;
         public String password;
+        public String congestion_control;
         public String network;
         public String pin_cert_sha256;
         public OutboundTLSOptions tls;
+    }
+
+    public static class Outbound_MieruOptions extends Outbound {
+        public String detour;
+        public String bind_interface;
+        public String inet4_bind_address;
+        public String inet6_bind_address;
+        public String protect_path;
+        public Integer routing_mark;
+        public Boolean reuse_addr;
+        public Long connect_timeout;
+        public Boolean tcp_fast_open;
+        public Boolean tcp_multi_path;
+        public Boolean udp_fragment;
+        public String domain_strategy;
+        public Long fallback_delay;
+
+        public String server;
+        public Integer server_port;
+        public String port_range;
+        public String transport;
+        public Boolean udp;
+        public String username;
+        public String password;
+        public String multiplexing;
+        public String handshake_mode;
+        public String traffic_pattern;
     }
 
     public static class Outbound_MasqueOptions extends Outbound {

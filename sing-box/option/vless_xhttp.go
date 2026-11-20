@@ -17,6 +17,9 @@ type VlessXHTTPOutboundOptions struct {
 	ClientFingerprint    string   `json:"client_fingerprint,omitempty"`
 	ClientFingerprintAlt string   `json:"client-fingerprint,omitempty"`
 	SkipCertVerify       bool     `json:"skip_cert_verify,omitempty"`
+	Certificate          string   `json:"certificate,omitempty"`
+	ECHEnabled           bool     `json:"ech_enabled,omitempty"`
+	ECHConfig            string   `json:"ech_config,omitempty"`
 	RealityPublicKey     string   `json:"reality_public_key,omitempty"`
 	RealityShortID       string   `json:"reality_short_id,omitempty"`
 

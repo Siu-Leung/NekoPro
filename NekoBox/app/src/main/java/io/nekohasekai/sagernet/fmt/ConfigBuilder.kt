@@ -254,6 +254,7 @@ fun buildConfig(
         // init routing object
         route = RouteOptions().apply {
             auto_detect_interface = true
+            default_domain_resolver = "dns-direct"
             // WireGuard is an endpoint since 1.13; without route.final the
             // default outbound falls back to the first *outbound* (direct),
             // so a WireGuard-only profile would leak all traffic direct.
@@ -622,6 +623,7 @@ fun buildConfig(
                             if (useFakeDns) userDNSRuleList += makeDnsRuleObj().apply {
                                 server = "dns-fake"
                                 inbound = listOf("tun-in")
+                                query_type = listOf("A", "AAAA")
                             }
                             userDNSRuleList += makeDnsRuleObj().apply {
                                 server = "dns-remote"
@@ -630,8 +632,8 @@ fun buildConfig(
 
                         -2L -> {
                             userDNSRuleList += makeDnsRuleObj().apply {
-                                server = "dns-block"
-                                disable_cache = true
+                                action = "predefined"
+                                rcode = "NOERROR"
                             }
                         }
                     }
@@ -697,48 +699,46 @@ fun buildConfig(
         }
 
         remoteDns.forEach {
-            var address = it
-            if (address.contains("://")) {
-                address = address.substringAfter("://")
-            }
-            "https://$address".toHttpUrlOrNull()?.apply {
+            SingBoxDnsServerParser.extractHost(it)?.let { host ->
                 if (!host.isIpAddress()) {
                     domainListDNSDirectForce.add("full:$host")
                 }
             }
         }
 
+        // sing-box 1.14 typed DNS servers (legacy address format and top-level dns.fakeip removed)
         dns.servers.add(DNSServerOptions().apply {
-            address = "rcode://success"
-            tag = "dns-block"
-        })
-
-        dns.servers.add(DNSServerOptions().apply {
-            address = "local"
+            type = "local"
             tag = "dns-local"
-            detour = TAG_DIRECT
         })
 
-        directDNS.firstOrNull().let {
-            dns.servers.add(DNSServerOptions().apply {
-                address = it ?: throw Exception("No direct DNS, check your settings!")
-                tag = "dns-direct"
-                detour = TAG_DIRECT
-                address_resolver = "dns-local"
-                strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy(tag))
-            })
+        val directDnsAddr = directDNS.firstOrNull()
+            ?: throw Exception("No direct DNS, check your settings!")
+        dns.servers.add(
+            SingBoxDnsServerParser.parse(
+                rawAddress = directDnsAddr,
+                tag = "dns-direct",
+                defaultDetour = null,
+                domainResolver = "dns-local",
+            )
+        )
+
+        if (!forTest) {
+            val remoteDnsAddr = remoteDns.firstOrNull()
+                ?: throw Exception("No remote DNS, check your settings!")
+            dns.servers.add(
+                SingBoxDnsServerParser.parse(
+                    rawAddress = remoteDnsAddr,
+                    tag = "dns-remote",
+                    defaultDetour = TAG_PROXY,
+                    domainResolver = "dns-direct",
+                )
+            )
         }
 
-        remoteDns.firstOrNull().let {
-            // Always use direct DNS for urlTest
-            if (!forTest) dns.servers.add(DNSServerOptions().apply {
-                address = it ?: throw Exception("No remote DNS, check your settings!")
-                tag = "dns-remote"
-                address_resolver = "dns-direct"
-                strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy(tag))
-            })
-        }
-
+        dns.strategy = autoDnsDomainStrategy(
+            SingBoxOptionsUtil.domainStrategy(if (forTest) "dns-direct" else "dns-remote")
+        )
         dns.final_ = if (forTest) "dns-direct" else "dns-remote"
 
         // dns object user rules
@@ -776,29 +776,25 @@ fun buildConfig(
                 source_ip_cidr = listOf("224.0.0.0/3", "ff00::/8")
                 action = "reject"
             })
-            // FakeDNS obj
+            // FakeDNS server (1.14 typed fakeip server format)
             if (useFakeDns) {
-                dns.fakeip = DNSFakeIPOptions().apply {
-                    enabled = true
-                    inet4_range = "198.18.0.0/15"
-                    inet6_range = "fc00::/18"
-                }
                 dns.servers.add(DNSServerOptions().apply {
-                    address = "fakeip"
+                    type = "fakeip"
                     tag = "dns-fake"
-                    strategy = "ipv4_only"
+                    if (ipv6Mode != IPv6Mode.ONLY) {
+                        inet4_range = "198.18.0.0/15"
+                    }
+                    if (ipv6Mode != IPv6Mode.DISABLE) {
+                        inet6_range = "fc00::/18"
+                    }
                 })
                 dns.rules.add(DNSRule_DefaultOptions().apply {
                     inbound = listOf("tun-in")
+                    query_type = listOf("A", "AAAA")
                     server = "dns-fake"
                     disable_cache = true
                 })
             }
-            // avoid loopback
-            dns.rules.add(0, DNSRule_DefaultOptions().apply {
-                outbound = mutableListOf("any")
-                server = "dns-direct"
-            })
             // force bypass (always top DNS rule)
             if (domainListDNSDirectForce.isNotEmpty()) {
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {

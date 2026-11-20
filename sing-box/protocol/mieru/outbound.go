@@ -138,6 +138,16 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return mihomo_adapter.WrapResolvedPacketConn(pc, meta, destination), nil
 }
 
+var _ adapter.Lifecycle = (*Outbound)(nil)
+
+func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage != adapter.StartStateInitialize {
+		return nil
+	}
+	scope.Add(h.Close)
+	return nil
+}
+
 func (h *Outbound) Close() error {
 	h.release()
 	return h.proxy.Close()

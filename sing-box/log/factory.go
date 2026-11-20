@@ -17,6 +17,7 @@ type Factory interface {
 	SetLevel(level Level)
 	Logger() ContextLogger
 	NewLogger(tag string) ContextLogger
+	AttachPlatformWriter(writer PlatformWriter)
 }
 
 type ObservableFactory interface {

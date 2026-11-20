@@ -20,10 +20,10 @@ const (
 )
 
 var (
-	clientSessionField, _   = reflect.TypeOf(anytls.Client{}).FieldByName("sessionClient")
-	streamSessionField, _   = reflect.TypeOf(session.Stream{}).FieldByName("sess")
-	sessionConnLockField, _ = reflect.TypeOf(session.Session{}).FieldByName("connLock")
-	sessionBufferField, _   = reflect.TypeOf(session.Session{}).FieldByName("buffer")
+	clientSessionField, _   = reflect.TypeFor[anytls.Client]().FieldByName("sessionClient")
+	streamSessionField, _   = reflect.TypeFor[session.Stream]().FieldByName("sess")
+	sessionConnLockField, _ = reflect.TypeFor[session.Session]().FieldByName("connLock")
+	sessionBufferField, _   = reflect.TypeFor[session.Session]().FieldByName("buffer")
 )
 
 // metadataHookSupported reports whether the internal layout used by
@@ -45,7 +45,7 @@ func sessionClientOf(client *anytls.Client) *session.Client {
 }
 
 func (h *Outbound) rewriteClientMetadata(conn net.Conn) {
-	if !metadataHookSupported() {
+	if h.clientMetadata == "" || !metadataHookSupported() {
 		return
 	}
 	sess := *(**session.Session)(unsafe.Add(unsafe.Pointer(conn.(*session.Stream)), streamSessionField.Offset))

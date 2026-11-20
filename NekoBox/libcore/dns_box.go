@@ -46,7 +46,9 @@ func newPlatformTransport(iif LocalDNSTransport, tag string, options option.Loca
 	}
 }
 
-func (p *platformLocalDNSTransport) Start(stage adapter.StartStage) error {
+var _ adapter.DNSTransport = (*platformLocalDNSTransport)(nil)
+
+func (p *platformLocalDNSTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	return nil
 }
 
@@ -57,6 +59,13 @@ func (p *platformLocalDNSTransport) Close() error {
 // Reset implements adapter.DNSTransport. The platform DNS transport has no
 // persistent connections to close, so reset is a no-op.
 func (p *platformLocalDNSTransport) Reset() {
+}
+
+func (p *platformLocalDNSTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	go func() {
+		response, err := p.Exchange(ctx, message)
+		callback(response, err)
+	}()
 }
 
 func (p *platformLocalDNSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
@@ -94,11 +103,14 @@ func (p *platformLocalDNSTransport) Exchange(ctx context.Context, message *mDNS.
 		}
 
 		done := make(chan struct{})
+		closeDone := sync.OnceFunc(func() {
+			close(done)
+		})
+		defer closeDone()
 		response := &ExchangeContext{
 			context: ctx,
-			done: sync.OnceFunc(func() {
-				close(done)
-			}),
+			doneCh:  done,
+			done:    closeDone,
 		}
 
 		var responseAddrs []netip.Addr
@@ -133,6 +145,7 @@ type Func interface {
 
 type ExchangeContext struct {
 	context   context.Context
+	doneCh    <-chan struct{}
 	message   mDNS.Msg
 	addresses []netip.Addr
 	error     error
@@ -140,9 +153,15 @@ type ExchangeContext struct {
 }
 
 func (c *ExchangeContext) OnCancel(callback Func) {
+	if callback == nil || c.context == nil {
+		return
+	}
 	go func() {
-		<-c.context.Done()
-		callback.Invoke()
+		select {
+		case <-c.context.Done():
+			_ = callback.Invoke()
+		case <-c.doneCh:
+		}
 	}()
 }
 
