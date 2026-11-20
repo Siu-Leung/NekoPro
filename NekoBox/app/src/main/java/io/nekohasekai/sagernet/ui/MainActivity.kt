@@ -139,8 +139,10 @@ class MainActivity : ThemedActivity(),
         if (::navigation.isInitialized) {
             navigation.menu.findItem(R.id.nav_traffic)?.isVisible = clashApi
             val isGlobal = DataStore.routeMode == 1
-            navigation.menu.findItem(R.id.nav_mode_rule)?.title = if (!isGlobal) "● 智能分流 (Rule)" else "○ 智能分流 (Rule)"
-            navigation.menu.findItem(R.id.nav_mode_global)?.title = if (isGlobal) "● 全局代理 (Global)" else "○ 全局代理 (Global)"
+            val ruleLabel = getString(R.string.route_mode_rule)
+            val globalLabel = getString(R.string.route_mode_global)
+            navigation.menu.findItem(R.id.nav_mode_rule)?.title = if (!isGlobal) "● $ruleLabel" else "○ $ruleLabel"
+            navigation.menu.findItem(R.id.nav_mode_global)?.title = if (isGlobal) "● $globalLabel" else "○ $globalLabel"
         }
     }
 
@@ -327,9 +329,9 @@ class MainActivity : ThemedActivity(),
                 DataStore.routeMode = 0
                 refreshNavMenu(DataStore.enableClashAPI)
                 binding.drawerLayout.closeDrawers()
-                snackbar("已切换至：智能分流 (Rule 模式)").show()
+                snackbar(getString(R.string.route_mode_switched, getString(R.string.route_mode_rule))).show()
                 if (DataStore.serviceState.connected) {
-                    SagerNet.reloadService(BaseService.ReloadReason.RouteModeChanged)
+                    SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.RouteModeChanged)
                 }
                 return true
             }
@@ -337,9 +339,9 @@ class MainActivity : ThemedActivity(),
                 DataStore.routeMode = 1
                 refreshNavMenu(DataStore.enableClashAPI)
                 binding.drawerLayout.closeDrawers()
-                snackbar("已切换至：全局代理 (Global 模式)").show()
+                snackbar(getString(R.string.route_mode_switched, getString(R.string.route_mode_global))).show()
                 if (DataStore.serviceState.connected) {
-                    SagerNet.reloadService(BaseService.ReloadReason.RouteModeChanged)
+                    SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.RouteModeChanged)
                 }
                 return true
             }
@@ -403,9 +405,10 @@ class MainActivity : ThemedActivity(),
         msg: String? = null,
         animate: Boolean = false,
     ) {
+        val previousState = DataStore.serviceState
         DataStore.serviceState = state
 
-        binding.fab.changeState(state, DataStore.serviceState, animate)
+        binding.fab.changeState(state, previousState, animate)
         binding.stats.changeState(state)
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
     }

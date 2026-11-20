@@ -23,6 +23,8 @@ import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
 import io.nekohasekai.sagernet.fmt.juicity.buildSingBoxOutboundJuicityBean
 import io.nekohasekai.sagernet.fmt.masque.MASQUEBean
 import io.nekohasekai.sagernet.fmt.masque.buildSingBoxOutboundMasqueBean
+import io.nekohasekai.sagernet.fmt.mieru.MieruBean
+import io.nekohasekai.sagernet.fmt.mieru.buildSingBoxOutboundMieruBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.buildSingBoxOutboundStandardV2RayBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
@@ -403,6 +405,9 @@ fun buildConfig(
                         is MASQUEBean ->
                             buildSingBoxOutboundMasqueBean(bean)
 
+                        is MieruBean ->
+                            buildSingBoxOutboundMieruBean(bean)
+
                         is SOCKSBean ->
                             buildSingBoxOutboundSocksBean(bean)
 
@@ -495,7 +500,9 @@ fun buildConfig(
                     }
                 }
 
-                if (currentOutbound is Endpoint) {
+                val isWireGuardCustom = currentOutbound is CustomSingBoxOption &&
+                    (currentOutbound.getBasicMap()["type"] as? String) == "wireguard"
+                if (currentOutbound is Endpoint || isWireGuardCustom) {
                     if (endpoints == null) endpoints = mutableListOf()
                     endpoints.add(currentOutbound)
                 } else {
@@ -514,6 +521,9 @@ fun buildConfig(
         if (buildSelector) {
             val list = group.id.let { SagerDatabase.proxyDao.getByGroup(it) }
             list.forEach {
+                if (it.type == TYPE_CONFIG && (it.requireBean() as? ConfigBean)?.type == 0) {
+                    return@forEach
+                }
                 tagMap[it.id] = buildChain(it.id, it)
             }
             outbounds.add(0, Outbound_SelectorOptions().apply {
@@ -808,6 +818,7 @@ fun buildConfig(
     }.let {
         val configMap = it.asMap()
         Util.mergeJSON(configMap, proxy.requireBean().customConfigJson!!)
+        migrateLegacyWireGuardOutbounds(configMap)
         ConfigBuildResult(
             gson.toJson(configMap),
             externalIndexMap,
@@ -818,4 +829,59 @@ fun buildConfig(
         )
     }
 
+}
+
+@Suppress("UNCHECKED_CAST")
+internal fun migrateLegacyWireGuardOutbounds(configMap: MutableMap<String, Any>) {
+    fun normalizeLegacyWireGuardMap(entry: MutableMap<String, Any?>) {
+        if ((entry["type"] as? String) != "wireguard") return
+        if (entry["address"] == null && entry["local_address"] != null) {
+            entry["address"] = entry.remove("local_address")
+        }
+        if (entry["peers"] == null && entry["server"] != null) {
+            val peer = LinkedHashMap<String, Any?>()
+            entry.remove("server")?.let { peer["address"] = it }
+            entry.remove("server_port")?.let { peer["port"] = it }
+            entry.remove("peer_public_key")?.let { peer["public_key"] = it }
+            entry.remove("pre_shared_key")?.let { peer["pre_shared_key"] = it }
+            entry.remove("reserved")?.let { peer["reserved"] = it }
+            peer["allowed_ips"] = listOf("0.0.0.0/0", "::/0")
+            entry["peers"] = listOf(peer)
+        }
+        entry.remove("gso")
+    }
+
+    val existingEndpoints = (configMap["endpoints"] as? List<*>)?.toMutableList() ?: mutableListOf()
+    var endpointsModified = false
+
+    val outboundsList = configMap["outbounds"] as? List<*>
+    if (outboundsList != null) {
+        val remainingOutbounds = ArrayList<Any?>(outboundsList.size)
+        var outboundsModified = false
+        for (item in outboundsList) {
+            val map = item as? MutableMap<String, Any?>
+            if (map != null && (map["type"] as? String) == "wireguard") {
+                normalizeLegacyWireGuardMap(map)
+                existingEndpoints.add(map)
+                outboundsModified = true
+                endpointsModified = true
+            } else {
+                remainingOutbounds.add(item)
+            }
+        }
+        if (outboundsModified) {
+            configMap["outbounds"] = remainingOutbounds
+        }
+    }
+
+    for (item in existingEndpoints) {
+        val map = item as? MutableMap<String, Any?> ?: continue
+        if ((map["type"] as? String) == "wireguard") {
+            normalizeLegacyWireGuardMap(map)
+            endpointsModified = true
+        }
+    }
+    if (endpointsModified && existingEndpoints.isNotEmpty()) {
+        configMap["endpoints"] = existingEndpoints
+    }
 }

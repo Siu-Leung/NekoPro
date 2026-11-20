@@ -9,32 +9,47 @@ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.tryResume
 import io.nekohasekai.sagernet.ktx.tryResumeWithException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
-import kotlin.coroutines.suspendCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
     BoxInstance(profile) {
 
+    private val closed = AtomicBoolean(false)
+
+    private fun closeOnce() {
+        if (closed.compareAndSet(false, true)) {
+            runCatching { close() }
+        }
+    }
+
     suspend fun doTest(): Int {
-        return suspendCoroutine { c ->
+        return suspendCancellableCoroutine { c ->
             processes = GuardedProcessPool {
                 Logs.w(it)
                 c.tryResumeWithException(it)
             }
-            runOnDefaultDispatcher {
-                use {
-                    try {
-                        init()
-                        launch()
-                        if (processes.processCount > 0) {
-                            // wait for plugin start
-                            delay(500)
-                        }
-                        c.tryResume(Libcore.urlTest(box, link, timeout))
-                    } catch (e: Exception) {
-                        c.tryResumeWithException(e)
+            val job = runOnDefaultDispatcher {
+                try {
+                    init()
+                    launch()
+                    if (processes.processCount > 0) {
+                        // wait for plugin start
+                        delay(500)
                     }
+                    c.tryResume(Libcore.urlTest(box, link, timeout))
+                } catch (e: Exception) {
+                    c.tryResumeWithException(e)
+                } finally {
+                    closeOnce()
+                }
+            }
+            c.invokeOnCancellation {
+                job.cancel()
+                runOnDefaultDispatcher {
+                    closeOnce()
                 }
             }
         }

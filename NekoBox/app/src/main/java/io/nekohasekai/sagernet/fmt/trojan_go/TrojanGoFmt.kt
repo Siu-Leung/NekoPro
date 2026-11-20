@@ -67,7 +67,7 @@ fun TrojanGoBean.toUri(): String {
             }
         }
     }
-    if (type!!.isNotBlank() && type != "none") {
+    if (!encryption.isNullOrBlank() && encryption != "none") {
         builder.addQueryParameter("encryption", encryption)
     }
     if (plugin!!.isNotBlank()) {
@@ -135,25 +135,30 @@ fun JSONObject.parseTrojanGo(): TrojanGoBean {
     return TrojanGoBean().applyDefaultValues().apply {
         serverAddress = optString("remote_addr", serverAddress!!)
         serverPort = optInt("remote_port", serverPort!!)
-        when (val pass = get("password")) {
+        when (val pass = opt("password")) {
             is String -> {
                 password = pass
             }
+            is JSONArray -> {
+                if (pass.length() > 0) {
+                    password = pass.optString(0, password ?: "")
+                }
+            }
             is List<*> -> {
-                password = pass[0] as String
+                password = pass.firstOrNull()?.toString() ?: password
             }
         }
-        optJSONArray("ssl")?.apply {
+        optJSONObject("ssl")?.apply {
             sni = optString("sni", sni!!)
         }
-        optJSONArray("websocket")?.apply {
+        optJSONObject("websocket")?.apply {
             if (optBoolean("enabled", false)) {
                 type = "ws"
                 host = optString("host", host!!)
                 path = optString("path", path!!)
             }
         }
-        optJSONArray("shadowsocks")?.apply {
+        optJSONObject("shadowsocks")?.apply {
             if (optBoolean("enabled", false)) {
                 encryption = "ss;${optString("method", "")}:${optString("password", "")}"
             }

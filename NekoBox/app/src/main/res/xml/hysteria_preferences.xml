@@ -46,7 +46,7 @@
             app:key="serverPassword"
             app:title="@string/hysteria_auth_payload" />
         <moe.matsuri.nb4a.ui.SimpleMenuPreference
-            app:defaultValue="https"
+            app:defaultValue="0"
             app:entries="@array/hysteria_protocol"
             app:entryValues="@array/int_array_3"
             app:icon="@drawable/ic_baseline_layers_24"

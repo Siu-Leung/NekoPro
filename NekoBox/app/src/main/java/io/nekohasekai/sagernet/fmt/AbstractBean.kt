@@ -17,8 +17,6 @@ abstract class AbstractBean : Serializable(), Cloneable {
     @JvmField @Transient var finalAddress: String? = null
     @JvmField @Transient var finalPort: Int = 0
 
-    private @Transient var serializeWithoutName = false
-
     open fun displayName(): String =
         if (JavaUtil.isNotBlank(name)) name!! else displayAddress()
 
@@ -47,7 +45,7 @@ abstract class AbstractBean : Serializable(), Cloneable {
     override fun serializeToBuffer(output: ByteBufferOutput) {
         serialize(output)
         output.writeInt(1)
-        if (!serializeWithoutName) {
+        if (serializeWithoutNameLocal.get() != true) {
             output.writeString(name)
         }
         output.writeString(customOutboundJson)
@@ -77,25 +75,29 @@ abstract class AbstractBean : Serializable(), Cloneable {
         if (this === other) return true
         if (other == null || javaClass != other.javaClass) return false
         val o = other as AbstractBean
+        val prev = serializeWithoutNameLocal.get()
         return try {
-            serializeWithoutName = true
-            o.serializeWithoutName = true
+            serializeWithoutNameLocal.set(true)
             KryoConverters.serialize(this).contentEquals(KryoConverters.serialize(o))
         } finally {
-            serializeWithoutName = false
-            o.serializeWithoutName = false
+            serializeWithoutNameLocal.set(prev)
         }
     }
 
     override fun hashCode(): Int {
+        val prev = serializeWithoutNameLocal.get()
         return try {
-            serializeWithoutName = true
+            serializeWithoutNameLocal.set(true)
             KryoConverters.serialize(this).contentHashCode()
         } finally {
-            serializeWithoutName = false
+            serializeWithoutNameLocal.set(prev)
         }
     }
 
     override fun toString(): String =
         "${javaClass.simpleName} ${JavaUtil.gson.toJson(this)}"
+
+    companion object {
+        private val serializeWithoutNameLocal = ThreadLocal.withInitial { false }
+    }
 }

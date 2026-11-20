@@ -82,11 +82,6 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	go func() {
 		defer device.DeferPanicToError("InitCore-go", func(err error) { log.Println(err) })
 		device.GoDebug(process)
-
-		// bg
-		if isBgProcess {
-			extractAssets()
-		}
 	}()
 }
 

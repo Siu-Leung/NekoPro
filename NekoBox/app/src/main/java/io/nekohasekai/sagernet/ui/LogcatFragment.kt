@@ -63,15 +63,18 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
     }
 
     private fun reloadSession() {
-        val span = SpannableString(
-            String(SendLog.getNekoLog(50 * 1024))
-        )
+        val normalized = String(SendLog.getNekoLog(50 * 1024))
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+        val span = SpannableString(normalized)
         var offset = 0
-        for (line in span.lines()) {
+        for (line in normalized.split('\n')) {
             val color = getColorForLine(line)
-            span.setSpan(
-                color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
-            )
+            if (line.isNotEmpty() && offset + line.length <= span.length) {
+                span.setSpan(
+                    color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
             offset += line.length + 1
         }
         binding.textview.text = span

@@ -29,11 +29,11 @@
         <item
             android:id="@+id/nav_mode_rule"
             android:icon="@drawable/ic_maps_directions"
-            android:title="智能分流 (Rule)" />
+            android:title="@string/route_mode_rule" />
         <item
             android:id="@+id/nav_mode_global"
             android:icon="@drawable/ic_file_cloud_queue"
-            android:title="全局代理 (Global)" />
+            android:title="@string/route_mode_global" />
     </group>
 
     <group

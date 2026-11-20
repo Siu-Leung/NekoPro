@@ -102,7 +102,8 @@ fun JSONObject.parseShadowsocks(): ShadowsocksBean {
 
         val pId = getStr("plugin")
         if (!pId.isNullOrBlank()) {
-            plugin = pId + ";" + optString("plugin_opts", "")
+            val pOpts = optString("plugin_opts", "")
+            plugin = if (pOpts.isNotBlank()) "$pId;$pOpts" else pId
         }
     }
 }
@@ -114,10 +115,11 @@ fun buildSingBoxOutboundShadowsocksBean(bean: ShadowsocksBean): SingBoxOptions.O
         server_port = bean.serverPort
         password = bean.password
         method = bean.method
-        if (bean.plugin!!.isNotBlank()) {
-            plugin = bean.plugin!!.substringBefore(";")
-            plugin_opts = bean.plugin!!.substringAfter(";", "")
-            if (plugin == "none") {
+        if (!bean.plugin.isNullOrBlank()) {
+            val rawPlugin = bean.plugin!!
+            plugin = rawPlugin.substringBefore(";").trim()
+            plugin_opts = rawPlugin.substringAfter(";", "").takeIf { it.isNotBlank() }
+            if (plugin == "none" || plugin.isNullOrBlank()) {
                 plugin = null
                 plugin_opts = null
             }

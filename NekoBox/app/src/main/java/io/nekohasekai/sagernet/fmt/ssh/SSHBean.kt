@@ -15,8 +15,8 @@ class SSHBean : AbstractBean() {
     @JvmField var publicKey: String? = null
 
     override fun initializeDefaultValues() {
-        super.initializeDefaultValues()
         if (serverPort == null) serverPort = 22
+        super.initializeDefaultValues()
         if (username == null) username = ""
         if (authType == null) authType = AUTH_TYPE_NONE
         if (password == null) password = ""

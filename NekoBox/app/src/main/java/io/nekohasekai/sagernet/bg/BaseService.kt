@@ -29,39 +29,24 @@ import java.util.concurrent.ConcurrentHashMap
 
 class BaseService {
 
-    sealed class ReloadReason {
-        data class SelectorOnly(val profileId: Long) : ReloadReason()
-        data object RouteModeChanged : ReloadReason()
-        data object CoreConfigChanged : ReloadReason()
-        data object DnsChanged : ReloadReason()
-        data object TunChanged : ReloadReason()
-        data object ClashApiChanged : ReloadReason()
+    companion object {
+        private const val EXTRA_REASON = "reload_reason"
+        private const val EXTRA_PROFILE_ID = "reload_profile_id"
 
-        companion object {
-            private const val EXTRA_REASON = "reload_reason"
-            private const val EXTRA_PROFILE_ID = "reload_profile_id"
-
-            fun put(intent: Intent, reason: ReloadReason): Intent = intent.apply {
-                putExtra(EXTRA_REASON, reason.javaClass.simpleName)
-                if (reason is SelectorOnly) putExtra(EXTRA_PROFILE_ID, reason.profileId)
-            }
-
-            fun from(intent: Intent): ReloadReason = when (intent.getStringExtra(EXTRA_REASON)) {
-                SelectorOnly::class.java.simpleName -> SelectorOnly(intent.getLongExtra(EXTRA_PROFILE_ID, 0L))
-                RouteModeChanged::class.java.simpleName -> RouteModeChanged
-                DnsChanged::class.java.simpleName -> DnsChanged
-                TunChanged::class.java.simpleName -> TunChanged
-                ClashApiChanged::class.java.simpleName -> ClashApiChanged
-                else -> CoreConfigChanged
-            }
+        fun putReloadReason(intent: Intent, reason: ReloadReason): Intent = intent.apply {
+            putExtra(EXTRA_REASON, reason.javaClass.simpleName)
+            if (reason is ReloadReason.SelectorOnly) putExtra(EXTRA_PROFILE_ID, reason.profileId)
         }
-    }
 
-    object ReloadDecision {
-        fun requiresFullRebuild(reason: ReloadReason) = reason !is ReloadReason.SelectorOnly
-
-        fun shouldSelectOnly(reason: ReloadReason, runningFingerprint: String, currentFingerprint: String) =
-            reason is ReloadReason.SelectorOnly && runningFingerprint == currentFingerprint
+        fun reloadReasonFrom(intent: Intent): ReloadReason = when (intent.getStringExtra(EXTRA_REASON)) {
+            ReloadReason.SelectorOnly::class.java.simpleName ->
+                ReloadReason.SelectorOnly(intent.getLongExtra(EXTRA_PROFILE_ID, 0L))
+            ReloadReason.RouteModeChanged::class.java.simpleName -> ReloadReason.RouteModeChanged
+            ReloadReason.DnsChanged::class.java.simpleName -> ReloadReason.DnsChanged
+            ReloadReason.TunChanged::class.java.simpleName -> ReloadReason.TunChanged
+            ReloadReason.ClashApiChanged::class.java.simpleName -> ReloadReason.ClashApiChanged
+            else -> ReloadReason.CoreConfigChanged
+        }
     }
 
     enum class State(
@@ -85,7 +70,7 @@ class BaseService {
         val receiver = broadcastReceiver { ctx, intent ->
             when (intent.action) {
                 Intent.ACTION_SHUTDOWN -> service.persistStats()
-                Action.RELOAD -> service.reload(ReloadReason.from(intent))
+                Action.RELOAD -> service.reload(reloadReasonFrom(intent))
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -120,6 +105,8 @@ class BaseService {
         private val serviceJob = SupervisorJob()
         val serviceScope = CoroutineScope(serviceJob + Dispatchers.Main.immediate)
         var generation = 0L
+        @Volatile
+        var pendingRestart = false
 
         fun close() {
             serviceJob.cancel()
@@ -230,32 +217,37 @@ class BaseService {
                 return
             }
             data.serviceScope.launch {
-                if (reason is ReloadReason.SelectorOnly && canReloadSelector(reason.profileId)) {
+                if (!ReloadDecision.requiresFullRebuild(reason) && reason is ReloadReason.SelectorOnly) {
                     val proxy = data.proxy
                     if (data.state == State.Connected && proxy != null && proxy.isInitialized()) {
-                        val tag = proxy.config.profileTagMap[reason.profileId].orEmpty()
-                        if (tag.isNotBlank()) {
-                            proxy.box.selectOutbound(tag)
+                        val runningGroupId = proxy.config.selectorGroupId
+                        if (runningGroupId >= 0L) {
+                            val ent = withContext(Dispatchers.IO) {
+                                SagerDatabase.proxyDao.getById(reason.profileId)
+                            }
+                            if (ent != null && ReloadDecision.shouldSelectOnly(
+                                    reason,
+                                    runningGroupId.toString(),
+                                    ent.groupId.toString()
+                                )
+                            ) {
+                                val tag = proxy.config.profileTagMap[reason.profileId].orEmpty()
+                                if (tag.isNotBlank()) {
+                                    proxy.box.selectOutbound(tag)
+                                    return@launch
+                                }
+                            }
                         }
-                        return@launch
                     }
                 }
                 val s = data.state
                 when {
                     s == State.Stopped -> startRunner()
+                    s == State.Stopping -> data.pendingRestart = true
                     s.canStop -> stopRunner(true)
                     else -> Logs.w("Illegal state $s when invoking use")
                 }
             }
-        }
-
-        suspend fun canReloadSelector(profileId: Long): Boolean {
-            val proxy = data.proxy ?: return false
-            if (data.state != State.Connected || !proxy.isInitialized()) return false
-            val runningGroupId = proxy.config.selectorGroupId
-            if (runningGroupId < 0L) return false
-            val ent = withContext(Dispatchers.IO) { SagerDatabase.proxyDao.getById(profileId) } ?: return false
-            return ent.groupId == runningGroupId
         }
 
         suspend fun startProcesses() {
@@ -283,7 +275,11 @@ class BaseService {
             DataStore.baseService = null
             DataStore.vpnService = null
 
-            if (data.state == State.Stopping) return
+            if (data.state == State.Stopping) {
+                if (restart) data.pendingRestart = true
+                return
+            }
+            data.pendingRestart = restart
             data.notification?.destroy()
             data.notification = null
             this as Service
@@ -293,21 +289,23 @@ class BaseService {
 
             data.serviceScope.launch {
                 data.connectingJob?.cancelAndJoin() // ensure stop connecting first
-                // we use a coroutineScope here to allow clean-up in parallel
-                coroutineScope {
+                // run blocking teardown off the main thread
+                withContext(Dispatchers.IO) {
                     killProcesses()
-                    val data = data
-                    if (data.closeReceiverRegistered) {
-                        unregisterReceiver(data.receiver)
-                        data.closeReceiverRegistered = false
-                    }
-                    data.proxy = null
                 }
+                val data = data
+                if (data.closeReceiverRegistered) {
+                    unregisterReceiver(data.receiver)
+                    data.closeReceiverRegistered = false
+                }
+                data.proxy = null
 
+                val shouldRestart = data.pendingRestart
+                data.pendingRestart = false
                 // change the state
                 data.changeState(State.Stopped, msg)
                 // stop the service if nothing has bound to it
-                if (restart) startRunner() else {
+                if (shouldRestart) startRunner() else {
                     stopSelf()
                 }
             }

@@ -1770,10 +1770,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (::undoManager.isInitialized) {
                         undoManager.flush()
                     }
+                    val oldProfile = configurationList[profile.id]
                     configurationList[profile.id] = profile
                     notifyItemChanged(index)
-                    //
-                    val oldProfile = configurationList[profile.id]
                     if (noTraffic && oldProfile != null) {
                         runOnDefaultDispatcher {
                             onUpdated(
@@ -1948,7 +1947,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             if (update) {
                                 ProfileManager.postUpdate(lastSelected)
                                 if (DataStore.serviceState.canStop && reloadAccess.tryLock()) {
-                                    SagerNet.reloadService(BaseService.ReloadReason.SelectorOnly(proxyEntity.id))
+                                    SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.SelectorOnly(proxyEntity.id))
                                     reloadAccess.unlock()
                                 }
                             } else if (SagerNet.isTv) {

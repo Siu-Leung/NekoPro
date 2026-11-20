@@ -161,7 +161,7 @@ abstract class GroupUpdater {
                 val connected = DataStore.serviceState.connected
                 val userInterface = GroupManager.userInterface
 
-                if (byUser && (subscription.link?.startsWith("http://") == true || subscription.updateWhenConnectedOnly == true) && !connected) {
+                if (byUser && (subscription.link?.startsWith("http://", ignoreCase = true) == true || subscription.updateWhenConnectedOnly == true) && !connected) {
                     if (userInterface == null || !userInterface.confirm(app.getString(R.string.update_subscription_warning))) {
                         finishUpdate(proxyGroup)
                         cancel()

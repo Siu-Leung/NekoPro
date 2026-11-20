@@ -30,19 +30,36 @@ object SendLog {
         logFile.writeText(report)
 
         try {
-            Runtime.getRuntime().exec(arrayOf("logcat", "-d")).inputStream.use(
-                FileOutputStream(
-                    logFile, true
-                )
-            )
+            val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d"))
+            try {
+                process.inputStream.use(FileOutputStream(logFile, true))
+                process.waitFor()
+            } finally {
+                process.destroy()
+            }
             logFile.appendText("\n")
         } catch (e: IOException) {
             Logs.w(e)
             logFile.appendText("Export logcat error: " + CrashHandler.formatThrowable(e))
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            Logs.w(e)
         }
 
         logFile.appendText("\n")
-        logFile.appendBytes(getNekoLog(0))
+        val nekoLog = File(SagerNet.application.cacheDir, "neko.log")
+        if (nekoLog.exists()) {
+            try {
+                FileInputStream(nekoLog).use { input ->
+                    FileOutputStream(logFile, true).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            } catch (e: Exception) {
+                Logs.w(e)
+                logFile.appendText("Export neko.log error: " + CrashHandler.formatThrowable(e))
+            }
+        }
 
         context.startActivity(
             Intent.createChooser(
@@ -65,11 +82,26 @@ object SendLog {
                 "neko.log"
             )
             val len = file.length()
-            val stream = FileInputStream(file)
-            if (max in 1 until len) {
-                stream.skip(len - max) // TODO string?
+            FileInputStream(file).use { stream ->
+                var skipped = false
+                if (max in 1 until len) {
+                    var remaining = len - max
+                    while (remaining > 0) {
+                        val n = stream.skip(remaining)
+                        if (n <= 0) break
+                        remaining -= n
+                    }
+                    skipped = true
+                }
+                val bytes = stream.readBytes()
+                if (!skipped || bytes.isEmpty()) return@use bytes
+                // Advance past any UTF-8 continuation bytes (10xxxxxx) at the slice boundary
+                var start = 0
+                while (start < bytes.size && start < 3 && (bytes[start].toInt() and 0xC0) == 0x80) {
+                    start++
+                }
+                if (start > 0) bytes.copyOfRange(start, bytes.size) else bytes
             }
-            stream.use { it.readBytes() }
         } catch (e: Exception) {
             e.stackTraceToString().toByteArray()
         }

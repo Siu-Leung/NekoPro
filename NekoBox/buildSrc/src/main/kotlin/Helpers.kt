@@ -94,7 +94,7 @@ fun Project.setupCommon() {
                     }
                 }
                 getByName("debug") {
-                    applicationIdSuffix = "debug"
+                    applicationIdSuffix = ".debug"
                     debuggable(true)
                     jniDebuggable(true)
                 }

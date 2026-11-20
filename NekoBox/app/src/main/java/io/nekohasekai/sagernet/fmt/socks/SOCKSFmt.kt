@@ -26,12 +26,14 @@ fun parseSOCKS(link: String): SOCKSBean {
         serverPort = url.port
         username = url.username
         password = url.password
-        // v2rayN fmt
+        // v2rayN fmt: only decode when username is valid Base64 of "user:pass"
         if (password.isNullOrBlank() && !username.isNullOrBlank()) {
             try {
                 val n = username!!.decodeBase64UrlSafe()
-                username = n.substringBefore(":")
-                password = n.substringAfter(":")
+                if (n.contains(":") && !n.contains('\uFFFD') && n.all { it >= ' ' }) {
+                    username = n.substringBefore(":")
+                    password = n.substringAfter(":")
+                }
             } catch (_: Exception) {
             }
         }
@@ -44,7 +46,7 @@ fun SOCKSBean.toUri(): String {
     if (!username.isNullOrBlank()) builder.username(username!!)
     if (!password.isNullOrBlank()) builder.password(password!!)
     if (!name.isNullOrBlank()) builder.encodedFragment(name!!.urlSafe())
-    return builder.toLink("socks${protocolVersion()}")
+    return builder.toLink("socks${protocolVersionName()}")
 
 }
 

@@ -30,8 +30,8 @@ jobs:
     name: Go tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26.7'
           cache-dependency-path: |
@@ -46,11 +46,11 @@ jobs:
       - name: Test sing-box
         working-directory: sing-box
         run: |
-          PKGS=$(go list -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' ./... | grep -v '/common/netns$')
-          go test -ldflags='-checklinkname=0' -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' $PKGS
+          PKGS=$(go list -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,no_tailscale' ./... | grep -v '/common/netns$')
+          go test -ldflags='-checklinkname=0' -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,no_tailscale' $PKGS
       - name: Test libcore
         working-directory: NekoBox/libcore
-        run: go test -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' ./...
+        run: go test -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,no_tailscale' ./...
 
   android-build:
     name: Android build
@@ -59,13 +59,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26.7'
           cache-dependency-path: NekoBox/libcore/go.sum
@@ -90,7 +90,7 @@ jobs:
           test -n "$RELEASE_KEYSTORE_B64"
           printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/nekopro-release.keystore"
           chmod 600 "$RUNNER_TEMP/nekopro-release.keystore"
-      - name: Test and build signed APKs
+      - name: Test, lint, and build signed APKs
         working-directory: NekoBox
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/nekopro-release.keystore
@@ -99,7 +99,7 @@ jobs:
           ALIAS_PASS: ${{ secrets.RELEASE_KEY_PASS }}
         run: |
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
-          bash ./gradlew :app:testOssReleaseUnitTest assembleOssRelease --no-daemon
+          bash ./gradlew :app:testOssReleaseUnitTest :app:lintVitalOssRelease assembleOssRelease --no-daemon
           mkdir -p app/build/outputs/apk/oss/release/checksums
           cd app/build/outputs/apk/oss/release
           test "$(find . -maxdepth 1 -name '*.apk' | wc -l)" -eq 4
@@ -109,7 +109,7 @@ jobs:
           done
           md5sum ./*.apk > checksums/MD5SUMS.txt
           sha256sum ./*.apk > checksums/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: NekoPro-signed-apks
           path: |
@@ -201,7 +201,7 @@ jobs:
           echo "Resolved release metadata: should_release=${should_release} tag_name=${tag_name} has_notes=${has_notes}"
       - name: Publish GitHub Release
         if: steps.release_meta.outputs.should_release == 'true' && steps.release_meta.outputs.tag_name != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.release_meta.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
