@@ -611,7 +611,6 @@ object RawUpdater : GroupUpdater() {
                                         "psk" -> bean.psk = rawVal.toString()
                                         "version" -> bean.version = rawVal.toString().toIntOrNull() ?: 4
                                         "mode" -> bean.mode = rawVal.toString()
-                                        "udp" -> bean.udp = rawVal.toString().equals("true", ignoreCase = true)
                                         "obfs-opts" -> {
                                             (rawVal as? Map<*, *>)?.let { obfs ->
                                                 bean.obfsMode = obfs["mode"]?.toString() ?: "none"

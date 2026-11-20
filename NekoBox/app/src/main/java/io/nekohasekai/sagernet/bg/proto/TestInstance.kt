@@ -6,13 +6,13 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
-import io.nekohasekai.sagernet.ktx.tryResume
-import io.nekohasekai.sagernet.ktx.tryResumeWithException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
     BoxInstance(profile) {
@@ -29,7 +29,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
         return suspendCancellableCoroutine { c ->
             processes = GuardedProcessPool {
                 Logs.w(it)
-                c.tryResumeWithException(it)
+                if (c.isActive) c.resumeWithException(it)
             }
             val job = runOnDefaultDispatcher {
                 try {
@@ -39,9 +39,10 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                         // wait for plugin start
                         delay(500)
                     }
-                    c.tryResume(Libcore.urlTest(box, link, timeout))
+                    val result = Libcore.urlTest(box, link, timeout)
+                    if (c.isActive) c.resume(result)
                 } catch (e: Exception) {
-                    c.tryResumeWithException(e)
+                    if (c.isActive) c.resumeWithException(e)
                 } finally {
                     closeOnce()
                 }
