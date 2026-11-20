@@ -4810,6 +4810,7 @@ public class SingBoxOptions {
         public Integer server_port;
         public String port_range;
         public String transport;
+        public Integer mtu;
         public Boolean udp;
         public String username;
         public String password;

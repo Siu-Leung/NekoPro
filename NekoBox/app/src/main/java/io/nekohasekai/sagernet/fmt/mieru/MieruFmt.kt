@@ -29,6 +29,7 @@ fun buildSingBoxOutboundMieruBean(bean: MieruBean): SingBoxOptions.Outbound_Mier
         server = bean.serverAddress?.trim()?.removeSurrounding("[", "]")
         server_port = bean.serverPort
         transport = (bean.protocol?.trim()?.uppercase()).takeUnless { it.isNullOrEmpty() } ?: "TCP"
+        if (transport == "UDP") mtu = bean.mtu ?: 1400
         udp = true
         username = bean.username ?: ""
         password = bean.password ?: ""

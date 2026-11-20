@@ -64,6 +64,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		PortRange:      portRange,
 		Transport:      transport,
 		UDP:            udpEnabled,
+		MTU:            options.MTU,
 		UserName:       options.UserName,
 		Password:       options.Password,
 		Multiplexing:   strings.TrimSpace(options.Multiplexing),

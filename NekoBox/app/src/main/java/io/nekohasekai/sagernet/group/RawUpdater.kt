@@ -36,6 +36,9 @@ import org.yaml.snakeyaml.error.YAMLException
 import java.io.StringReader
 import androidx.core.net.toUri
 import androidx.room.withTransaction
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 @Suppress("EXPERIMENTAL_API_USAGE")
 object RawUpdater : GroupUpdater() {
@@ -66,7 +69,7 @@ object RawUpdater : GroupUpdater() {
                 sb.toString()
             }
 
-            proxies = contentText?.let { parseRaw(contentText) }
+            proxies = contentText?.let { parseSubscription(it) }
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
         } else {
 
@@ -99,7 +102,7 @@ object RawUpdater : GroupUpdater() {
                         setURL(subscription.link)
                         setUserAgent(candidate)
                     }.execute()
-                    val parsed = parseRaw(Util.getStringBox(response.contentString))
+                    val parsed = parseSubscription(Util.getStringBox(response.contentString))
                     if (parsed.isNullOrEmpty()) {
                         throw IllegalStateException("no proxies found with UA: $candidate")
                     }
@@ -114,6 +117,8 @@ object RawUpdater : GroupUpdater() {
                         }
                     }
                     break
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: SubscriptionFoundException) {
                     throw e
                 } catch (e: Throwable) {
@@ -288,12 +293,25 @@ object RawUpdater : GroupUpdater() {
         )
     }
 
+    suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? =
+        parseRaw(text, fileName, forSubscription = false)
+
+    internal suspend fun parseSubscription(text: String): List<AbstractBean>? {
+        currentCoroutineContext().ensureActive()
+        return parseRaw(text, "", forSubscription = true).also {
+            currentCoroutineContext().ensureActive()
+        }
+    }
+
+    // Recognize YAML-looking declarations without treating URI substrings as malformed YAML.
+    private val clashProxiesKey = Regex("""(?m)^[\t ]*(?:\{[\t ]*)?(?:proxies|"proxies"|'proxies')[\t ]*:""")
+
     @Suppress("UNCHECKED_CAST")
-    suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? {
-
+    private suspend fun parseRaw(text: String, fileName: String, forSubscription: Boolean): List<AbstractBean>? {
         val proxies = mutableListOf<AbstractBean>()
+        val hasClashDeclaration = forSubscription && clashProxiesKey.containsMatchIn(text)
 
-        if (text.contains("proxies:")) {
+        if (hasClashDeclaration || (!forSubscription && text.contains("proxies:"))) {
 
             // clash & meta
 
@@ -850,8 +868,13 @@ object RawUpdater : GroupUpdater() {
                             }
                         }
                     }.onFailure { err ->
+                        if (err is CancellationException || forSubscription) throw err
                         Logs.w("Skip malformed proxy entry in YAML: ${err.readableMessage}")
                     }
+                }
+
+                if (forSubscription && proxies.size != rawProxies.size) {
+                    error("Incomplete Clash subscription: parsed ${proxies.size} of ${rawProxies.size} entries")
                 }
 
                 // Fix ent
@@ -871,6 +894,7 @@ object RawUpdater : GroupUpdater() {
                 }
                 return proxies
             } catch (e: YAMLException) {
+                if (forSubscription) error("Malformed Clash subscription YAML")
                 Logs.w(e)
             }
         } else if (text.contains("[Interface]")) {

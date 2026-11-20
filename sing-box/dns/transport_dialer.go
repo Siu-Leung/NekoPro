@@ -10,17 +10,21 @@ import (
 
 func NewLocalDialer(ctx context.Context, options option.LocalDNSServerOptions) (N.Dialer, error) {
 	return dialer.NewWithOptions(dialer.Options{
-		Context:        ctx,
-		Options:        options.DialerOptions,
-		DirectResolver: true,
+		Context:                 ctx,
+		Options:                 options.DialerOptions,
+		DirectResolver:          true,
+		DefaultOutbound:         options.LegacyDNSDialer && options.Detour == "",
+		DisableEmptyDirectCheck: options.LegacyDNSDialer,
 	})
 }
 
 func NewRemoteDialer(ctx context.Context, options option.RemoteDNSServerOptions) (N.Dialer, error) {
 	return dialer.NewWithOptions(dialer.Options{
-		Context:        ctx,
-		Options:        options.DialerOptions,
-		RemoteIsDomain: options.ServerIsDomain(),
-		DirectResolver: true,
+		Context:                 ctx,
+		Options:                 options.DialerOptions,
+		RemoteIsDomain:          options.ServerIsDomain(),
+		DirectResolver:          true,
+		DefaultOutbound:         options.LegacyDNSDialer && options.Detour == "",
+		DisableEmptyDirectCheck: options.LegacyDNSDialer,
 	})
 }

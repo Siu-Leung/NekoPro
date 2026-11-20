@@ -7,7 +7,7 @@ import org.junit.Test
 class SingBoxDnsServerParserTest {
 
     @Test
-    fun parsesHttpsDomainWithDetourWithoutDomainResolver() {
+    fun parsesHttpsDomainWithDetourAndExplicitDomainResolver() {
         val server = SingBoxDnsServerParser.parse(
             rawAddress = "https://dns.google/dns-query",
             tag = "dns-remote",
@@ -20,8 +20,22 @@ class SingBoxDnsServerParserTest {
         assertNull(server.server_port)
         assertEquals("/dns-query", server.path)
         assertEquals("proxy", server.detour)
-        assertNull(server.domain_resolver)
+        assertEquals("dns-direct", server.domain_resolver)
         assertNull(server.address)
+    }
+
+    @Test
+    fun parsesHttpsDomainWithDetourWithoutDomainResolver() {
+        for (resolver in listOf(null, "", " ")) {
+            val server = SingBoxDnsServerParser.parse(
+                rawAddress = "https://dns.google/dns-query",
+                tag = "dns-remote",
+                defaultDetour = "proxy",
+                domainResolver = resolver,
+            )
+            assertEquals("proxy", server.detour)
+            assertNull(server.domain_resolver)
+        }
     }
 
     @Test

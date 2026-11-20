@@ -1,14 +1,19 @@
 package dns
 
 import (
+	"github.com/sagernet/sing-box/adapter"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"net/netip"
 )
 
 type TransportAdapter struct {
-	transportType string
-	transportTag  string
-	dependencies  []string
-	references    []string
+	transportType      string
+	transportTag       string
+	dependencies       []string
+	references         []string
+	legacyStrategy     C.DomainStrategy
+	legacyClientSubnet netip.Prefix
 }
 
 func NewTransportAdapter(transportType string, transportTag string, dependencies []string) TransportAdapter {
@@ -29,10 +34,12 @@ func NewTransportAdapterWithLocalOptions(transportType string, transportTag stri
 		references = []string{localOptions.Detour}
 	}
 	return TransportAdapter{
-		transportType: transportType,
-		transportTag:  transportTag,
-		dependencies:  dependencies,
-		references:    references,
+		transportType:      transportType,
+		transportTag:       transportTag,
+		dependencies:       dependencies,
+		references:         references,
+		legacyStrategy:     localOptions.LegacyDNSStrategy,
+		legacyClientSubnet: localOptions.LegacyDNSClientSubnet,
 	}
 }
 
@@ -46,10 +53,12 @@ func NewTransportAdapterWithRemoteOptions(transportType string, transportTag str
 		references = []string{remoteOptions.Detour}
 	}
 	return TransportAdapter{
-		transportType: transportType,
-		transportTag:  transportTag,
-		dependencies:  dependencies,
-		references:    references,
+		transportType:      transportType,
+		transportTag:       transportTag,
+		dependencies:       dependencies,
+		references:         references,
+		legacyStrategy:     remoteOptions.LegacyDNSStrategy,
+		legacyClientSubnet: remoteOptions.LegacyDNSClientSubnet,
 	}
 }
 
@@ -67,4 +76,15 @@ func (a *TransportAdapter) Dependencies() []string {
 
 func (a *TransportAdapter) References() []string {
 	return a.references
+}
+
+// ApplyLegacyDNSDefaults applies the legacy server's query options only when
+// the caller or a DNS rule did not supply an override.
+func (a *TransportAdapter) ApplyLegacyDNSDefaults(options *adapter.DNSQueryOptions) {
+	if options.Strategy == C.DomainStrategyAsIS {
+		options.Strategy = a.legacyStrategy
+	}
+	if !options.ClientSubnet.IsValid() && !options.RemoveClientSubnet {
+		options.ClientSubnet = a.legacyClientSubnet
+	}
 }

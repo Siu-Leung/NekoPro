@@ -34,6 +34,7 @@ type MieruOption struct {
 	Port           int    `proxy:"port,omitempty"`
 	PortRange      string `proxy:"port-range,omitempty"`
 	Transport      string `proxy:"transport"`
+	MTU            int32  `proxy:"mtu,omitempty"`
 	UDP            bool   `proxy:"udp,omitempty"`
 	UserName       string `proxy:"username"`
 	Password       string `proxy:"password"`
@@ -283,6 +284,9 @@ func buildMieruClientConfig(option MieruOption) (*mieruclient.ClientConfig, erro
 	}
 	if handshakeMode, ok := mierupb.HandshakeMode_value[option.HandshakeMode]; ok {
 		config.Profile.HandshakeMode = (*mierupb.HandshakeMode)(&handshakeMode)
+	}
+	if option.Transport == "UDP" && option.MTU != 0 {
+		config.Profile.Mtu = proto.Int32(option.MTU)
 	}
 	if option.TrafficPattern != "" {
 		trafficPattern, _ := mierutp.Decode(option.TrafficPattern)

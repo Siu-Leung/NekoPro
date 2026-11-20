@@ -113,8 +113,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	service.MustRegister[adapter.PlatformInterface](ctx, boxPlatformInterfaceInstance)
 
 	// parse options
-	var options option.Options
-	err = options.UnmarshalJSONContext(ctx, []byte(config))
+	options, err := decodeLegacyDNSConfig(ctx, config)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
@@ -163,8 +162,7 @@ func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b 
 	// mihomo protect/DNS hooks from the main instance
 	ctx = mihomo_adapter.ContextWithTestInstance(ctx)
 
-	var options option.Options
-	err = options.UnmarshalJSONContext(ctx, []byte(config))
+	options, err := decodeLegacyDNSConfig(ctx, config)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)

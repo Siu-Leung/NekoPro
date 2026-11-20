@@ -45,6 +45,7 @@ type Router struct {
 	rawRules              []option.DNSRule
 	rules                 []adapter.DNSRule
 	defaultDomainStrategy C.DomainStrategy
+	legacyServerStrategy  bool
 	dnsReverseMapping     *freelru.Cache[netip.Addr, string]
 	platformInterface     adapter.PlatformInterface
 	legacyDNSMode         bool
@@ -63,6 +64,12 @@ func NewRouter(ctx context.Context, logFactory log.Factory, options option.DNSOp
 		rawRules:              make([]option.DNSRule, 0, len(options.Rules)),
 		rules:                 make([]adapter.DNSRule, 0, len(options.Rules)),
 		defaultDomainStrategy: C.DomainStrategy(options.Strategy),
+	}
+	for _, server := range options.Servers {
+		if legacy, ok := server.Options.(interface{ HasLegacyDNSStrategy() bool }); ok && legacy.HasLegacyDNSStrategy() {
+			router.legacyServerStrategy = true
+			break
+		}
 	}
 	if options.DNSClientOptions.IndependentCache {
 		deprecated.Report(ctx, deprecated.OptionIndependentDNSCache)
@@ -180,7 +187,7 @@ func (r *Router) buildRules(startRules bool) ([]adapter.DNSRule, bool, dnsRuleMo
 		}
 	}
 	router := service.FromContext[adapter.Router](r.ctx)
-	legacyDNSMode, modeFlags, err := resolveLegacyDNSMode(router, r.rawRules, nil)
+	legacyDNSMode, modeFlags, err := r.resolveLegacyDNSMode(router, nil)
 	if err != nil {
 		return nil, false, dnsRuleModeFlags{}, err
 	}
@@ -246,7 +253,7 @@ func (r *Router) ValidateRuleSetMetadataUpdate(tag string, metadata adapter.Rule
 		return nil
 	}
 	if !started {
-		candidateLegacyDNSMode, _, err := resolveLegacyDNSMode(router, r.rawRules, overrides)
+		candidateLegacyDNSMode, _, err := r.resolveLegacyDNSMode(router, overrides)
 		if err != nil {
 			return err
 		}
@@ -256,7 +263,7 @@ func (r *Router) ValidateRuleSetMetadataUpdate(tag string, metadata adapter.Rule
 		}
 		return nil
 	}
-	candidateLegacyDNSMode, flags, err := resolveLegacyDNSMode(router, r.rawRules, overrides)
+	candidateLegacyDNSMode, flags, err := r.resolveLegacyDNSMode(router, overrides)
 	if err != nil {
 		return err
 	}
@@ -513,7 +520,7 @@ func (r *Router) launchDNSEvaluate(ctx context.Context, state *dnsRuleWalkState,
 		done:      make(chan struct{}),
 	}
 	state.futures = append(state.futures, future)
-	r.client.ExchangeAsync(exchangeCtx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, err error) {
+	r.client.ExchangeAsync(exchangeCtx, transport, message, r.finalizeExchangeOptions(transport, options), nil, func(response *mDNS.Msg, err error) {
 		future.response = response
 		future.err = err
 		close(future.done)
@@ -565,7 +572,8 @@ func dnsRefusedResponse(message *mDNS.Msg) *mDNS.Msg {
 	}
 }
 
-func (r *Router) finalizeExchangeOptions(options adapter.DNSQueryOptions) adapter.DNSQueryOptions {
+func (r *Router) finalizeExchangeOptions(transport adapter.DNSTransport, options adapter.DNSQueryOptions) adapter.DNSQueryOptions {
+	applyLegacyDNSDefaults(transport, &options)
 	if options.Strategy == C.DomainStrategyAsIS {
 		options.Strategy = r.defaultDomainStrategy
 	}
@@ -912,7 +920,7 @@ func (r *Router) finishPendingExchange(ctx context.Context, message *mDNS.Msg, s
 			err:       pending.future.err,
 		}
 	}
-	response, err := r.client.Exchange(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil)
+	response, err := r.client.Exchange(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.transport, pending.options), nil)
 	return exchangeWithRulesResult{
 		response:  response,
 		transport: pending.transport,
@@ -931,7 +939,7 @@ func (r *Router) exchangeWithRulesAsync(ctx context.Context, rules []adapter.DNS
 	if suspension.pending != nil && suspension.pending.future == nil {
 		cancelDNSFutures(state)
 		pending := suspension.pending
-		r.client.ExchangeAsync(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil, func(response *mDNS.Msg, err error) {
+		r.client.ExchangeAsync(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.transport, pending.options), nil, func(response *mDNS.Msg, err error) {
 			callback(exchangeWithRulesResult{
 				response:  response,
 				transport: pending.transport,
@@ -1165,7 +1173,7 @@ func (r *Router) exchangeLegacy(ctx context.Context, exchangeCtx *dnsExchangeCon
 			}
 		}
 		responseCheck := addressLimitResponseCheck(rule, exchangeCtx.metadata)
-		response, err := r.client.Exchange(dnsCtx, transport, message, r.finalizeExchangeOptions(dnsOptions), responseCheck)
+		response, err := r.client.Exchange(dnsCtx, transport, message, r.finalizeExchangeOptions(transport, dnsOptions), responseCheck)
 		var rejected bool
 		if err != nil {
 			if errors.Is(err, ErrResponseRejectedCached) {
@@ -1199,7 +1207,7 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 	)
 	if options.Transport != nil {
 		transport = options.Transport
-		response, err = r.client.Exchange(ctx, transport, message, r.finalizeExchangeOptions(options), nil)
+		response, err = r.client.Exchange(ctx, transport, message, r.finalizeExchangeOptions(transport, options), nil)
 	} else if !exchangeCtx.legacyDNSMode {
 		exchangeResult := r.exchangeWithRules(ctx, exchangeCtx.rules, message, options, true)
 		response, transport, err = exchangeResult.response, exchangeResult.transport, exchangeResult.err
@@ -1222,7 +1230,7 @@ func (r *Router) ExchangeAsync(ctx context.Context, message *mDNS.Msg, options a
 	ctx = exchangeCtx.ctx
 	if options.Transport != nil {
 		transport := options.Transport
-		r.client.ExchangeAsync(ctx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, exchangeErr error) {
+		r.client.ExchangeAsync(ctx, transport, message, r.finalizeExchangeOptions(transport, options), nil, func(response *mDNS.Msg, exchangeErr error) {
 			r.finishExchangeAsync(message, transport, response, exchangeErr, callback)
 		})
 	} else if !exchangeCtx.legacyDNSMode {
@@ -1289,9 +1297,7 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
 	metadata.DestinationAddressMatchFromResponse = false
 	if options.Transport != nil {
 		transport := options.Transport
-		if options.Strategy == C.DomainStrategyAsIS {
-			options.Strategy = r.defaultDomainStrategy
-		}
+		options = r.finalizeExchangeOptions(transport, options)
 		responseAddrs, err = r.client.Lookup(ctx, transport, domain, options, nil)
 	} else if !legacyDNSMode {
 		responseAddrs, err = r.lookupWithRules(ctx, rules, domain, options)
@@ -1329,9 +1335,7 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
 				}
 			}
 			responseCheck := addressLimitResponseCheck(rule, metadata)
-			if dnsOptions.Strategy == C.DomainStrategyAsIS {
-				dnsOptions.Strategy = r.defaultDomainStrategy
-			}
+			dnsOptions = r.finalizeExchangeOptions(transport, dnsOptions)
 			responseAddrs, err = r.client.Lookup(dnsCtx, transport, domain, dnsOptions, responseCheck)
 			if responseCheck == nil || err == nil {
 				break
@@ -1429,6 +1433,13 @@ func (f *dnsRuleModeFlags) merge(other dnsRuleModeFlags) {
 	f.disabled = f.disabled || other.disabled
 	f.needed = f.needed || other.needed
 	f.neededFromStrategy = f.neededFromStrategy || other.neededFromStrategy
+}
+
+// Prefer the old lookup pipeline for legacy per-server strategy when the
+// rules allow it. New-only rules still use the modern per-query-type pipeline.
+func (r *Router) resolveLegacyDNSMode(router adapter.Router, overrides map[string]adapter.RuleSetMetadata) (bool, dnsRuleModeFlags, error) {
+	legacy, flags, err := resolveLegacyDNSMode(router, r.rawRules, overrides)
+	return legacy || r.legacyServerStrategy && !flags.disabled, flags, err
 }
 
 func resolveLegacyDNSMode(router adapter.Router, rules []option.DNSRule, metadataOverrides map[string]adapter.RuleSetMetadata) (bool, dnsRuleModeFlags, error) {
@@ -1771,5 +1782,13 @@ func dnsRuleRace(rule option.DNSRule) bool {
 		return rule.LogicalOptions.Race
 	default:
 		return false
+	}
+}
+
+func applyLegacyDNSDefaults(transport adapter.DNSTransport, options *adapter.DNSQueryOptions) {
+	if legacy, ok := transport.(interface {
+		ApplyLegacyDNSDefaults(*adapter.DNSQueryOptions)
+	}); ok {
+		legacy.ApplyLegacyDNSDefaults(options)
 	}
 }

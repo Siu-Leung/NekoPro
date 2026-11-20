@@ -7,6 +7,7 @@ type MieruOutboundOptions struct {
 	ServerOptions
 	PortRange      string `json:"port_range,omitempty"`
 	Transport      string `json:"transport"` // TCP or UDP
+	MTU            int32  `json:"mtu,omitempty"`
 	UDP            *bool  `json:"udp,omitempty"`
 	UserName       string `json:"username"`
 	Password       string `json:"password"`

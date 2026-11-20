@@ -555,7 +555,7 @@
     <string name="speed_test_rate_mbps">%1$.2f Mbps</string>
     <string name="speed_test_finished_summary">已完成：%1$d，失败：%2$d，已取消：%3$d</string>
     <string name="branch_info">Neko Pro 版本信息</string>
-    <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.14.4 加固版主内核（原生 Snell / AnyTLS 与 1.14 新版 DNS），并内置 mihomo 1.19.34+ 与 sing-juicity 现代协议适配。</string>
+    <string name="branch_desc_detail">基于 MatsuriDayo/NekoBoxForAndroid 深度定制。采用 sing-box 1.14.4 加固版主内核（原生 Snell / AnyTLS 与 1.14 新版 DNS），并内置 mihomo 1.19.34 与 sing-juicity 现代协议适配。</string>
     <string name="supported_protocols">实际支持协议</string>
     <string name="route_mode_rule">智能分流 (Rule)</string>
     <string name="route_mode_global">全局代理 (Global)</string>

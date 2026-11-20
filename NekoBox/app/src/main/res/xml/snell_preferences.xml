@@ -56,15 +56,4 @@
             app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
-    <PreferenceCategory app:title="TLS Fingerprint">
-        <moe.matsuri.nb4a.ui.SimpleMenuPreference
-            app:defaultValue=""
-            app:entries="@array/utls_fingerprint_entry"
-            app:entryValues="@array/utls_fingerprint_entry"
-            app:icon="@drawable/ic_baseline_fingerprint_24"
-            app:key="clientFingerprint"
-            app:title="Client Fingerprint (uTLS)"
-            app:useSimpleSummaryProvider="true" />
-    </PreferenceCategory>
-
 </PreferenceScreen>

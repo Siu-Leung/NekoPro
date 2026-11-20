@@ -76,7 +76,7 @@ fun buildConfig(
         val bean = proxy.requireBean() as ConfigBean
         if (bean.type == 0) {
             return ConfigBuildResult(
-                bean.config!!,
+                bean.config!!, // Compatibility is applied only when libcore decodes this config.
                 listOf(),
                 proxy.id, //
                 mapOf(TAG_PROXY to listOf(proxy)), //

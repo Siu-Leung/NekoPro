@@ -85,7 +85,8 @@ object SingBoxDnsServerParser {
             }
             if (effectiveDetour != null) {
                 this.detour = effectiveDetour
-            } else if (!isIpLiteral(host) && !domainResolver.isNullOrBlank()) {
+            }
+            if (!isIpLiteral(host) && !domainResolver.isNullOrBlank()) {
                 this.domain_resolver = domainResolver
             }
         }

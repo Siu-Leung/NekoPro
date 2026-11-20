@@ -183,6 +183,20 @@ type HostsDNSServerOptions struct {
 
 type RawLocalDNSServerOptions struct {
 	DialerOptions
+	// Runtime-only NekoBox compatibility. Never accepted as typed JSON fields.
+	LegacyDNSDialer       bool             `json:"-"`
+	LegacyDNSStrategy     C.DomainStrategy `json:"-"`
+	LegacyDNSClientSubnet netip.Prefix     `json:"-"`
+}
+
+func (o *RawLocalDNSServerOptions) SetLegacyDNSOptions(strategy C.DomainStrategy, subnet netip.Prefix) {
+	o.LegacyDNSDialer = true
+	o.LegacyDNSStrategy = strategy
+	o.LegacyDNSClientSubnet = subnet
+}
+
+func (o *RawLocalDNSServerOptions) HasLegacyDNSStrategy() bool {
+	return o.LegacyDNSStrategy != C.DomainStrategyAsIS
 }
 
 type LocalDNSServerOptions struct {
