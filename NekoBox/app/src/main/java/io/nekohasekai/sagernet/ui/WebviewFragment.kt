@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.WebViewUtil
+import java.net.URI
 import org.json.JSONObject
 
 internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
@@ -31,6 +33,17 @@ internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
     // Passing a complete URL as hostname makes URL.hostname invalid and the
     // SPA renders a blank dashboard despite a successful HTTP handshake.
     return "${base}?hostname=127.0.0.1&port=9090&secret=$secret"
+}
+
+internal fun isLocalDashboardUrl(url: String): Boolean {
+    return url.trim().startsWith("http://127.0.0.1:9090/ui")
+}
+
+internal fun isSameLocalDashboardOrigin(targetUrl: String): Boolean {
+    val parsed = runCatching { URI(targetUrl.trim()) }.getOrNull() ?: return false
+    return parsed.scheme?.equals("http", ignoreCase = true) == true &&
+        parsed.host == "127.0.0.1" &&
+        parsed.port == 9090
 }
 
 private fun isAllowedDashboardUrl(url: String): Boolean {
@@ -103,24 +116,29 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             }
         }
         mWebView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView?, request: WebResourceRequest?
-            ): Boolean {
-                val targetUrl = request?.url?.toString() ?: return true
-                if (!isAllowedDashboardUrl(targetUrl)) {
+            private fun handleNavigation(targetUrl: String?): Boolean {
+                if (targetUrl.isNullOrBlank() || !isAllowedDashboardUrl(targetUrl)) {
                     Logs.w("Blocked non-HTTP(S) WebView navigation")
+                    return true
+                }
+                if (isLocalDashboardUrl(DataStore.yacdURL) && !isSameLocalDashboardOrigin(targetUrl)) {
+                    runCatching {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
+                    }.onFailure { Logs.w(it) }
                     return true
                 }
                 return false
             }
 
+            override fun shouldOverrideUrlLoading(
+                view: WebView?, request: WebResourceRequest?
+            ): Boolean {
+                return handleNavigation(request?.url?.toString())
+            }
+
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                if (url == null || !isAllowedDashboardUrl(url)) {
-                    Logs.w("Blocked non-HTTP(S) WebView navigation")
-                    return true
-                }
-                return false
+                return handleNavigation(url)
             }
 
             override fun onReceivedError(

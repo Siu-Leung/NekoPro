@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,3 +248,37 @@ type closeNotifyReader struct {
 }
 
 func (r closeNotifyReader) Close() error { close(r.closed); return nil }
+
+func TestHTTPForceSocks5NeverFallsBackToDirect(t *testing.T) {
+	var directHits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directHits.Add(1)
+		_, _ = w.Write([]byte("leaked"))
+	}))
+	defer server.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedPort := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	client := NewHttpClient().(*httpClient)
+	client.timeout = 2 * time.Second
+	client.ForceSocks5(int32(closedPort))
+	client.TryH3Direct()
+	defer client.Close()
+
+	req := client.NewRequest()
+	if err := req.SetURL(server.URL); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := req.Execute()
+	if err == nil || resp != nil {
+		t.Fatalf("expected ForceSocks5 error on unreachable proxy, got resp=%v err=%v", resp, err)
+	}
+	if directHits.Load() != 0 {
+		t.Fatalf("ForceSocks5 leaked %d direct request(s)", directHits.Load())
+	}
+}

@@ -40,7 +40,8 @@ type MieruOption struct {
 	Password       string `proxy:"password"`
 	Multiplexing   string `proxy:"multiplexing,omitempty"`
 	HandshakeMode  string `proxy:"handshake-mode,omitempty"`
-	TrafficPattern string `proxy:"traffic-pattern,omitempty"`
+	TrafficPattern string                  `proxy:"traffic-pattern,omitempty"`
+	Resolver       mierucommon.DNSResolver `proxy:"-"`
 }
 
 type mieruPacketDialer struct {
@@ -127,7 +128,11 @@ func (m *Mieru) ensureClientIsRunning() error {
 	}
 	config.Dialer = m.dialer
 	config.PacketDialer = mieruPacketDialer{Dialer: m.dialer}
-	config.Resolver = mieruDNSResolver{prefer: m.prefer}
+	if m.option.Resolver != nil {
+		config.Resolver = m.option.Resolver
+	} else {
+		config.Resolver = mieruDNSResolver{prefer: m.prefer}
+	}
 	if err := m.client.Store(config); err != nil {
 		return err
 	}

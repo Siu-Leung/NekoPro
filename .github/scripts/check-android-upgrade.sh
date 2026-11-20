@@ -7,6 +7,7 @@ adb_cmd=(adb -s "$serial")
 [[ $("${adb_cmd[@]}" shell getprop ro.kernel.qemu | tr -d '\r') == 1 ]]
 old_apk=${1:?previous signed APK required}
 new_apk=${2:?candidate signed APK required}
+expected_version=${3:-Neko-Pro-1.3.0}
 pkg=moe.nb4a.siu
 activity=$pkg/io.nekohasekai.sagernet.ui.MainActivity
 marker=NekoPro-Upgrade-Smoke
@@ -51,10 +52,10 @@ wait_for_view text "$marker" >/dev/null
 "${adb_cmd[@]}" shell am force-stop "$pkg"
 "${adb_cmd[@]}" install -r -g "$new_apk"
 package_info=$("${adb_cmd[@]}" shell dumpsys package "$pkg")
-if ! grep -Eq '^[[:space:]]+versionName=Neko-Pro-1\.3\.0[[:space:]]*$' <<< "$package_info"; then
-  echo 'Installed version is not Neko-Pro-1.3.0.' >&2
+if ! grep -Fq "versionName=${expected_version}" <<< "$package_info"; then
+  echo "Installed version is not ${expected_version}." >&2
   exit 1
 fi
 "${adb_cmd[@]}" shell am start -W -n "$activity"
 wait_for_view text "$marker" >/dev/null
-printf '%s\n' 'Signed v1.2.2 → v1.3.0 in-place upgrade preserved the imported test profile.'
+printf 'Signed v1.2.2 -> %s in-place upgrade preserved the imported test profile.\n' "$expected_version"

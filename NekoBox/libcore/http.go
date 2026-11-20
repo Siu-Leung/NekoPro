@@ -54,6 +54,7 @@ type HTTPClient interface {
 	PinnedTLS12()
 	PinnedSHA256(sumHex string)
 	TrySocks5(port int32)
+	ForceSocks5(port int32)
 	TryH3Direct()
 	KeepAlive()
 	NewRequest() HTTPRequest
@@ -94,6 +95,7 @@ type httpClient struct {
 	h1h2Transport      http.Transport
 	h1h2Client         http.Client
 	trySocks5          bool
+	forceSocks5        bool
 	tryH3Direct        bool
 	timeout            time.Duration
 }
@@ -164,12 +166,17 @@ func (c *httpClient) PinnedSHA256(sumHex string) {
 }
 
 func (c *httpClient) TrySocks5(port int32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	c.h1h2Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c.mu.Lock()
+		tryH3 := c.tryH3Direct
+		c.mu.Unlock()
 		for {
 			socksConn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:"+strconv.Itoa(int(port)))
 			if err != nil {
-				if c.tryH3Direct {
+				if tryH3 {
 					return nil, errFailConnectSocks5
 				}
 				break
@@ -179,7 +186,7 @@ func (c *httpClient) TrySocks5(port int32) {
 			_ = socksConn.SetDeadline(time.Time{})
 			if err != nil {
 				_ = socksConn.Close()
-				if c.tryH3Direct {
+				if tryH3 {
 					return nil, errFailConnectSocks5
 				}
 				break
@@ -189,13 +196,45 @@ func (c *httpClient) TrySocks5(port int32) {
 		return dialer.DialContext(ctx, network, addr)
 	}
 	c.trySocks5 = true
+	c.forceSocks5 = false
+}
+
+// ForceSocks5 routes all requests strictly through the local SOCKS5 proxy and
+// fails closed without falling back to direct TCP or HTTP/3 connections.
+func (c *httpClient) ForceSocks5(port int32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	c.h1h2Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		socksConn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:"+strconv.Itoa(int(port)))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errFailConnectSocks5, err)
+		}
+		_ = socksConn.SetDeadline(time.Now().Add(10 * time.Second))
+		_, err = socks.ClientHandshake5(socksConn, socks5.CommandConnect, metadata.ParseSocksaddr(addr), "", "")
+		_ = socksConn.SetDeadline(time.Time{})
+		if err != nil {
+			_ = socksConn.Close()
+			return nil, fmt.Errorf("%w: %v", errFailConnectSocks5, err)
+		}
+		return socksConn, nil
+	}
+	c.trySocks5 = true
+	c.forceSocks5 = true
+	c.tryH3Direct = false
 }
 
 func (c *httpClient) TryH3Direct() {
-	c.tryH3Direct = true
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.forceSocks5 {
+		c.tryH3Direct = true
+	}
 }
 
 func (c *httpClient) KeepAlive() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.h1h2Transport.ForceAttemptHTTP2 = true
 	c.h1h2Transport.DisableKeepAlives = false
 	c.h1h2Transport.IdleConnTimeout = 30 * time.Second
@@ -382,8 +421,14 @@ func (r *httpRequest) Execute() (resp HTTPResponse, err error) {
 	if r.request.URL == nil {
 		return nil, errors.New("request URL is not set")
 	}
+	r.mu.Lock()
+	tryH3Direct := r.tryH3Direct
+	trySocks5 := r.trySocks5
+	forceSocks5 := r.forceSocks5
+	r.mu.Unlock()
+
 	// full direct
-	if r.tryH3Direct && !r.trySocks5 {
+	if !forceSocks5 && tryH3Direct && !trySocks5 {
 		return r.doH3Direct()
 	}
 
@@ -401,8 +446,8 @@ func (r *httpRequest) Execute() (resp HTTPResponse, err error) {
 		},
 	)
 	if err != nil {
-		// trySocks5 && tryH3Direct
-		if r.tryH3Direct && errors.Is(err, errFailConnectSocks5) {
+		// trySocks5 && tryH3Direct (never bypass when forceSocks5 is set)
+		if !forceSocks5 && tryH3Direct && errors.Is(err, errFailConnectSocks5) {
 			return r.doH3Direct()
 		}
 		return nil, err

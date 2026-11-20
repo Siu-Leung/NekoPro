@@ -204,7 +204,7 @@ func installSingBoxResolverOnce() {
 	// through the tunnel) must not leak to the direct DNS server.
 	remote := &singBoxResolver{
 		fallback:   resolver.SystemResolver,
-		transports: []string{"dns-remote", "dns-direct", "dns-local"},
+		transports: []string{"dns-remote"},
 		strict:     true,
 	}
 	// Proxy server hostnames and direct destinations use direct DNS.
@@ -292,6 +292,8 @@ func (r *singBoxResolver) lookup(ctx context.Context, host string, strategy boxC
 			}
 			return nil, err
 		}
+	} else if r.strict {
+		return nil, resolver.ErrIPNotFound
 	}
 	if r.fallback != nil {
 		switch strategy {
@@ -369,6 +371,9 @@ func (r *singBoxResolver) ExchangeContext(ctx context.Context, m *mDNS.Msg) (*mD
 		return h.router.Exchange(ctx, m, adapter.DNSQueryOptions{
 			Transport: r.defaultTransport(h),
 		})
+	}
+	if r.strict {
+		return nil, resolver.ErrIPNotFound
 	}
 	if r.fallback != nil {
 		return r.fallback.ExchangeContext(ctx, m)

@@ -95,4 +95,12 @@ func TestUpdateRootCACertsAppendsToSystemPool(t *testing.T) {
 	if systemRoots != beforeInvalid {
 		t.Fatalf("invalid PEM modified systemRoots")
 	}
+
+	// Empty PEM must restore the unmodified system root pool and reject the custom CA.
+	if !UpdateRootCACerts(nil) {
+		t.Fatalf("expected UpdateRootCACerts(nil) to succeed")
+	}
+	if _, err := leafCert.Verify(x509.VerifyOptions{DNSName: "leaf.internal.test"}); err == nil {
+		t.Fatalf("expected custom CA leaf verification to fail after restoring system roots")
+	}
 }

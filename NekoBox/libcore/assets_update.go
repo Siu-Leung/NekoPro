@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/oschwald/maxminddb-golang"
+	geosites "github.com/sagernet/sing-box/common/geosite"
 )
 
 const (
@@ -27,7 +30,7 @@ func UpdateGeoIP() (string, error) {
 }
 
 func UpdateGeoIPWithProxy(socksPort int32) (string, error) {
-	return downloadGeoAsset("geoip.db", GeoIPDownloadURL, socksPort, func() {
+	return downloadGeoAsset("geoip.db", GeoIPDownloadURL, socksPort, validateGeoIPFile, func() {
 		ResetGeoipCache()
 	})
 }
@@ -39,12 +42,30 @@ func UpdateGeoSite() (string, error) {
 }
 
 func UpdateGeoSiteWithProxy(socksPort int32) (string, error) {
-	return downloadGeoAsset("geosite.db", GeoSiteDownloadURL, socksPort, func() {
+	return downloadGeoAsset("geosite.db", GeoSiteDownloadURL, socksPort, validateGeoSiteFile, func() {
 		ResetGeositeCache()
 	})
 }
 
-func downloadGeoAsset(fileName, url string, socksPort int32, onSuccess func()) (string, error) {
+func validateGeoIPFile(path string) error {
+	r, err := maxminddb.Open(path)
+	if err != nil {
+		return fmt.Errorf("invalid geoip.db: %w", err)
+	}
+	defer r.Close()
+	return r.Verify()
+}
+
+func validateGeoSiteFile(path string) error {
+	r, _, err := geosites.Open(path)
+	if err != nil {
+		return fmt.Errorf("invalid geosite.db: %w", err)
+	}
+	closeGeositeReader(r)
+	return nil
+}
+
+func downloadGeoAsset(fileName, url string, socksPort int32, validate func(string) error, onSuccess func()) (string, error) {
 	dst := filepath.Join(externalAssetsPath, fileName)
 	if err := os.MkdirAll(externalAssetsPath, 0755); err != nil {
 		return "", err
@@ -66,7 +87,7 @@ func downloadGeoAsset(fileName, url string, socksPort int32, onSuccess func()) (
 	client := NewHttpClient()
 	client.KeepAlive()
 	if socksPort > 0 && socksPort <= 65535 {
-		client.TrySocks5(socksPort)
+		client.ForceSocks5(socksPort)
 	}
 	defer client.Close()
 
@@ -87,6 +108,11 @@ func downloadGeoAsset(fileName, url string, socksPort int32, onSuccess func()) (
 	}
 	if stat.Size() < geoAssetMinSize {
 		return "", fmt.Errorf("downloaded %s too small: %d bytes", fileName, stat.Size())
+	}
+	if validate != nil {
+		if err := validate(tmp); err != nil {
+			return "", err
+		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		return "", fmt.Errorf("replace %s: %w", fileName, err)
