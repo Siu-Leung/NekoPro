@@ -332,7 +332,7 @@ object IpInfoStore {
                         .post(question.toRequestBody("application/dns-message".toMediaType()))
                         .header("Accept", "application/dns-message").build()
                     val answer = dohClient.read(request, MAX_DNS)
-                        ?: if (boundUnderlying) fallbackDohClient.read(request, MAX_DNS) else null
+                        ?: (if (boundUnderlying) fallbackDohClient.read(request, MAX_DNS) else null)
                         ?: continue
                     parseAnswer(answer, question)?.takeIf(::isUsableEntryIp)?.let {
                         return@withTimeoutOrNull it

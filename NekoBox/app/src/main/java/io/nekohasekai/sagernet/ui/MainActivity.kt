@@ -474,7 +474,7 @@ class MainActivity : ThemedActivity(),
         val old = DataStore.selectedProxy
         DataStore.selectedProxy = id
         DataStore.currentProfile = id
-        onMainDispatcher {
+        runOnUiThread {
             notifyConfigurationSurgeHeader()
         }
         runOnDefaultDispatcher {
