@@ -2043,6 +2043,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
             val profileIpInfo: TextView = view.findViewById(R.id.profile_ip_info)
             val profileIpProbe: TextView = view.findViewById(R.id.profile_ip_probe)
+            val profileSpeedTest: TextView = view.findViewById(R.id.profile_speed_test)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
             val selectedView: View = view.findViewById(R.id.selected_view)
@@ -2109,12 +2110,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
 
-                    view.setOnLongClickListener {
-                        if (!DataStore.runningTest) {
-                            pf.speedTest(proxyEntity)
-                        }
-                        true
-                    }
+                    // 测速改为下方显式按钮；长按不再触发，避免与入口查询/滑动冲突。
                 }
 
                 val bean = proxyEntity.requireBean()
@@ -2156,6 +2152,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val ipInfoText = if (DataStore.showNodeIpOwner) pf.ipInfoLabel(proxyEntity, proxyGroup, hideAddress) else null
                 profileIpInfo.text = ipInfoText.orEmpty()
                 profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
+                profileSpeedTest.isVisible = !select
+                profileSpeedTest.setOnClickListener(if (select) null else View.OnClickListener {
+                    pf.speedTest(proxyEntity)
+                })
                 profileIpProbe.isVisible = !select && DataStore.showNodeIpOwner && pf.supportsCardEntry(proxyEntity)
                 profileIpProbe.setOnClickListener(if (profileIpProbe.isVisible) View.OnClickListener {
                     pf.confirmNodeIpInfo(proxyEntity.id)

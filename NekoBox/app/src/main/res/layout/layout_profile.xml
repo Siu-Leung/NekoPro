@@ -157,22 +157,6 @@
                 android:textColor="?android:attr/textColorSecondary"
                 android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/profile_ip_probe"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:background="?attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp"
-                android:text="@string/card_ip_probe"
-                android:textAppearance="?android:attr/textAppearanceSmall"
-                android:textColor="?attr/accentOrTextSecondary"
-                android:visibility="gone" />
-
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -187,6 +171,41 @@
                     android:layout_height="wrap_content"
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?attr/accentOrTextSecondary" />
+
+                <!-- 测速与查询都是显式按钮：长按容易被误触且与查询抢焦点。 -->
+                <TextView
+                    android:id="@+id/profile_speed_test"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:minHeight="32dp"
+                    android:gravity="center_vertical"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:text="@string/card_speed_test"
+                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    android:textColor="?attr/accentOrTextSecondary"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/profile_ip_probe"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:minHeight="32dp"
+                    android:gravity="center_vertical"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:text="@string/card_ip_probe_short"
+                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    android:textColor="?attr/accentOrTextSecondary"
+                    android:visibility="gone" />
 
                 <LinearLayout
                     android:layout_width="0dp"

@@ -197,3 +197,39 @@ func TestNewOutboundResolverBindsGroupDomainResolverAndFailsClosedOnMissingTag(t
 		t.Fatal("expected error for missing domain_resolver tag")
 	}
 }
+
+func TestTestInstanceNeverPublishesDNSRouter(t *testing.T) {
+	// A temporary box must not become the process-wide mihomo resolver.
+	registryMu.Lock()
+	registry = nil
+	registryMu.Unlock()
+	defer func() {
+		registryMu.Lock()
+		registry = nil
+		registryMu.Unlock()
+		refreshActiveLocked()
+	}()
+
+	router := &stubDNSRouter{addrs: []netip.Addr{netip.MustParseAddr("203.0.113.9")}}
+	transports := &stubDNSTransportManager{byTag: map[string]adapter.DNSTransport{"dns-remote": &stubDNSTransport{tag: "dns-remote"}}}
+
+	ctx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.DNSRouter](ctx, router)
+	service.MustRegister[adapter.DNSTransportManager](ctx, transports)
+	testCtx := ContextWithTestInstance(ctx)
+
+	release := InstallProtectHook(testCtx)
+	if activeDNSRouter.Load() != nil {
+		t.Fatal("test instance published a DNS router")
+	}
+	release()
+
+	mainRelease := InstallProtectHook(ctx)
+	if activeDNSRouter.Load() == nil {
+		t.Fatal("main instance did not publish its DNS router")
+	}
+	mainRelease()
+	if activeDNSRouter.Load() != nil {
+		t.Fatal("released main instance left a stale DNS router")
+	}
+}

@@ -9,4 +9,11 @@
     <string name="card_ip_probe_failed">No verified result. Previous results kept.</string>
     <string name="card_ip_probe_entry_only">Entry updated. Could not verify this node’s exit.</string>
     <string name="card_ip_probe_complete">IP information updated.</string>
+    <string name="card_speed_test">Speed test</string>
+    <string name="card_ip_probe_short">IP / ASN</string>
+    <string name="group_dns_multi_hint">One endpoint per line; the first line is primary and later lines are ordered fallbacks.</string>
+    <plurals name="group_node_dns_count">
+        <item quantity="one">%d endpoint configured</item>
+        <item quantity="other">%d endpoints configured (first is primary)</item>
+    </plurals>
 </resources>

@@ -17,7 +17,13 @@ import (
 	mDNS "github.com/miekg/dns"
 )
 
-const fallbackAttemptTimeout = 2 * time.Second
+// A private DoH mirror should answer quickly; a stalled one must not consume the
+// whole caller deadline. 1.2s leaves room for the next mirror plus the handshake
+// that follows resolution (URL tests run with a ~5s budget).
+const fallbackAttemptTimeout = 1200 * time.Millisecond
+
+// Reported instead of a sub-millisecond budget when the caller's deadline is nearly spent.
+const fallbackMinimumAttempt = 250 * time.Millisecond
 
 type fallbackTransport struct {
 	TransportAdapter
@@ -82,7 +88,14 @@ func (t *fallbackTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*m
 		// Reserve time for every remaining member without extending the caller's deadline.
 		budget := fallbackAttemptTimeout
 		if deadline, ok := ctx.Deadline(); ok {
-			budget = min(budget, time.Until(deadline)/time.Duration(len(*members)-index))
+			remaining := time.Until(deadline)
+			share := remaining / time.Duration(len(*members)-index)
+			// Keep a floor only while the caller still has that much time left;
+			// otherwise fail fast instead of starting a query that cannot finish.
+			if remaining >= fallbackMinimumAttempt {
+				share = max(share, fallbackMinimumAttempt)
+			}
+			budget = min(budget, share)
 		}
 		attempt, cancel := context.WithTimeout(ctx, budget)
 		response, err = exchangeFallbackMember(attempt, member, message.Copy())

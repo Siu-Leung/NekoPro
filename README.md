@@ -29,10 +29,17 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.3`
+`Neko-Pro-1.4.4`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.3)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.3-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.4)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.4-arm64-v8a.apk`
+
+### v1.4.4 改动日志 (2026-11-21)
+
+- **修复：组 DNS 多端点只剩一个**。分组设置里的「节点域名 DNS」编辑器此前沿用 AndroidX 默认单行输入，多行内容被压成一行显示；现在改为多行输入框，并在摘要里显示已配置的端点数量。
+- **修复：点过「IP/归属」后测速和 URL Test 失效**。入口/出口探测会临时创建一个测速盒，它此前按主实例身份注册全局 mihomo DNS 解析器，临时盒关闭后全局解析器指向已销毁的实例。现在测试实例只登记 socket protect，不再改写进程级解析器。
+- **测速改为独立按钮**：卡片底部新增「测速」按钮，长按节点不再触发测速，避免与入口查询和列表滑动冲突。
+- 单次 DNS 回退尝试改为 1.2 秒、URL 测速超时放宽到 8 秒，给多端点解析留出握手时间；剩余预算不足时直接失败，不再启动无法完成的子查询。
 
 ### v1.4.3 改动日志 (2026-11-21)
 

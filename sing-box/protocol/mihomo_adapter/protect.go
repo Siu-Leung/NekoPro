@@ -83,13 +83,15 @@ func refreshActiveLocked() {
 		dnsHolder *dnsRouterHolder
 		protect   control.Func
 	)
+	// Non-test entries always win; a test entry is only a last resort while no
+	// main instance is running, and never contributes a DNS router.
 	for _, wantTest := range []bool{false, true} {
 		for i := len(registry) - 1; i >= 0; i-- {
 			e := registry[i]
 			if e.test != wantTest {
 				continue
 			}
-			if dnsHolder == nil && e.dns != nil {
+			if dnsHolder == nil && e.dns != nil && !e.test {
 				dnsHolder = e.dns
 			}
 			if protect == nil && e.protect != nil {
@@ -119,14 +121,20 @@ func InstallProtectHook(ctx context.Context) (release func()) {
 	}
 
 	entry := &hookEntry{test: isTestInstance(ctx)}
-	if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
-		entry.key.router = dnsRouter
-		entry.dns = &dnsRouterHolder{
-			router:           dnsRouter,
-			transportManager: service.FromContext[adapter.DNSTransportManager](ctx),
-			test:             entry.test,
+	// A temporary box (URL test, speed test, exit probe) must not publish its DNS
+	// router: the mihomo resolver is process-global, so a short-lived config would
+	// otherwise replace the main instance's dns-remote after it closes. Test boxes
+	// already use their own in-process DNS for their own dials.
+	if !entry.test {
+		if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
+			entry.key.router = dnsRouter
+			entry.dns = &dnsRouterHolder{
+				router:           dnsRouter,
+				transportManager: service.FromContext[adapter.DNSTransportManager](ctx),
+				test:             false,
+			}
+			installSingBoxResolverOnce()
 		}
-		installSingBoxResolverOnce()
 	}
 	if networkManager := service.FromContext[adapter.NetworkManager](ctx); networkManager != nil {
 		entry.key.networkManager = networkManager

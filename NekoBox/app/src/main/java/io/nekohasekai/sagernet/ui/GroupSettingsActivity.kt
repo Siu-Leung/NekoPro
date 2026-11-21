@@ -193,6 +193,16 @@ class GroupSettingsActivity(
             true
         }
 
+        // 多端点输入框需要多行：AndroidX 的 EditTextPreference 对话框默认单行，
+        // 多行内容会被压成一行显示，看起来像"只有一个端点"。
+        findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnBindEditTextListener { editText ->
+            editText.inputType = editText.inputType or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            editText.setSingleLine(false)
+            editText.minLines = 3
+            editText.maxLines = 8
+            editText.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        }
         findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnPreferenceChangeListener { _, newValue ->
             // 多端点容错：每行一个端点，第一行为主端点，其余为镜像。任一行非法即拒绝保存。
             val lines = (newValue as? String)?.trim().orEmpty()
@@ -346,9 +356,15 @@ class GroupSettingsActivity(
     /** Show the source of the yet-to-be-saved DNS setting, never its credential-bearing URL. */
     private fun updateNodeDnsStatus(fragment: PreferenceFragmentCompat) {
         val manual = DataStore.subscriptionNodeDns.isNotBlank()
-        fragment.findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setSummary(
-            if (manual) R.string.group_node_dns_manual else R.string.subscription_node_dns_sum,
-        )
+        fragment.findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.apply {
+            // 摘要显示端点数，让用户直接看出主备是否都保存了。
+            val count = DataStore.subscriptionNodeDns.lineSequence().count { it.trim().isNotEmpty() }
+            setSummary(
+                if (manual) resources.getQuantityString(
+                    R.plurals.group_node_dns_count, count, count,
+                ) else getString(R.string.group_dns_multi_hint)
+            )
+        }
         val status = when {
             manual -> R.string.group_node_dns_manual
             !DataStore.subscriptionAutoAdoptNodeDns -> R.string.group_node_dns_default
