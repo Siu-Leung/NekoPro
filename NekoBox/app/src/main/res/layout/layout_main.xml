@@ -5,12 +5,14 @@
     android:id="@+id/drawer_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surge_canvas"
     tools:openDrawer="start">
 
     <androidx.coordinatorlayout.widget.CoordinatorLayout
         android:id="@+id/coordinator"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="@color/surge_canvas"
         android:clipChildren="false">
 
         <androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -36,7 +38,7 @@
             android:id="@+id/fab"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:elevation="6dp"
+            android:elevation="4dp"
             android:nextFocusDown="@+id/stats"
             app:backgroundTint="?fabColorBackground"
             app:layout_anchor="@id/stats"
@@ -49,10 +51,12 @@
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
             android:nextFocusUp="@+id/fab"
-            app:backgroundTint="?colorMaterial300"
+            app:backgroundTint="@color/surge_surface"
             app:contentInsetStart="0dp"
-            app:fabCradleMargin="6dp"
-            app:fabCradleRoundedCornerRadius="14dp"
+            app:elevation="4dp"
+            app:fabAlignmentMode="end"
+            app:fabCradleMargin="7dp"
+            app:fabCradleRoundedCornerRadius="16dp"
             app:hideOnScroll="true"
             app:layout_scrollFlags="enterAlways|scroll">
 
@@ -60,44 +64,82 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="?android:attr/selectableItemBackground"
-                android:orientation="vertical"
-                android:paddingStart="18dp"
-                android:paddingTop="12dp"
-                android:paddingEnd="18dp"
-                android:paddingBottom="12dp">
+                android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/tx"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:alpha="0.9"
-                    android:ellipsize="marquee"
-                    android:singleLine="true"
-                    android:textColor="?whiteOrTextPrimary"
-                    android:textSize="12.5sp" />
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/stats_bar_divider" />
 
-                <TextView
-                    android:id="@+id/rx"
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="1dp"
-                    android:alpha="0.9"
-                    android:ellipsize="marquee"
-                    android:singleLine="true"
-                    android:textColor="?whiteOrTextPrimary"
-                    android:textSize="12.5sp" />
+                    android:orientation="vertical"
+                    android:paddingStart="18dp"
+                    android:paddingTop="10dp"
+                    android:paddingEnd="88dp"
+                    android:paddingBottom="10dp">
 
-                <TextView
-                    android:id="@+id/status"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="1"
-                    android:textColor="?whiteOrTextPrimary"
-                    android:textSize="15sp"
-                    tools:text="@string/connection_test_available" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/stats_status_dot"
+                            android:layout_width="8dp"
+                            android:layout_height="8dp"
+                            android:layout_marginEnd="8dp"
+                            android:background="@drawable/bg_surge_status_dot" />
+
+                        <TextView
+                            android:id="@+id/status"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:ellipsize="end"
+                            android:fontFamily="sans-serif-medium"
+                            android:maxLines="1"
+                            android:textColor="@color/surge_text_primary"
+                            android:textSize="14sp"
+                            tools:text="@string/connection_test_available" />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/tx"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:fontFeatureSettings="tnum"
+                            android:singleLine="true"
+                            android:textColor="@color/surge_text_secondary"
+                            android:textSize="12sp"
+                            tools:text="▲ 12.4 KB/s" />
+
+                        <TextView
+                            android:id="@+id/rx"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:ellipsize="end"
+                            android:fontFeatureSettings="tnum"
+                            android:singleLine="true"
+                            android:textColor="@color/surge_text_secondary"
+                            android:textSize="12sp"
+                            tools:text="▼ 1.28 MB/s" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
 
             </LinearLayout>
 
@@ -111,6 +153,8 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_gravity="start"
+        android:background="@color/surge_surface"
+        app:headerLayout="@layout/nav_header_surge"
         app:itemIconTint="@color/navigation_icon"
         app:itemTextColor="@color/navigation_icon"
         app:menu="@menu/main_drawer_menu" />
@@ -121,6 +165,8 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_gravity="start"
+        android:background="@color/surge_surface"
+        app:headerLayout="@layout/nav_header_surge"
         app:itemIconTint="@color/navigation_icon"
         app:itemShapeAppearance="@style/ShapeAppearance.MaterialComponents.MediumComponent"
         app:itemShapeFillColor="@color/navigation_item"

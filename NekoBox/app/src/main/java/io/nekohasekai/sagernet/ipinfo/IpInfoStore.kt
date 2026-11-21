@@ -242,12 +242,25 @@ object IpInfoStore {
     }
 
     /**
+     * Builds an OkHttp client trusting any imported custom root CA (`ca.pem`) with the
+     * requested call timeout, without forcing physical network socket binding.
+     */
+    private fun customCaClient(timeoutSeconds: Long): OkHttpClient {
+        val builder = client.newBuilder().callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+        loadCustomTrustPair()?.let { (factory, trustManager) ->
+            builder.sslSocketFactory(factory, trustManager)
+        }
+        return builder.build()
+    }
+
+    /**
      * Builds an OkHttp client for Group DoH resolution bound to the physical underlying
      * network (bypassing TUN/VPN exit) and trusting any imported custom root CA (`ca.pem`).
      */
-    private fun directDohClient(): OkHttpClient {
-        val builder = client.newBuilder()
+    private fun directDohClient(): Pair<OkHttpClient, Boolean> {
+        val builder = client.newBuilder().callTimeout(6, TimeUnit.SECONDS)
         val underlying = runCatching { SagerNet.underlyingNetwork }.getOrNull()
+        val boundUnderlying = underlying != null
         if (underlying != null) {
             builder.socketFactory(underlying.socketFactory)
             builder.dns(object : Dns {
@@ -258,7 +271,7 @@ object IpInfoStore {
         loadCustomTrustPair()?.let { (factory, trustManager) ->
             builder.sslSocketFactory(factory, trustManager)
         }
-        return builder.build()
+        return builder.build() to boundUnderlying
     }
 
     /**
@@ -267,13 +280,14 @@ object IpInfoStore {
      * the active proxy instead of leaking the device's physical IP directly.
      */
     private fun ownerClient(): OkHttpClient {
+        val builder = client.newBuilder().callTimeout(8, TimeUnit.SECONDS)
         val useLocalProxy = runCatching {
             DataStore.serviceMode == Key.MODE_PROXY && DataStore.serviceState.connected
         }.getOrDefault(false)
-        if (!useLocalProxy) return client
+        if (!useLocalProxy) return builder.build()
         val mixedPort = runCatching { DataStore.mixedPort }.getOrDefault(0)
-        if (mixedPort !in 1..65535) return client
-        return client.newBuilder()
+        if (mixedPort !in 1..65535) return builder.build()
+        return builder
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", mixedPort)))
             .build()
     }
@@ -305,8 +319,11 @@ object IpInfoStore {
                 .mapNotNull { it.hostAddress?.let(::literal) }
                 .firstOrNull(::isUsableEntryIp)
         }
-        val dohClient = directDohClient()
-        return withTimeoutOrNull(12000L) {
+        val (dohClient, boundUnderlying) = directDohClient()
+        // WHY: Some Android OEM ROMs or Always-On VPN policies reject direct physical socketFactory
+        // calls from the UI process; fall back to default routing (still rejecting FakeIP/bogons).
+        val fallbackDohClient by lazy { customCaClient(timeoutSeconds = 6L) }
+        return withTimeoutOrNull(14000L) {
             for (endpoint in groupDns.distinct()) {
                 val url = groupDohUrl(endpoint) ?: continue
                 for (type in listOf(1, 28)) {
@@ -314,7 +331,9 @@ object IpInfoStore {
                     val request = Request.Builder().url(url)
                         .post(question.toRequestBody("application/dns-message".toMediaType()))
                         .header("Accept", "application/dns-message").build()
-                    val answer = dohClient.read(request, MAX_DNS) ?: continue
+                    val answer = dohClient.read(request, MAX_DNS)
+                        ?: if (boundUnderlying) fallbackDohClient.read(request, MAX_DNS) else null
+                        ?: continue
                     parseAnswer(answer, question)?.takeIf(::isUsableEntryIp)?.let {
                         return@withTimeoutOrNull it
                     }
@@ -348,7 +367,10 @@ object IpInfoStore {
 
     /** Loopback CONNECT with unique credentials; there is no non-proxy route or local DNS fallback. */
     internal suspend fun probeExit(port: Int, password: String): IpOwner? {
+        // WHY: Cold-starting an isolated sing-box test box + TLS proxy handshake + GeoIP lookup
+        // frequently takes 5-9s on cellular links, so 12s prevents false exit-probe timeouts.
         val proxyClient = client.newBuilder()
+            .callTimeout(12, TimeUnit.SECONDS)
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port)))
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> = throw UnknownHostException()

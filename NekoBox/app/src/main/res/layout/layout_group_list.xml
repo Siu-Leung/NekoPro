@@ -4,6 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surge_canvas"
     android:orientation="vertical"
     tools:context=".ui.ConfigurationFragment">
 
@@ -15,20 +16,95 @@
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/group_tab"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="?colorPrimary"
-        android:elevation="2dp"
+        android:layout_height="44dp"
+        android:background="@color/surge_surface"
+        android:elevation="0dp"
         android:visibility="gone"
+        app:tabIndicator="@drawable/bg_surge_tab_indicator"
         app:tabIndicatorColor="?tabIndicatorColor"
         app:tabIndicatorFullWidth="false"
         app:tabIndicatorHeight="2.5dp"
         app:tabMode="scrollable"
-        app:tabPaddingEnd="16dp"
-        app:tabPaddingStart="16dp"
+        app:tabPaddingEnd="14dp"
+        app:tabPaddingStart="14dp"
         app:tabRippleColor="?tabRippleColor"
         app:tabSelectedTextColor="?tabSelectedTextColor"
+        app:tabTextAppearance="@style/TextAppearance.NekoPro.SurgeTab"
         app:tabTextColor="?tabTextColor"
         app:tabUnboundedRipple="false" />
+
+    <View
+        android:id="@+id/group_tab_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/surge_divider"
+        android:visibility="gone" />
+
+    <!-- Surge-inspired compact telemetry & quick route-mode control bar -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/surge_status_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="4dp"
+        app:cardBackgroundColor="@color/surge_surface"
+        app:cardCornerRadius="13dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/card_stroke"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="9dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="9dp">
+
+            <View
+                android:id="@+id/surge_status_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginEnd="9dp"
+                android:background="@drawable/bg_surge_status_dot" />
+
+            <TextView
+                android:id="@+id/surge_active_profile"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:text="@string/surge_status_idle_hint"
+                android:textColor="@color/surge_text_primary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/surge_route_mode_chip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_surge_mode_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:minHeight="28dp"
+                android:paddingStart="11dp"
+                android:paddingEnd="11dp"
+                android:singleLine="true"
+                android:text="@string/route_mode_rule"
+                android:textColor="@color/surge_text_primary"
+                android:textSize="11.5sp" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
 
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/group_pager"

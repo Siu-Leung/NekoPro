@@ -5,14 +5,15 @@
     android:id="@+id/content"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginStart="6dp"
+    android:layout_marginStart="4dp"
     android:layout_marginTop="4dp"
-    android:layout_marginEnd="6dp"
+    android:layout_marginEnd="4dp"
     android:layout_marginBottom="4dp"
     android:clickable="true"
     android:focusable="true"
+    app:cardBackgroundColor="@color/surge_surface"
     app:cardCornerRadius="14dp"
-    app:cardElevation="1dp"
+    app:cardElevation="0dp"
     app:strokeColor="@color/card_stroke"
     app:strokeWidth="1dp">
 
@@ -41,6 +42,7 @@
             android:nextFocusRight="@+id/edit"
             android:orientation="vertical">
 
+            <!-- Row 1: Node Name + subtle secondary action icons -->
             <LinearLayout
                 android:id="@+id/container"
                 android:layout_width="match_parent"
@@ -59,7 +61,7 @@
                     android:paddingStart="10dp"
                     android:paddingTop="6dp"
                     android:paddingEnd="4dp"
-                    android:paddingBottom="4dp">
+                    android:paddingBottom="2dp">
 
                     <TextView
                         android:id="@+id/profile_name"
@@ -68,27 +70,27 @@
                         android:ellipsize="end"
                         android:fontFamily="sans-serif-medium"
                         android:maxLines="1"
-                        android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="15sp"
+                        android:textColor="@color/surge_text_primary"
+                        android:textSize="14.5sp"
                         tools:text="@string/profile_name" />
                 </LinearLayout>
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/edit"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
                     android:layout_gravity="center_vertical"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/edit"
                     android:focusable="true"
-                    android:padding="8dp"
+                    android:padding="7dp"
                     app:srcCompat="@drawable/ic_image_edit"
                     app:tint="@color/card_icon_tint" />
 
                 <LinearLayout
                     android:id="@+id/share"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
                     android:layout_gravity="center_vertical"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/share"
@@ -100,7 +102,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:gravity="center"
-                        android:padding="8dp">
+                        android:padding="7dp">
 
                         <androidx.appcompat.widget.AppCompatImageView
                             android:id="@+id/shareIcon"
@@ -114,73 +116,29 @@
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/remove"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
                     android:layout_gravity="center_vertical"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/delete"
                     android:focusable="true"
-                    android:padding="8dp"
+                    android:padding="7dp"
                     android:visibility="gone"
                     app:srcCompat="@drawable/ic_action_delete"
                     app:tint="@color/card_icon_tint" />
 
             </LinearLayout>
 
+            <!-- Row 2: Protocol Badge (left) + Surge Tabular Latency / Speed Readout (right) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
+                android:paddingTop="3dp"
                 android:paddingEnd="12dp"
-                android:paddingBottom="4dp"
-                android:visibility="gone"
-                tools:visibility="visible">
-
-                <TextView
-                    android:id="@+id/profile_address"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:text="@string/server_address"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:id="@+id/traffic_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:text="@string/traffic"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="11.5sp" />
-
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/profile_ip_info"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:lineSpacingExtra="2dp"
-                android:paddingStart="10dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="6dp"
-                android:textColor="?android:attr/textColorSecondary"
-                android:textSize="12sp"
-                android:visibility="gone" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="10dp"
-                android:paddingTop="4dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="10dp">
+                android:paddingBottom="6dp">
 
                 <TextView
                     android:id="@+id/profile_type"
@@ -189,48 +147,13 @@
                     android:background="@drawable/bg_protocol_badge"
                     android:fontFamily="sans-serif-medium"
                     android:paddingStart="7dp"
-                    android:paddingTop="2.5dp"
+                    android:paddingTop="2dp"
                     android:paddingEnd="7dp"
-                    android:paddingBottom="2.5dp"
+                    android:paddingBottom="2dp"
+                    android:singleLine="true"
                     android:textColor="?attr/accentOrTextSecondary"
-                    android:textSize="11sp" />
-
-                <!-- 测速与查询都是显式按钮：长按容易被误触且与查询抢焦点。 -->
-                <TextView
-                    android:id="@+id/profile_speed_test"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_card_action_pill"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:fontFamily="sans-serif-medium"
-                    android:gravity="center_vertical"
-                    android:minHeight="28dp"
-                    android:paddingStart="9dp"
-                    android:paddingEnd="9dp"
-                    android:text="@string/card_speed_test"
-                    android:textColor="?attr/primaryOrTextPrimary"
-                    android:textSize="11.5sp"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/profile_ip_probe"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_card_action_pill"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:fontFamily="sans-serif-medium"
-                    android:gravity="center_vertical"
-                    android:minHeight="28dp"
-                    android:paddingStart="9dp"
-                    android:paddingEnd="9dp"
-                    android:text="@string/card_ip_probe_short"
-                    android:textColor="?attr/primaryOrTextPrimary"
-                    android:textSize="11.5sp"
-                    android:visibility="gone" />
+                    android:textSize="11sp"
+                    tools:text="VLESS" />
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -243,10 +166,136 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
                     android:fontFamily="sans-serif-medium"
+                    android:fontFeatureSettings="tnum"
                     android:gravity="end"
                     android:lineSpacingExtra="2dp"
-                    android:textColor="?attr/accentOrTextSecondary"
-                    android:textSize="12sp" />
+                    android:textColor="@color/surge_text_secondary"
+                    android:textSize="12sp"
+                    tools:text="42 ms" />
+
+            </LinearLayout>
+
+            <!-- Row 3 (conditional): Server address + traffic (parent visibility toggled in holder) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="6dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <TextView
+                    android:id="@+id/profile_address"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/server_address"
+                    android:textColor="@color/surge_text_secondary"
+                    android:textSize="11.5sp" />
+
+                <TextView
+                    android:id="@+id/traffic_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:fontFeatureSettings="tnum"
+                    android:text="@string/traffic"
+                    android:textColor="@color/surge_text_secondary"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+
+            <!-- Row 4 (conditional): Surge inset diagnostic panel for Entry/Exit IP & ISP -->
+            <TextView
+                android:id="@+id/profile_ip_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="12dp"
+                android:layout_marginBottom="7dp"
+                android:background="@drawable/bg_surge_ip_panel"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFeatureSettings="tnum"
+                android:lineSpacingExtra="3dp"
+                android:paddingStart="9dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="6dp"
+                android:textColor="@color/surge_text_secondary"
+                android:textSize="11.5sp"
+                android:visibility="gone"
+                tools:text="入口 DNS 应答 1.2.3.4 🇨🇳 CN · AS4134\n实测出口 5.6.7.8 🇭🇰 HK · AS9269"
+                tools:visibility="visible" />
+
+            <!-- Row 5: Dedicated Surge Action Strip (never collides with protocol/latency even in 2-column mode) -->
+            <View
+                android:id="@+id/profile_action_divider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="12dp"
+                android:background="@color/surge_divider"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
+            <LinearLayout
+                android:id="@+id/profile_action_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="9dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <!-- 测速与出入口 IP/归属查询独立成行，单列与双列模式下都不会被协议名或测速结果挤出屏幕。 -->
+                <TextView
+                    android:id="@+id/profile_speed_test"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_card_action_pill"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:minHeight="28dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:singleLine="true"
+                    android:text="@string/card_speed_test"
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="11.5sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/profile_ip_probe"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_card_action_pill"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:minHeight="28dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:singleLine="true"
+                    android:text="@string/card_ip_probe_short"
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="11.5sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
 
             </LinearLayout>
 

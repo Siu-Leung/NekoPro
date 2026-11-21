@@ -326,23 +326,13 @@ class MainActivity : ThemedActivity(),
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.nav_mode_rule -> {
-                DataStore.routeMode = 0
-                refreshNavMenu(DataStore.enableClashAPI)
+                switchRouteMode(0)
                 binding.drawerLayout.closeDrawers()
-                snackbar(getString(R.string.route_mode_switched, getString(R.string.route_mode_rule))).show()
-                if (DataStore.serviceState.connected) {
-                    SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.RouteModeChanged)
-                }
                 return true
             }
             R.id.nav_mode_global -> {
-                DataStore.routeMode = 1
-                refreshNavMenu(DataStore.enableClashAPI)
+                switchRouteMode(1)
                 binding.drawerLayout.closeDrawers()
-                snackbar(getString(R.string.route_mode_switched, getString(R.string.route_mode_global))).show()
-                if (DataStore.serviceState.connected) {
-                    SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.RouteModeChanged)
-                }
                 return true
             }
         }
@@ -350,6 +340,28 @@ class MainActivity : ThemedActivity(),
             return displayFragmentWithId(item.itemId)
         }
         return true
+    }
+
+    /**
+     * Switches between Rule (`0`) and Global (`1`) routing modes, synchronizes drawer and
+     * Surge header UI, and reloads the active VPN service when connected.
+     *
+     * @param targetMode Target route mode (`0` = rule, `1` = global).
+     */
+    fun switchRouteMode(targetMode: Int) {
+        DataStore.routeMode = targetMode
+        refreshNavMenu(DataStore.enableClashAPI)
+        notifyConfigurationSurgeHeader()
+        val labelRes = if (targetMode == 1) R.string.route_mode_global else R.string.route_mode_rule
+        snackbar(getString(R.string.route_mode_switched, getString(labelRes))).show()
+        if (DataStore.serviceState.connected) {
+            SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.RouteModeChanged)
+        }
+    }
+
+    private fun notifyConfigurationSurgeHeader() {
+        (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
+            ?.refreshSurgeStatusHeader()
     }
 
 
@@ -410,6 +422,7 @@ class MainActivity : ThemedActivity(),
 
         binding.fab.changeState(state, previousState, animate)
         binding.stats.changeState(state)
+        notifyConfigurationSurgeHeader()
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
     }
 
@@ -461,6 +474,9 @@ class MainActivity : ThemedActivity(),
         val old = DataStore.selectedProxy
         DataStore.selectedProxy = id
         DataStore.currentProfile = id
+        onMainDispatcher {
+            notifyConfigurationSurgeHeader()
+        }
         runOnDefaultDispatcher {
             ProfileManager.postUpdate(old, true)
             ProfileManager.postUpdate(id, true)

@@ -193,6 +193,15 @@ class ConfigurationFragment @JvmOverloads constructor(
     private var ipInfoDialog: AlertDialog? = null
     private var lastIpDisplayOptions: Pair<Boolean, Boolean>? = null
 
+    @Volatile
+    internal var probingProxyId: Long? = null
+
+    private var groupTabDivider: View? = null
+    private var surgeStatusCard: View? = null
+    private var surgeStatusDot: View? = null
+    private var surgeActiveProfile: TextView? = null
+    private var surgeRouteModeChip: TextView? = null
+
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
 
     fun getCurrentGroupFragment(): GroupFragment? {
@@ -262,6 +271,24 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         groupPager = view.findViewById(R.id.group_pager)
         tabLayout = view.findViewById(R.id.group_tab)
+        groupTabDivider = view.findViewById(R.id.group_tab_divider)
+        surgeStatusCard = view.findViewById(R.id.surge_status_card)
+        surgeStatusDot = view.findViewById(R.id.surge_status_dot)
+        surgeActiveProfile = view.findViewById(R.id.surge_active_profile)
+        surgeRouteModeChip = view.findViewById(R.id.surge_route_mode_chip)
+
+        surgeStatusCard?.isGone = select
+        if (!select) {
+            surgeRouteModeChip?.setOnClickListener {
+                val nextMode = if (DataStore.routeMode == 1) 0 else 1
+                (activity as? MainActivity)?.switchRouteMode(nextMode)
+            }
+            surgeStatusCard?.setOnClickListener {
+                scrollToSelectedProfile()
+            }
+            refreshSurgeStatusHeader()
+        }
+
         adapter = GroupPagerAdapter()
         ProfileManager.addListener(adapter)
         GroupManager.addListener(adapter)
@@ -279,30 +306,85 @@ class ConfigurationFragment @JvmOverloads constructor(
         }.attach()
 
         toolbar.setOnClickListener {
-            val fragment = getCurrentGroupFragment()
-
-            if (fragment != null) {
-                val selectedProxy = selectedItem?.id ?: DataStore.selectedProxy
-                val selectedProfileIndex =
-                    fragment.adapter!!.configurationIdList.indexOf(selectedProxy)
-                if (selectedProfileIndex != -1) {
-                    val layoutManager = fragment.layoutManager
-                    val first = layoutManager.findFirstVisibleItemPosition()
-                    val last = layoutManager.findLastVisibleItemPosition()
-
-                    if (selectedProfileIndex !in first..last) {
-                        fragment.configurationListView.scrollTo(selectedProfileIndex, true)
-                        return@setOnClickListener
-                    }
-
-                }
-
-                fragment.configurationListView.scrollTo(0)
-            }
-
+            scrollToSelectedProfile()
         }
 
         DataStore.profileCacheStore.registerChangeListener(this)
+    }
+
+    private fun scrollToSelectedProfile() {
+        val fragment = getCurrentGroupFragment() ?: return
+        val listAdapter = fragment.adapter ?: return
+        val selectedProxy = selectedItem?.id ?: DataStore.selectedProxy
+        val selectedProfileIndex = listAdapter.configurationIdList.indexOf(selectedProxy)
+        if (selectedProfileIndex != -1) {
+            val layoutManager = fragment.layoutManager
+            val first = layoutManager.findFirstVisibleItemPosition()
+            val last = layoutManager.findLastVisibleItemPosition()
+
+            if (selectedProfileIndex !in first..last) {
+                fragment.configurationListView.scrollTo(selectedProfileIndex, true)
+                return
+            }
+        }
+        fragment.configurationListView.scrollTo(0)
+    }
+
+    /**
+     * Refreshes the compact Surge status strip above the node list with live connection
+     * state, active proxy name (respecting screenshot address redaction), and route mode.
+     */
+    fun refreshSurgeStatusHeader() {
+        if (select || !isAdded) return
+        val dot = surgeStatusDot ?: return
+        val titleView = surgeActiveProfile ?: return
+        val modeChip = surgeRouteModeChip ?: return
+        val ctx = context ?: return
+
+        val state = DataStore.serviceState
+        val dotColorRes = when (state) {
+            BaseService.State.Connected -> R.color.surge_green
+            BaseService.State.Connecting, BaseService.State.Stopping -> R.color.surge_amber
+            else -> R.color.surge_status_idle
+        }
+        dot.backgroundTintList = android.content.res.ColorStateList.valueOf(ctx.getColour(dotColorRes))
+
+        val isGlobal = DataStore.routeMode == 1
+        modeChip.text = getString(if (isGlobal) R.string.route_mode_global else R.string.route_mode_rule)
+
+        val selectedId = DataStore.selectedProxy
+        val hideAddress = DataStore.hideNodeAddress
+        runOnDefaultDispatcher {
+            val entity = if (selectedId > 0L) SagerDatabase.proxyDao.getById(selectedId) else null
+            val displayTitle = if (entity != null) {
+                val bean = entity.requireBean()
+                val safeName = AddressRedactor.cardTitle(
+                    entity.displayName(),
+                    bean.name,
+                    bean.serverAddress.orEmpty(),
+                    getString(R.string.card_hidden_title),
+                    hideAddress,
+                )
+                when (state) {
+                    BaseService.State.Connected -> safeName
+                    BaseService.State.Connecting -> "${getString(R.string.connecting)} · $safeName"
+                    BaseService.State.Stopping -> "${getString(R.string.stopping)} · $safeName"
+                    else -> "${getString(R.string.not_connected)} · $safeName"
+                }
+            } else {
+                when (state) {
+                    BaseService.State.Connected -> getString(R.string.vpn_connected)
+                    BaseService.State.Connecting -> getString(R.string.connecting)
+                    BaseService.State.Stopping -> getString(R.string.stopping)
+                    else -> getString(R.string.surge_status_idle_hint)
+                }
+            }
+            onMainDispatcher {
+                if (isAdded && surgeActiveProfile === titleView) {
+                    titleView.text = displayTitle
+                }
+            }
+        }
     }
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
@@ -331,6 +413,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             runCatching { handle.dialog?.dismiss() }.onFailure { Logs.w(it) }
             handle.dialog = null
         }
+        groupTabDivider = null
+        surgeStatusCard = null
+        surgeStatusDot = null
+        surgeActiveProfile = null
+        surgeRouteModeChip = null
         verifiedExits.clear()
         super.onDestroyView()
     }
@@ -354,6 +441,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             lastIpDisplayOptions = displayOptions
             adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
         }
+        refreshSurgeStatusHeader()
         activeTestHandle?.restoreIfHidden()
     }
 
@@ -793,7 +881,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             a.effectiveNodeDnsList() == b.effectiveNodeDnsList() && a.requiresNodeDnsAdoption() == b.requiresNodeDnsAdoption()
 
     private fun confirmNodeIpInfo(id: Long) {
-        if (!isResumed || ipInfoJob?.isActive == true || ipInfoDialog?.isShowing == true) return
+        if (!isResumed || ipInfoDialog?.isShowing == true) return
+        if (ipInfoJob?.isActive == true) {
+            snackbar(R.string.card_ip_probe_busy).show()
+            return
+        }
         ipInfoDialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.card_ip_probe)
             .setMessage(R.string.card_ip_probe_disclosure)
@@ -804,7 +896,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun requestNodeIpInfo(id: Long) {
         if (view == null || ipInfoJob?.isActive == true) return
+        probingProxyId = id
+        if (isResumed) snackbar(R.string.card_ip_probe_started).show()
         ipInfoJob = viewLifecycleOwner.lifecycleScope.launch {
+            withContext(Dispatchers.IO) { ProfileManager.postUpdate(id) }
             val result = try {
                 withContext(Dispatchers.IO) {
                     val dao = SagerDatabase.proxyDao
@@ -840,6 +935,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 throw e
             } catch (_: Exception) {
                 null // No raw resolver path, URL or node name in logs/errors.
+            } finally {
+                probingProxyId = null
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    ProfileManager.postUpdate(id)
+                }
             }
             if (result?.exit != null) {
                 verifiedExits[id] = ExitSample(result.profile, result.group, result.exit)
@@ -860,10 +960,13 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private suspend fun probeNodeExit(profile: ProxyEntity, group: ProxyGroup, entry: String?): io.nekohasekai.sagernet.ipinfo.IpOwner? {
         val bean = profile.requireBean()
-        // Allow exit probing even when entry DNS lookup returned null if the group configures
-        // non-HTTPS resolvers (tls://, quic://, h3://, udp://, tcp://) handled natively by sing-box.
-        val hasNonHttpsGroupDns = group.effectiveNodeDnsList().any { !IpInfoStore.isHttpsResolver(it) }
-        if ((entry == null && !hasNonHttpsGroupDns) || group.frontProxy > 0 || group.landingProxy > 0 || profile.needExternal() ||
+        val resolvers = group.effectiveNodeDnsList()
+        // Allow exit probing when entry resolved, when the group uses non-HTTPS resolvers handled
+        // natively by sing-box, or when no private group DNS adoption is required.
+        val hasNonHttpsGroupDns = resolvers.any { !IpInfoStore.isHttpsResolver(it) }
+        val canResolveInTestBox = entry != null || hasNonHttpsGroupDns ||
+            (resolvers.isEmpty() && !group.requiresNodeDnsAdoption())
+        if (!canResolveInTestBox || group.frontProxy > 0 || group.landingProxy > 0 || profile.needExternal() ||
             !bean.customConfigJson.isNullOrBlank() || !bean.customOutboundJson.isNullOrBlank()
         ) return null
         return try {
@@ -1584,7 +1687,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (set) groupPager.setCurrentItem(selectedGroupIndex, false)
                         val hideTab = groupList.size < 2
                         tabLayout.isGone = hideTab
-                        toolbar.elevation = if (hideTab) 0F else dp2px(4).toFloat()
+                        groupTabDivider?.isGone = hideTab
+                        toolbar.elevation = 0F
                         if (!select) {
                             groupPager.registerOnPageChangeCallback(updateSelectedCallback)
                         }
@@ -2188,6 +2292,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             lateinit var entity: ProxyEntity
 
+            val cardView = view as? com.google.android.material.card.MaterialCardView
             val profileName: TextView = view.findViewById(R.id.profile_name)
             val profileType: TextView = view.findViewById(R.id.profile_type)
             val profileAddress: TextView = view.findViewById(R.id.profile_address)
@@ -2195,6 +2300,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profileIpInfo: TextView = view.findViewById(R.id.profile_ip_info)
             val profileIpProbe: TextView = view.findViewById(R.id.profile_ip_probe)
             val profileSpeedTest: TextView = view.findViewById(R.id.profile_speed_test)
+            val profileActionDivider: View = view.findViewById(R.id.profile_action_divider)
+            val profileActionRow: View = view.findViewById(R.id.profile_action_row)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
             val selectedView: View = view.findViewById(R.id.selected_view)
@@ -2243,7 +2350,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 onMainDispatcher {
                                     if (entity.id == proxyEntity.id) {
                                         selectedView.visibility = View.VISIBLE
+                                        cardView?.strokeColor = requireContext().getColorAttr(R.attr.selectedColorPrimary)
                                     }
+                                    pf.refreshSurgeStatusHeader()
                                 }
                             }
 
@@ -2302,27 +2411,40 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profileAddress.text = address
                 (trafficText.parent as View).isGone = (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
 
+                val canProbeIp = !select && DataStore.showNodeIpOwner && pf.supportsCardEntry(proxyEntity)
                 val ipInfoText = if (DataStore.showNodeIpOwner) pf.ipInfoLabel(proxyEntity, proxyGroup, hideAddress) else null
                 profileIpInfo.text = ipInfoText.orEmpty()
                 profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
+                profileIpInfo.setOnClickListener(if (canProbeIp && profileIpInfo.isVisible) View.OnClickListener {
+                    pf.confirmNodeIpInfo(proxyEntity.id)
+                } else null)
+
                 profileSpeedTest.isVisible = !select
                 profileSpeedTest.setOnClickListener(if (select) null else View.OnClickListener {
                     pf.speedTest(proxyEntity)
                 })
-                profileIpProbe.isVisible = !select && DataStore.showNodeIpOwner && pf.supportsCardEntry(proxyEntity)
-                profileIpProbe.setOnClickListener(if (profileIpProbe.isVisible) View.OnClickListener {
+                profileIpProbe.isVisible = canProbeIp
+                val isProbingThis = pf.probingProxyId == proxyEntity.id
+                profileIpProbe.text = getString(
+                    if (isProbingThis) R.string.card_ip_probe_probing else R.string.card_ip_probe_short
+                )
+                profileIpProbe.setOnClickListener(if (canProbeIp) View.OnClickListener {
                     pf.confirmNodeIpInfo(proxyEntity.id)
                 } else null)
+
+                val showActionRow = profileSpeedTest.isVisible || profileIpProbe.isVisible
+                profileActionDivider.isVisible = showActionRow
+                profileActionRow.isVisible = showActionRow
 
                 val stText = speedTestResultText(proxyEntity)
 
                 if (proxyEntity.status <= 0) {
                     if (stText != null) {
                         profileStatus.text = stText
-                        profileStatus.setTextColor(requireContext().getColorAttr(android.R.attr.textColorSecondary))
+                        profileStatus.setTextColor(requireContext().getColour(R.color.surge_text_secondary))
                     } else if (showTraffic) {
                         profileStatus.text = trafficText.text
-                        profileStatus.setTextColor(requireContext().getColorAttr(android.R.attr.textColorSecondary))
+                        profileStatus.setTextColor(requireContext().getColour(R.color.surge_text_secondary))
                         trafficText.text = ""
                     } else {
                         profileStatus.text = ""
@@ -2330,9 +2452,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                 } else if (proxyEntity.status == 1) {
                     val pingText = getString(R.string.available, proxyEntity.ping)
                     profileStatus.text = if (stText != null) "$pingText\n$stText" else pingText
-                    profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
+                    val latencyColorRes = when {
+                        proxyEntity.ping <= 150 -> R.color.surge_green
+                        proxyEntity.ping <= 350 -> R.color.surge_amber
+                        else -> R.color.surge_red
+                    }
+                    profileStatus.setTextColor(requireContext().getColour(latencyColorRes))
                 } else {
-                    profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
+                    profileStatus.setTextColor(requireContext().getColour(R.color.surge_red))
                     if (proxyEntity.status == 2) {
                         profileStatus.text = if (hideAddress) getString(R.string.unavailable)
                             else if (stText != null) "${proxyEntity.error}\n$stText" else proxyEntity.error
@@ -2388,6 +2515,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                         editButton.isEnabled = !started
                         removeButton.isEnabled = !started
                         selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
+                        cardView?.strokeColor = if (selected) {
+                            requireContext().getColorAttr(R.attr.selectedColorPrimary)
+                        } else {
+                            requireContext().getColour(R.color.card_stroke)
+                        }
                     }
 
                     fun showShare(anchor: View) {

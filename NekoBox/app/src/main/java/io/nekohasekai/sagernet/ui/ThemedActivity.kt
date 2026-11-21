@@ -8,6 +8,7 @@ import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import com.google.android.material.appbar.AppBarLayout
@@ -34,17 +35,22 @@ abstract class ThemedActivity : AppCompatActivity {
         super.onCreate(savedInstanceState)
 
         uiMode = resources.configuration.uiMode
+        if (!isDialog) {
+            // WHY: Surge surfaces use a crisp light bar in Day mode and dark slate in Night mode,
+            // so system status/nav icons must follow the active Day/Night contrast automatically.
+            val isLightMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = isLightMode
+                isAppearanceLightNavigationBars = isLightMode
+            }
+        }
 
         if (Build.VERSION.SDK_INT >= 35) {
             ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { _, insets ->
                 val top = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top
                 findViewById<AppBarLayout>(R.id.appbar)?.apply {
                     updatePadding(top = top)
-//                Logs.w("appbar $top")
                 }
-//            findViewById<NavigationView>(R.id.nav_view)?.apply {
-//                updatePadding(top = top)
-//            }
                 insets
             }
         }

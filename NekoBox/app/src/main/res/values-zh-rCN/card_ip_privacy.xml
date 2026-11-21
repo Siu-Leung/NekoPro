@@ -11,6 +11,11 @@
     <string name="card_ip_probe_complete">IP 信息已更新。</string>
     <string name="card_speed_test">测速</string>
     <string name="card_ip_probe_short">IP/归属</string>
+    <string name="card_ip_probe_probing">查询中…</string>
+    <string name="card_ip_probe_started">正在查询入口与出口 IP / 服务商…</string>
+    <string name="card_ip_probe_busy">正在查询节点 IP，请稍候…</string>
+    <string name="surge_status_idle_hint">未连接 · 点击右下角按钮启动</string>
+    <string name="surge_drawer_subtitle">sing-box · mihomo 双核代理引擎</string>
     <string name="group_dns_multi_hint">每行一个端点：第一行为主端点，后续为依次回退的镜像。</string>
     <plurals name="group_node_dns_count">
         <item quantity="other">已配置 %d 个端点（第一行为主端点）</item>

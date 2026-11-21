@@ -4,14 +4,15 @@
     android:id="@+id/content"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginStart="6dp"
+    android:layout_marginStart="4dp"
     android:layout_marginTop="4dp"
-    android:layout_marginEnd="6dp"
+    android:layout_marginEnd="4dp"
     android:layout_marginBottom="4dp"
     android:clickable="true"
     android:focusable="true"
+    app:cardBackgroundColor="@color/surge_surface"
     app:cardCornerRadius="14dp"
-    app:cardElevation="1dp"
+    app:cardElevation="0dp"
     app:strokeColor="@color/card_stroke"
     app:strokeWidth="1dp">
 
@@ -50,8 +51,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:fontFamily="sans-serif-medium"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15.5sp" />
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="15sp" />
             </LinearLayout>
 
         </LinearLayout>
@@ -61,7 +62,7 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:paddingStart="16dp"
-            android:paddingEnd="10dp"
+            android:paddingEnd="12dp"
             android:paddingBottom="10dp">
 
             <LinearLayout
@@ -74,20 +75,29 @@
                     android:id="@+id/asset_status"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="12.5sp" />
+                    android:textColor="@color/surge_text_secondary"
+                    android:textSize="12sp" />
 
             </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/rules_update"
-                style="?attr/borderlessButtonStyle"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="36dp"
+                android:layout_height="34dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
                 android:text="@string/group_update"
-                android:textColor="?attr/primaryOrTextPrimary"
-                app:cornerRadius="16dp" />
+                android:textAllCaps="false"
+                android:textColor="@color/surge_text_primary"
+                android:textSize="12sp"
+                app:backgroundTint="@color/card_action_bg"
+                app:cornerRadius="10dp"
+                app:strokeColor="@color/card_action_stroke"
+                app:strokeWidth="1dp" />
         </LinearLayout>
 
     </LinearLayout>

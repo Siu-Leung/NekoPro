@@ -3,11 +3,21 @@
     <color name="fab_color_progress">@color/material_light_white</color>
     <color name="preference_simple_menu_background">#303030</color>
 
-    <!-- Restrained dark-mode surface tokens for cards, badges, action pills, and secondary icons -->
-    <color name="card_stroke">#1FFFFFFF</color>
-    <color name="card_badge_bg">#17FFFFFF</color>
-    <color name="card_action_bg">#12FFFFFF</color>
-    <color name="card_action_stroke">#29FFFFFF</color>
-    <color name="card_icon_tint">#99FFFFFF</color>
-    <color name="stats_bar_divider">#1FFFFFFF</color>
+    <!-- Surge-inspired dark-mode obsidian canvas, elevated slate surface, and telemetry tokens -->
+    <color name="surge_canvas">#0B0D11</color>
+    <color name="surge_surface">#16181F</color>
+    <color name="surge_surface_subtle">#1E212B</color>
+    <color name="surge_divider">#18FFFFFF</color>
+    <color name="surge_text_primary">#F3F4F6</color>
+    <color name="surge_text_secondary">#9CA3AF</color>
+    <color name="surge_green">#34D399</color>
+    <color name="surge_amber">#FBBF24</color>
+    <color name="surge_red">#F87171</color>
+    <color name="surge_status_idle">#6B7280</color>
+    <color name="card_stroke">#1CFFFFFF</color>
+    <color name="card_badge_bg">#242834</color>
+    <color name="card_action_bg">#212530</color>
+    <color name="card_action_stroke">#26FFFFFF</color>
+    <color name="card_icon_tint">#9098A6</color>
+    <color name="stats_bar_divider">#18FFFFFF</color>
 </resources>

@@ -27,6 +27,7 @@ class StatsBar @JvmOverloads constructor(
     private lateinit var statusText: TextView
     private lateinit var txText: TextView
     private lateinit var rxText: TextView
+    private var statusDot: View? = null
     private lateinit var behavior: YourBehavior
 
     var allowShow = true
@@ -72,6 +73,7 @@ class StatsBar @JvmOverloads constructor(
         statusText = findViewById(R.id.status)
         txText = findViewById(R.id.tx)
         rxText = findViewById(R.id.rx)
+        statusDot = findViewById(R.id.stats_status_dot)
         super.setOnClickListener(l)
     }
 
@@ -80,8 +82,18 @@ class StatsBar @JvmOverloads constructor(
         TooltipCompat.setTooltipText(this, text)
     }
 
+    private fun updateStatusDotColor(state: BaseService.State) {
+        val colorRes = when (state) {
+            BaseService.State.Connected -> R.color.surge_green
+            BaseService.State.Connecting, BaseService.State.Stopping -> R.color.surge_amber
+            else -> R.color.surge_status_idle
+        }
+        statusDot?.backgroundTintList = android.content.res.ColorStateList.valueOf(context.getColour(colorRes))
+    }
+
     fun changeState(state: BaseService.State) {
         val activity = context as MainActivity
+        updateStatusDotColor(state)
         fun postWhenStarted(what: () -> Unit) = activity.lifecycleScope.launch(Dispatchers.Main) {
             delay(100L)
             activity.whenStarted { what() }

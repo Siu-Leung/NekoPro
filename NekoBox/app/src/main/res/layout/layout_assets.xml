@@ -3,6 +3,7 @@
     android:id="@+id/coordinator"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surge_canvas"
     android:orientation="vertical">
 
     <LinearLayout
@@ -25,9 +26,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clipToPadding="false"
-                android:paddingStart="6dp"
-                android:paddingTop="6dp"
-                android:paddingEnd="6dp"
+                android:paddingStart="8dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="8dp"
                 android:paddingBottom="24dp" />
 
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
