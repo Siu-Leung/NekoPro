@@ -29,12 +29,12 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.5`（测试分支预发布：`Neko-Pro-1.4.6-rc2`）
+`Neko-Pro-1.4.6`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.5)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.5-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
 
-### v1.4.6-rc2 测试版改动日志 (2026-11-21)
+### v1.4.6 改动日志 (2026-11-21)
 
 - **全新 Surge 风格界面精修（日间浅灰分组底板 + 夜间深邃黑曜石表面）**
   - **Surge 扁平发丝线层次**：全局切换为 iOS/Surge 分组画布底色（日间 `#F2F2F7` / 夜间 `#0B0D11`）与纯净卡片表面（日间 `#FFFFFF` / 夜间 `#16181F`），移除厚重阴影改用 `1dp` 轻描边，顶栏与分组标签改为无阴影平铺导航并自动适配系统状态栏/导航栏明暗图标，全面兼容 21 套主题强调色与深浅色模式。
@@ -44,16 +44,10 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
   - **彻底解决按钮被挤出卡片的问题**：将节点卡片的「测速」与「IP/归属」操作按钮独立为专属操作行，无论单列还是双列布局、长协议名或测速结果多行展示，均不再被挤压裁剪，文字采用高对比主色在全部主题下清晰可读。
   - **Surge 诊断面板样式呈现入口/出口 IP 与服务商**：探测结果以独立的柔和内嵌诊断面板展示，点击面板即可再次刷新；探测过程新增「查询中…」实时状态与忙碌提示。
   - **增强探测成功率**：`IpInfoStore` 为组内 DoH 查询补齐底层网络失败时的安全回退（仍严格过滤 FakeIP `198.18.0.0/15` 与保留段），放宽 `api.ip.sb` 服务商查询（8s）与隔离测试盒出口探测（12s）超时，并优化出口探测放行条件。
-- **包含 `v1.4.6-rc1` 全部 31 项深度代码审计修复（P0–P3）**。
-
-### v1.4.6-rc1 测试版改动日志 (2026-11-21)
-
 - **全量 31 项深度代码审计修复（P0–P3）**
   - **P0 安全与兼容性**：彻底加固本地 Clash 仪表板 WebView（同源子资源拦截、阻断恶意 `hostname`/`port` 参数注入、严格按本地 `baseURL` 同步 `secret`、防隐藏 iframe 静默外跳）；重构 `speedTest`/`pingTest`/`urlTest` 统一并发令牌状态机与 `NonCancellable` 清理；将 `UniversalFmt` 与 `AnyTLSCertificatePin` 从 API 26 专有 `java.util.Base64` 迁回 API 21 兼容的 Guava `BaseEncoding`，并在 `lint.xml` 将 `NewApi` 设为 `fatal` 与补齐 PR Android 编译单测门禁。
   - **内核、DNS 与网络防泄漏**：为 MASQUE 增加实例级 `TargetResolver` 修复测试盒解析故障；`probeNodeExit` 补传 `LocalResolverImpl`；`IpInfoStore` 严格屏蔽 FakeIP `198.18.0.0/15`/私网/CGNAT/ULA 并使组 DoH 绑定底层物理网络与自定义 `ca.pem`；`libcore/http.go` 增加重定向防降级/SSRF 策略与 8 MiB/超时硬上限；`GroupNodeDnsPlan` 导出 JSON 自动将私有 `fallback` 降级为上游标准端点并在含私有 DNS 时弹窗确认；`GroupSettingsActivity` 输入框启用 `FLAG_SECURE`。
   - **订阅、协议与存储可靠度**：收紧 SnakeYAML 防别名炸弹与深层嵌套；拒绝 HTML 维护页误作订阅清空整组；Clash YAML 跳过已知不支持协议并补齐 `wireguard` 支持；修齐 Mieru 上游分享链接（`?port=`/`?profile=`/`a:b` 冒号范围与枚举大小写）、WireGuard 多行 `AllowedIPs`/CIDR/Keepalive、AnyTLS `alpn`/含冒号密码/PEM 冲突检测、Snell 拒绝不支持的 v1–v3；备份导入改用严格 Kryo 校验（不再吞掉 `KryoException`）；`WorkManager 2.10` 多进程组件绑定 `:bg` 且保留 `InitializationProvider`；修复 `TestInstance`/`GuardedProcessPool`/`SpeedTestRunner` 并发取消资源泄漏与 `AssetsActivity`/`ConfigurationFragment` 主线程列表更新竞态。
-- **简洁大方 UI 精修**
-  - 统一节点、分组、路由、规则库与备份卡片为 `14dp` 圆角 + 细微描边与自适应日夜色阶；选中指示条升级为悬浮圆角胶囊；协议类型与路由出站加入柔和色调徽标；「测速 / 查IP」改为轻描边圆角操作按钮，次级操作图标降噪；优化底部状态栏排版与列表底部留白，全面兼容现有 21 套主题与深浅色模式。
 
 ### v1.4.5 改动日志 (2026-11-21)
 
