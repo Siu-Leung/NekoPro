@@ -81,10 +81,15 @@ val Throwable.readableMessage
  * https://android.googlesource.com/platform/prebuilts/runtime/+/94fec32/appcompat/hiddenapi-light-greylist.txt#9466
  */
 
-private val socketGetFileDescriptor = Socket::class.java.getDeclaredMethod("getFileDescriptor\$")
+// 安全加固：改为 lazy 初始化。这两个是 Android 隐藏 API（JDK 的 Socket/FileDescriptor 没有
+// getFileDescriptor$/getInt$），原顶层 eager 反射会让纯 JVM 单元测试在加载本文件时直接抛
+// NoSuchMethodException → ExceptionInInitializerError，拖垮所有间接 import 本文件的测试。
+// lazy 后仅真正访问 fd/int 才解析；主流程行为不变（运行在 Android 上方法必然存在）。
+private val socketGetFileDescriptor by lazy { Socket::class.java.getDeclaredMethod("getFileDescriptor\$") }
 val Socket.fileDescriptor get() = socketGetFileDescriptor.invoke(this) as FileDescriptor
 
-private val getInt = FileDescriptor::class.java.getDeclaredMethod("getInt$")
+// 同上，FileDescriptor.getInt$ 同为 Android 隐藏 API。
+private val getInt by lazy { FileDescriptor::class.java.getDeclaredMethod("getInt$") }
 val FileDescriptor.int get() = getInt.invoke(this) as Int
 
 suspend fun <T> HttpURLConnection.useCancellable(block: suspend HttpURLConnection.() -> T): T {
