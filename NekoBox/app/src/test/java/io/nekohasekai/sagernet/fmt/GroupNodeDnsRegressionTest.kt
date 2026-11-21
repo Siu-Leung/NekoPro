@@ -47,10 +47,10 @@ class GroupNodeDnsRegressionTest {
     @Test
     fun resolverTagsAndTunRulesUseTheActualNodeGroup() {
         val plan = GroupNodeDnsPlan()
-        assertEquals("dns-group-8", plan.bind(8, first, "Node-A.Example."))
-        assertEquals("dns-group-9", plan.bind(9, second, "node-b.example"))
-        assertEquals("dns-group-8", plan.bind(8, first, "192.0.2.15"))
-        assertEquals("dns-group-10", plan.bind(10, second, "192.0.2.20"))
+        assertEquals("dns-group-8", plan.bind(8, listOf(first), "Node-A.Example."))
+        assertEquals("dns-group-9", plan.bind(9, listOf(second), "node-b.example"))
+        assertEquals("dns-group-8", plan.bind(8, listOf(first), "192.0.2.15"))
+        assertEquals("dns-group-10", plan.bind(10, listOf(second), "192.0.2.20"))
         val servers = plan.servers.associateBy { it.tag }
         val resolver = servers.getValue("dns-group-8")
         assertEquals("https", resolver.type)
@@ -70,8 +70,8 @@ class GroupNodeDnsRegressionTest {
     @Test
     fun ambiguousTunLookupDoesNotPickAnArbitraryResolver() {
         val plan = GroupNodeDnsPlan()
-        assertEquals("dns-group-1", plan.bind(1, first, "same.example"))
-        assertEquals("dns-group-2", plan.bind(2, second, "same.example"))
+        assertEquals("dns-group-1", plan.bind(1, listOf(first), "same.example"))
+        assertEquals("dns-group-2", plan.bind(2, listOf(second), "same.example"))
         val rule = plan.domainRules().single()
         assertEquals(listOf("same.example"), rule.domain)
         assertEquals("reject", rule.action)
@@ -144,5 +144,50 @@ class GroupNodeDnsRegressionTest {
             assertEquals(200L, recovered.landingProxy)
             assertEquals(307, input.readInt())
         }
+    }
+
+    /** 同一服务的多域名镜像：主端点打 dns-group-N，其余按序打 -1 / -2。 */
+    @Test
+    fun mirrorEndpointsGetOrderedTags() {
+        val plan = GroupNodeDnsPlan()
+        val primary = plan.bind(
+            37,
+            listOf(
+                "https://resolver-a.example:44443/dns-query/token",
+                "https://resolver-b.example:44443/dns-query/token",
+                "https://resolver-c.example/dns-query/token",
+            ),
+            "entry.example",
+        )
+        assertEquals("dns-group-37", primary)
+        val tags = plan.servers.map { it.tag }
+        assertEquals(listOf("dns-group-37", "dns-group-37-1", "dns-group-37-2"), tags)
+        // 三个端点路径一致（同一私有服务），全部保留为可用镜像
+        assertTrue(plan.servers.all { it.path == "/dns-query/token" })
+    }
+
+    /** 其中一行写坏时跳过该行，主端点仍然可用，不整组失败。 */
+    @Test
+    fun invalidMirrorIsSkippedWithoutLosingPrimary() {
+        val plan = GroupNodeDnsPlan()
+        val primary = plan.bind(
+            5,
+            listOf("https://good.example/dns-query/t", "https://bad.example:99999/dns-query/t"),
+            "entry.example",
+        )
+        assertEquals("dns-group-5", primary)
+        assertEquals(listOf("dns-group-5"), plan.servers.map { it.tag })
+    }
+
+    /** 组级手填支持多行，取第一行为主端点。 */
+    @Test
+    fun manualMultiLineResolverUsesFirstAsPrimary() {
+        val group = ProxyGroup().apply {
+            name = "multi"
+            type = GroupType.SUBSCRIPTION
+            outboundDns = "https://a.example/dns-query/t\nhttps://b.example/dns-query/t"
+        }
+        assertEquals(2, group.effectiveNodeDnsList().size)
+        assertEquals("https://a.example/dns-query/t", group.effectiveNodeDns())
     }
 }
