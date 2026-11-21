@@ -58,6 +58,8 @@ object Key {
     const val LOG_BUF_SIZE = "logBufSize"
     const val MTU = "mtu"
     const val ALWAYS_SHOW_ADDRESS = "alwaysShowAddress"
+    const val HIDE_NODE_ADDRESS = "hideNodeAddress"
+    const val SHOW_NODE_IP_OWNER = "showNodeIpOwner"
 
     // Protocol Settings
     const val GLOBAL_ALLOW_INSECURE = "globalAllowInsecure"

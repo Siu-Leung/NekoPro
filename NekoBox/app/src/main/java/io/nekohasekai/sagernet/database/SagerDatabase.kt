@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class],
-    version = 10,
+    version = 11,
     autoMigrations = [
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
         AutoMigration(from = 8, to = 9),
         // 只新增可空组 DNS 列；旧订阅 BLOB 原样保留，由 ProxyGroup 兼容读取。
         AutoMigration(from = 9, to = 10),
+        // v11：节点入口/出口地址与归属（可空，默认空串），不改动已有数据。
+        AutoMigration(from = 10, to = 11),
     ]
 )
 @TypeConverters(value = [KryoConverters::class, GsonConverters::class])

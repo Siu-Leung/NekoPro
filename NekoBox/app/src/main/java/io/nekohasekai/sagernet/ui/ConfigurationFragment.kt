@@ -58,6 +58,8 @@ import io.nekohasekai.sagernet.fmt.toUniversalLink
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.RawUpdater
 import io.nekohasekai.sagernet.ktx.FixedLinearLayoutManager
+import io.nekohasekai.sagernet.ipinfo.AddressRedactor
+import io.nekohasekai.sagernet.ipinfo.IpInfoStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.SubscriptionFoundException
 import io.nekohasekai.sagernet.ktx.alert
@@ -146,6 +148,14 @@ class ConfigurationFragment @JvmOverloads constructor(
     lateinit var groupPager: ViewPager2
 
     private var speedTestRunner: SpeedTestQueueRunner<ProxyEntity>? = null
+
+    /** 正在查询地址归属的节点，避免重复排程。 */
+    private val ipInfoInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+
+    private companion object {
+        /** 地址归属缓存有效期：6 小时。 */
+        const val IP_INFO_TTL_MS = 6 * 60 * 60 * 1000L
+    }
     private var speedTestJob: Job? = null
     private var speedTestDialog: AlertDialog? = null
     private var speedTestHidden = false
@@ -698,6 +708,90 @@ class ConfigurationFragment @JvmOverloads constructor(
             .setPositiveButton(R.string.speed_test_group) { _, _ -> speedTest() }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /** 地址行遮蔽走统一实现，避免界面与测试出现两套规则。 */
+    private fun redactNodeAddress(address: String): String = AddressRedactor.redactAddress(address)
+
+    /** 卡片第二行的入口/出口摘要；没有可用数据时返回 null 以隐藏该行。 */
+    private fun ipInfoLabel(entity: ProxyEntity): String? {
+        val parts = mutableListOf<String>()
+        if (entity.entryIp.isNotBlank() || entity.entryProvider.isNotBlank()) {
+            parts.add(
+                listOf(getString(R.string.node_entry_label), maskIp(entity.entryIp), entity.entryProvider)
+                    .filter { it.isNotBlank() }.joinToString(" ")
+            )
+        }
+        if (entity.exitIp.isNotBlank() || entity.exitProvider.isNotBlank()) {
+            parts.add(
+                listOf(getString(R.string.node_exit_label), maskIp(entity.exitIp), entity.exitProvider)
+                    .filter { it.isNotBlank() }.joinToString(" ")
+            )
+        }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString("  ·  ")
+    }
+
+    /** 隐藏开关只影响 IP 本身；服务商标签不经过这里。 */
+    private fun maskIp(ip: String): String = AddressRedactor.maskIp(ip, DataStore.hideNodeAddress)
+
+    /**
+     * 后台补齐入口/出口 IP 与归属。同一节点只排一次；结果写库后刷新卡片。
+     * 入口优先用组私有 DoH 解析（不泄露私有域名），出口仅在节点处于选中且服务运行时探测。
+     */
+    private fun requestNodeIpInfo(entity: ProxyEntity) {
+        val age = System.currentTimeMillis() - entity.ipInfoUpdatedAt
+        if (entity.ipInfoUpdatedAt > 0L && age in 0 until IP_INFO_TTL_MS) return
+        if (!ipInfoInFlight.add(entity.id)) return
+        runOnDefaultDispatcher {
+            try {
+                val bean = runCatching { entity.requireBean() }.getOrNull()
+                val host = bean?.serverAddress.orEmpty()
+                var entryIp = ""
+                var entryProvider = ""
+                if (host.isNotBlank()) {
+                    val groupDns = runCatching {
+                        SagerDatabase.groupDao.getById(entity.groupId)?.effectiveNodeDnsList().orEmpty()
+                    }.getOrDefault(emptyList())
+                    entryIp = IpInfoStore.resolveEntry(host, groupDns).orEmpty()
+                    if (entryIp.isNotEmpty()) {
+                        entryProvider = IpInfoStore.owner(entryIp)?.label().orEmpty()
+                    }
+                }
+                var exitIp = ""
+                var exitProvider = ""
+                if (entity.id == DataStore.selectedProxy && DataStore.serviceState.canStop) {
+                    exitIp = IpInfoStore.currentExitIp().orEmpty()
+                    if (exitIp.isNotEmpty()) exitProvider = IpInfoStore.owner(exitIp)?.label().orEmpty()
+                }
+                if (entryIp.isBlank() && exitIp.isBlank()) return@runOnDefaultDispatcher
+                SagerDatabase.proxyDao.updateIpInfo(
+                    proxyId = entity.id,
+                    entryIp = entryIp,
+                    entryProvider = entryProvider,
+                    exitIp = exitIp,
+                    exitProvider = exitProvider,
+                    updatedAt = System.currentTimeMillis(),
+                )
+                runOnMainDispatcher {
+                    if (!isAdded) return@runOnMainDispatcher
+                    adapter.groupFragments.values.forEach { fragment ->
+                        val configurationAdapter = fragment.adapter ?: return@forEach
+                        val updated = configurationAdapter.configurationList[entity.id] ?: return@forEach
+                        updated.entryIp = entryIp
+                        updated.entryProvider = entryProvider
+                        updated.exitIp = exitIp
+                        updated.exitProvider = exitProvider
+                        updated.ipInfoUpdatedAt = System.currentTimeMillis()
+                        val index = configurationAdapter.configurationIdList.indexOf(entity.id)
+                        if (index >= 0) configurationAdapter.notifyItemChanged(index)
+                    }
+                }
+            } catch (e: Exception) {
+                Logs.w(e)
+            } finally {
+                ipInfoInFlight.remove(entity.id)
+            }
+        }
     }
 
     private fun retryFailedSpeedTest() {
@@ -1900,6 +1994,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profileType: TextView = view.findViewById(R.id.profile_type)
             val profileAddress: TextView = view.findViewById(R.id.profile_address)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
+            val profileIpInfo: TextView = view.findViewById(R.id.profile_ip_info)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
             val selectedView: View = view.findViewById(R.id.selected_view)
@@ -2004,8 +2099,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (proxyEntity.requireBean().name!!.isBlank() || !pf.alwaysShowAddress || isDualColumn) {
                     address = ""
                 }
+                if (DataStore.hideNodeAddress && address.isNotEmpty()) {
+                    address = redactNodeAddress(address)
+                }
 
                 profileAddress.text = address
+                val ipInfoText = if (DataStore.showNodeIpOwner) ipInfoLabel(proxyEntity) else null
+                profileIpInfo.text = ipInfoText.orEmpty()
+                profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
+                if (!ipInfoText.isNullOrBlank() && !isDualColumn) {
+                    pf.requestNodeIpInfo(proxyEntity)
+                }
                 (trafficText.parent as View).isGone =
                     (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
 

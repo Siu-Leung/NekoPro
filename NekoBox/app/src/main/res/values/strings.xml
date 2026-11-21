@@ -322,6 +322,12 @@
     <string name="available" translatable="false">%dms</string>
     <string name="unavailable">Unavailable</string>
     <string name="always_show_address">Always Show Address</string>
+    <string name="show_node_ip_owner">Show IP owner</string>
+    <string name="show_node_ip_owner_sum">Display entry and exit address owners on the node card. Owners are never hidden.</string>
+    <string name="hide_node_address">Hide addresses (screenshot friendly)</string>
+    <string name="hide_node_address_sum">Mask node domains and IPs on the card while keeping countries and owners visible.</string>
+    <string name="node_entry_label">Entry</string>
+    <string name="node_exit_label">Exit</string>
     <string name="always_show_address_sum">Always display the server address on the configuration
         card</string>
     <string name="clear_traffic_statistics">Clear traffic statistics</string>

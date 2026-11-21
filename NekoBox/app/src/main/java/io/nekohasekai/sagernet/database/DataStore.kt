@@ -187,6 +187,12 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var simpleDownloadURL by configurationStore.string(Key.SIMPLE_DOWNLOAD_URL) { "https://speed.cloudflare.com/__down?bytes=200000000" }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
 
+    /** 截图友好：隐藏节点域名与 IP，但保留服务商与地区。 */
+    var hideNodeAddress by configurationStore.boolean(Key.HIDE_NODE_ADDRESS) { false }
+
+    /** 在卡片上显示入口/出口 IP 归属（服务商）。 */
+    var showNodeIpOwner by configurationStore.boolean(Key.SHOW_NODE_IP_OWNER) { true }
+
     var tunImplementation by configurationStore.stringToInt(Key.TUN_IMPLEMENTATION) { TunImplementation.GVISOR }
     var profileTrafficStatistics by configurationStore.boolean(Key.PROFILE_TRAFFIC_STATISTICS) { true }
 

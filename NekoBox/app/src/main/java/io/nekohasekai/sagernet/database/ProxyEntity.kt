@@ -82,6 +82,12 @@ data class ProxyEntity(
     @ColumnInfo(defaultValue = "''") var speedTestMode: String = "",
     @ColumnInfo(defaultValue = "0") var speedTestDownloadBitsPerSecond: Long = 0L,
     @ColumnInfo(defaultValue = "0") var speedTestUploadBitsPerSecond: Long = 0L,
+    // 入口/出口地址与归属。IP 可被界面隐藏，服务商始终显示；归属查询失败时保持空。
+    @ColumnInfo(defaultValue = "''") var entryIp: String = "",
+    @ColumnInfo(defaultValue = "''") var entryProvider: String = "",
+    @ColumnInfo(defaultValue = "''") var exitIp: String = "",
+    @ColumnInfo(defaultValue = "''") var exitProvider: String = "",
+    @ColumnInfo(defaultValue = "0") var ipInfoUpdatedAt: Long = 0L,
 ) : Serializable() {
 
     companion object {
@@ -133,7 +139,7 @@ data class ProxyEntity(
     }
 
     override fun serializeToBuffer(output: ByteBufferOutput) {
-        output.writeInt(1)
+        output.writeInt(2)
 
         output.writeLong(id)
         output.writeLong(groupId)
@@ -148,6 +154,12 @@ data class ProxyEntity(
         output.writeString(speedTestMode)
         output.writeLong(speedTestDownloadBitsPerSecond)
         output.writeLong(speedTestUploadBitsPerSecond)
+        // v2：地址归属随完整备份保存，旧备份按版本号跳过。
+        output.writeString(entryIp)
+        output.writeString(entryProvider)
+        output.writeString(exitIp)
+        output.writeString(exitProvider)
+        output.writeLong(ipInfoUpdatedAt)
 
         val data = KryoConverters.serialize(requireBean())
         output.writeVarInt(data.size, true)
@@ -173,6 +185,13 @@ data class ProxyEntity(
             speedTestMode = input.readString() ?: ""
             speedTestDownloadBitsPerSecond = input.readLong()
             speedTestUploadBitsPerSecond = input.readLong()
+        }
+        if (version >= 2) {
+            entryIp = input.readString() ?: ""
+            entryProvider = input.readString() ?: ""
+            exitIp = input.readString() ?: ""
+            exitProvider = input.readString() ?: ""
+            ipInfoUpdatedAt = input.readLong()
         }
         putByteArray(input.readBytes(input.readVarInt(true)))
 
@@ -579,6 +598,24 @@ data class ProxyEntity(
         fun updateSpeedTestFailure(
             proxyId: Long,
             error: String,
+        ): Int
+
+        @Query(
+            """UPDATE proxy_entities SET
+                entryIp = :entryIp,
+                entryProvider = :entryProvider,
+                exitIp = :exitIp,
+                exitProvider = :exitProvider,
+                ipInfoUpdatedAt = :updatedAt
+                WHERE id = :proxyId"""
+        )
+        fun updateIpInfo(
+            proxyId: Long,
+            entryIp: String,
+            entryProvider: String,
+            exitIp: String,
+            exitProvider: String,
+            updatedAt: Long,
         ): Int
 
         @Query("UPDATE proxy_entities SET tx = :tx, rx = :rx WHERE id = :proxyId")

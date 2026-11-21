@@ -280,6 +280,12 @@
     <string name="standard">标准</string>
     <string name="unavailable">不可用</string>
     <string name="always_show_address">始终显示地址</string>
+    <string name="show_node_ip_owner">显示 IP 服务商</string>
+    <string name="show_node_ip_owner_sum">在节点卡片上显示入口与出口 IP 的归属服务商。服务商始终不隐藏。</string>
+    <string name="hide_node_address">隐藏地址（方便截图）</string>
+    <string name="hide_node_address_sum">遮蔽卡片上的节点域名与 IP，但保留地区与服务商信息。</string>
+    <string name="node_entry_label">入口</string>
+    <string name="node_exit_label">出口</string>
     <string name="always_show_address_sum">始终在配置卡片上显示服务器地址</string>
     <string name="clear_traffic_statistics">清空流量统计数据</string>
     <string name="connection_test">连接测试</string>
