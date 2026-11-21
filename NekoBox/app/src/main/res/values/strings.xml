@@ -649,7 +649,7 @@
     <string name="speed_test_rate_mbps">%1$.2f Mbps</string>
     <string name="speed_test_finished_summary">Finished: %1$d, failed: %2$d, cancelled: %3$d</string>
     <string name="subscription_node_dns">Node Domain DNS</string>
-    <string name="subscription_node_dns_sum">Optional DNS used only to resolve proxy server hostnames in this group</string>
+    <string name="subscription_node_dns_sum">Resolvers for proxy entry hostnames in this group. One endpoint per line: the first is primary, extra lines are ordered fallbacks.</string>
     <string name="subscription_auto_adopt_node_dns">Auto-adopt Node DNS from Clash YAML</string>
     <string name="subscription_auto_adopt_node_dns_sum">Adopt dns.proxy-server-nameserver from Clash YAML on refresh. Manual DNS takes priority.</string>
     <string name="subscription_node_dns_status">Node DNS status</string>

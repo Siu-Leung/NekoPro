@@ -55,7 +55,7 @@ object RawUpdater : GroupUpdater() {
         // An explicit group DNS is sufficient; a nodes-only subscription can still refresh.
         val requireAdoptedDns = proxyGroup.requiresNodeDnsAdoption()
         val savedManualDns = proxyGroup.manualNodeDns()
-        var adoptedNodeDnsCandidate: String? = null
+        var adoptedNodeDnsCandidate: List<String> = emptyList()
         var proxies: List<AbstractBean>
         if (link!!.startsWith("content://")) {
             val maxChars = 16 * 1024 * 1024
@@ -76,8 +76,8 @@ object RawUpdater : GroupUpdater() {
             proxies = contentText?.let { parseSubscription(it)?.takeIf(List<AbstractBean>::isNotEmpty) }
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
             if (requireAdoptedDns) {
-                adoptedNodeDnsCandidate = extractClashProxyServerNameserver(contentText)
-                    ?: error(app.getString(R.string.group_node_dns_refresh_missing))
+                adoptedNodeDnsCandidate = extractClashProxyServerNameservers(contentText)
+                if (adoptedNodeDnsCandidate.isEmpty()) error(app.getString(R.string.group_node_dns_refresh_missing))
             }
         } else {
             // Keep both Clash UAs for automatic subscription DNS. Prefer Clash with a manual
@@ -130,8 +130,8 @@ object RawUpdater : GroupUpdater() {
                     if (parsed.isNullOrEmpty()) {
                         throw IllegalStateException("no proxies found with UA: $candidate")
                     }
-                    val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameserver(responseText) else null
-                    if (requireAdoptedDns && candidateDns == null) {
+                    val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameservers(responseText) else emptyList()
+                    if (requireAdoptedDns && candidateDns.isEmpty()) {
                         validNodesWithoutDns = true
                         continue
                     }
@@ -190,7 +190,7 @@ object RawUpdater : GroupUpdater() {
         proxies = proxiesMap.values.toList()
 
         // A group resolver must see the original node hostname, not a public DNS result.
-        if (subscription.forceResolve == true && savedManualDns == null && adoptedNodeDnsCandidate == null) {
+        if (subscription.forceResolve == true && savedManualDns == null && adoptedNodeDnsCandidate.isEmpty()) {
             forceResolve(proxies, proxyGroup.id)
         }
 
@@ -320,7 +320,7 @@ object RawUpdater : GroupUpdater() {
             }
 
             // The source DNS and node list are one snapshot; a failed refresh changes neither.
-            if (adoptedNodeDnsCandidate != null) subscription.adoptedNodeDns = adoptedNodeDnsCandidate
+            if (adoptedNodeDnsCandidate.isNotEmpty()) subscription.adoptedNodeDns = adoptedNodeDnsCandidate.joinToString("\n")
             subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
             SagerDatabase.groupDao.updateGroup(proxyGroup)
         }
@@ -333,34 +333,86 @@ object RawUpdater : GroupUpdater() {
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? =
         parseRaw(text, fileName, forSubscription = false)
 
-    /** Read exactly one usable node resolver from a Clash snapshot, never ordinary website DNS. */
-    internal fun extractClashProxyServerNameserver(text: String): String? {
-        if (!clashProxiesKey.containsMatchIn(text)) return null
+    /**
+     * Read usable node resolvers from a Clash snapshot, never ordinary website DNS.
+     * 返回顺序与配置一致（主端点在前，镜像在后）。proxy-server-nameserver 是回环/自指
+     * 指针（Kuromis 类完整配置指向 Clash 自身监听）时，回退采纳 dns.nameserver 中同一
+     * 私有服务的多域名镜像端点，全部返回供 Go 侧逐个回退。
+     */
+    internal fun extractClashProxyServerNameservers(text: String): List<String> {
+        if (!clashProxiesKey.containsMatchIn(text)) return emptyList()
         val loaderOptions = LoaderOptions().apply {
             codePointLimit = 8 * 1024 * 1024
         }
         val yaml = runCatching {
             Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<*, *>
-        }.getOrNull() ?: return null
-        val dns = yaml["dns"] as? Map<*, *> ?: return null
-        val raw = dns["proxy-server-nameserver"] ?: return null
-        val entries = when (raw) {
-            is String -> listOf(raw.trim())
-            is List<*> -> raw.map { (it as? String)?.trim() ?: return null }
-            else -> return null
-        }.distinct()
-        val candidate = entries.singleOrNull()?.takeIf { it.isNotEmpty() } ?: return null
-        // Bare words are parsed as plaintext UDP hosts. Only an explicit transport or a literal
-        // IP is an unambiguous, portable resolver; never adopt an unknown hostname from site DNS.
-        if (!candidate.contains("://") && !SingBoxDnsServerParser.isIpLiteral(candidate)) return null
-        return runCatching {
-            val transport = SingBoxDnsServerParser.parseGroupNodeDns(candidate, "probe-node-dns")
-            // Other apps may publish their own loopback listener. It is not a portable resolver.
-            val host = transport.server?.trimEnd('.')?.lowercase() ?: return null
-            if (host == "localhost" || host.endsWith(".localhost") || host == "::1" ||
-                (SingBoxDnsServerParser.isIpLiteral(host) && host.startsWith("127."))) return null
-            candidate
-        }.getOrNull()
+        }.getOrNull() ?: return emptyList()
+        val dns = yaml["dns"] as? Map<*, *> ?: return emptyList()
+
+        // 1) proxy-server-nameserver：直接的节点解析器指针。接受单一可移植端点或
+        //    一组彼此独立的可移植端点（罕见；一般是一个）。
+        val psnRaw = (dns["proxy-server-nameserver"] as? List<*>)
+            ?: (dns["proxy-server-nameserver"] as? String)?.let { listOf(it) }
+        val direct = extractPortableEndpointList(psnRaw, includeMirrors = false)
+        if (direct.isNotEmpty()) return direct
+
+        // 2) 回退：仅当 proxy-server-nameserver 明确指向本机（udp://127.0.0.1:xxxx /
+        //    localhost，即 Clash 自身 DNS 监听）时，才采纳 dns.nameserver 的镜像端点组。
+        //    普通订阅没有 psn 时绝不碰 nameserver——那是网站 DNS，不是节点解析器。
+        val selfPointing = psnRaw?.map { (it as? String)?.trim() }
+            ?.filter { !it.isNullOrEmpty() }?.map { it!! }
+            ?.all { entry ->
+                if (entry.contains('?') || entry.contains('#')) return@all false
+                runCatching {
+                    val transport = SingBoxDnsServerParser.parseGroupNodeDns(entry, "probe-node-dns")
+                    val host = transport.server?.trimEnd('.')?.lowercase() ?: return@runCatching false
+                    host == "localhost" || host.endsWith(".localhost") || host == "::1" ||
+                        host == "0.0.0.0" ||
+                        (SingBoxDnsServerParser.isIpLiteral(host) && host.startsWith("127."))
+                }.getOrDefault(false)
+            } == true && !psnRaw.isNullOrEmpty()
+        if (!selfPointing) return emptyList()
+        return extractPortableEndpointList(dns["nameserver"] as? List<*>, includeMirrors = true)
+    }
+
+    /**
+     * 从一组 Clash DNS 端点字符串中提取可移植解析器。
+     * @param includeMirrors true 时允许返回多个端点（要求同一服务镜像：type+port+path
+     *   完全一致，path 常含每用户 UUID）；false 时只接受单一端点。
+     * 永远拒绝：裸词（明文 UDP 域名歧义）、system/local/DHCP、回环、query/fragment。
+     */
+    private fun extractPortableEndpointList(raw: List<*>?, includeMirrors: Boolean): List<String> {
+        val candidates = raw?.map { (it as? String)?.trim() }?.filter { !it.isNullOrEmpty() }?.map { it!! }
+            ?: return emptyList()
+        data class Endpoint(val raw: String, val type: String, val host: String, val port: Int?, val path: String?)
+
+        val endpoints = candidates.mapNotNull { entry ->
+            // Bare words are parsed as plaintext UDP hosts. Only an explicit transport or a
+            // literal IP is an unambiguous, portable resolver; never adopt an unknown hostname.
+            if (!entry.contains("://") && !SingBoxDnsServerParser.isIpLiteral(entry)) return@mapNotNull null
+            if (entry.contains('?') || entry.contains('#')) return@mapNotNull null
+            // 非法端口/authority 等直接跳过该端点，不让一条坏记录毁掉整组采纳。
+            val transport = runCatching {
+                SingBoxDnsServerParser.parseGroupNodeDns(entry, "probe-node-dns")
+            }.getOrNull() ?: return@mapNotNull null
+            val host = transport.server?.trimEnd('.')?.lowercase() ?: return@mapNotNull null
+            val loopback = host == "localhost" || host.endsWith(".localhost") || host == "::1" ||
+                host == "0.0.0.0" ||
+                (SingBoxDnsServerParser.isIpLiteral(host) && host.startsWith("127."))
+            if (loopback) return@mapNotNull null
+            Endpoint(entry, transport.type ?: "", host, transport.server_port,
+                transport.path?.takeIf { it.isNotBlank() })
+        }.distinctBy { it.raw }
+        if (endpoints.isEmpty()) return emptyList()
+        if (!includeMirrors) {
+            return if (endpoints.size == 1) listOf(endpoints[0].raw) else emptyList()
+        }
+        // 同一服务镜像判定：type+port+path 全一致。path 常含每用户 UUID，是比域名更强的身份。
+        val first = endpoints[0]
+        val sameService = endpoints.all {
+            it.type == first.type && it.port == first.port && it.path == first.path
+        }
+        return if (sameService) endpoints.map { it.raw } else emptyList()
     }
 
     internal suspend fun parseSubscription(text: String): List<AbstractBean>? {

@@ -330,13 +330,13 @@ fun buildConfig(
                 var needGlobal = false
 
                 val entityGroup = SagerDatabase.groupDao.getById(proxyEntity.groupId)
-                val groupNodeDns = entityGroup?.effectiveNodeDns()
+                val groupNodeDnsList = entityGroup?.effectiveNodeDnsList().orEmpty()
                 // A custom outbound owns its `server` setting, not the bean's default placeholder.
                 val entryHost = if (bean is ConfigBean) {
                     (gson.fromJson(bean.config, Map::class.java)?.get("server") as? String).orEmpty()
                 } else bean.serverAddress.orEmpty()
                 val entryIsDomain = entryHost.isNotBlank() && !SingBoxDnsServerParser.isIpLiteral(entryHost)
-                if (entryIsDomain && groupNodeDns == null && entityGroup?.requiresNodeDnsAdoption() == true) {
+                if (entryIsDomain && groupNodeDnsList.isEmpty() && entityGroup?.requiresNodeDnsAdoption() == true) {
                     // 逻辑修正（2026-11-21）：不再硬性中止构建。自动采纳开启但订阅源从不提供
                     // dns.proxy-server-nameserver 时（如纯节点订阅），旧行为（≤1.4.1）是回退
                     // default_domain_resolver=dns-direct 拨号；公网可解析的节点仍可用，私有
@@ -345,7 +345,7 @@ fun buildConfig(
                     // 刷新提示引导手填。
                     Logs.w("Group '${entityGroup.displayName()}' has auto-adopt node DNS enabled but no resolver; falling back to the default resolver for ${bean.displayName()}")
                 }
-                if (entryIsDomain && groupNodeDns != null && proxyEntity.needExternal()) {
+                if (entryIsDomain && groupNodeDnsList.isNotEmpty() && proxyEntity.needExternal()) {
                     // 组解析器无法绑定到外部插件的本地 SOCKS 占位出站（占位是 127.0.0.1）。
                     // 与上一条同理改为警告：插件自身仍按其原有方式解析入口域名。
                     Logs.w("Group resolver cannot bind to external plugin outbound ${bean.displayName()}; skipping explicit domain_resolver")
@@ -355,7 +355,7 @@ fun buildConfig(
                 if (index == profileList.lastIndex) {
                     needGlobal = true
                     tagOut = "g-" + proxyEntity.id
-                    if (groupNodeDns.isNullOrBlank()) {
+                    if (groupNodeDnsList.isEmpty()) {
                         bypassDNSBeans += proxyEntity.requireBean()
                     }
                 }
@@ -477,9 +477,10 @@ fun buildConfig(
                         if (forTest) "" else defaultServerDomainStrategy
 
                     // Explicit resolver also applies in URL tests and on detoured chain hops.
-                    if (groupNodeDns != null && !proxyEntity.needExternal()) {
+                    // 多端点容错：第一行为主端点，其余为镜像（Go 侧按 tag 后缀回退）。
+                    if (groupNodeDnsList.isNotEmpty() && !proxyEntity.needExternal()) {
                         _hack_config_map["domain_resolver"] = try {
-                            groupNodeDnsPlan.bind(proxyEntity.groupId, groupNodeDns, entryHost)
+                            groupNodeDnsPlan.bind(proxyEntity.groupId, groupNodeDnsList, entryHost)
                         } catch (_: IllegalArgumentException) {
                             throw IllegalArgumentException(app.getString(R.string.group_node_dns_invalid))
                         }

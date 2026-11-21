@@ -42,8 +42,8 @@ class Pr6ClashSnapshotRegressionTest {
               - {name: kept, type: socks5, server: example.com, port: 1080}
         """.trimIndent()
         assertEquals(
-            "https://dns.example.com/dns-query/token",
-            RawUpdater.extractClashProxyServerNameserver(validYaml),
+            listOf("https://dns.example.com/dns-query/token"),
+            RawUpdater.extractClashProxyServerNameservers(validYaml),
         )
 
         val suffixYaml = """
@@ -53,7 +53,7 @@ class Pr6ClashSnapshotRegressionTest {
             proxies:
               - {name: kept, type: socks5, server: example.com, port: 1080}
         """.trimIndent()
-        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(suffixYaml))
+        assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(suffixYaml))
 
         val queryYaml = """
             dns:
@@ -62,15 +62,15 @@ class Pr6ClashSnapshotRegressionTest {
             proxies:
               - {name: kept, type: socks5, server: example.com, port: 1080}
         """.trimIndent()
-        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(queryYaml))
+        assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(queryYaml))
     }
 
     /** Auto-adoption must never promote website DNS or another client's local listener. */
     @Test
     fun autoAdoptionRefusesNonportableResolvers() {
-        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(valid))
+        assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(valid))
         val websiteDns = "dns:\n  nameserver: [https://resolver.example/dns-query]\n$valid"
-        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(websiteDns))
+        assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(websiteDns))
         for (candidate in listOf(
             "['udp://127.0.0.1:7874']",
             "['http://[::1]:7874/dns-query']",
@@ -80,8 +80,38 @@ class Pr6ClashSnapshotRegressionTest {
             "['https://resolver.example/dns-query', {unexpected: mapping}]",
         )) {
             val text = "dns:\n  proxy-server-nameserver: $candidate\n$valid"
-            assertEquals(null, RawUpdater.extractClashProxyServerNameserver(text))
+            assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(text))
         }
+    }
+
+    /** Kuromis 形态：psn 指向 Clash 自身监听，真实解析器在 dns.nameserver 的同服务多域名镜像里。 */
+    @Test
+    fun selfPointingResolverFallsBackToNameserverMirrors() {
+        val mirrorPath = "/dns-query/6e4d9b50-uuid"
+        val kuromis = """
+            dns:
+              listen: 0.0.0.0:7874
+              proxy-server-nameserver: [udp://127.0.0.1:7874]
+              nameserver:
+                - https://hydrogen1693.example:44443$mirrorPath
+                - https://subprime7404.example:44443$mirrorPath
+                - https://tribunal2944.example$mirrorPath
+            proxies:
+              - {name: kept, type: socks5, server: entry.example, port: 1080}
+        """.trimIndent()
+        assertEquals(
+            listOf(
+                "https://hydrogen1693.example:44443$mirrorPath",
+                "https://subprime7404.example:44443$mirrorPath",
+                "https://tribunal2944.example$mirrorPath",
+            ),
+            RawUpdater.extractClashProxyServerNameservers(kuromis),
+        )
+        // 不同服务的镜像（path 不同）不可合并采纳——不猜。
+        val mixedServices = kuromis.replace(mirrorPath, mirrorPath).replace(
+            "https://tribunal2944.example$mirrorPath", "https://tribunal2944.example/other-path",
+        )
+        assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(mixedServices))
     }
 
     @Test

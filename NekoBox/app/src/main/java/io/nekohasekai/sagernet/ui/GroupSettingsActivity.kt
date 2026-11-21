@@ -180,9 +180,15 @@ class GroupSettingsActivity(
         }
 
         findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnPreferenceChangeListener { _, newValue ->
-            val raw = (newValue as? String)?.trim().orEmpty()
-            raw.isEmpty() || runCatching {
-                moe.matsuri.nb4a.SingBoxDnsServerParser.parseGroupNodeDns(raw, "dns-group-validate")
+            // 多端点容错：每行一个端点，第一行为主端点，其余为镜像。任一行非法即拒绝保存。
+            val lines = (newValue as? String)?.trim().orEmpty()
+                .split('\n')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            lines.isEmpty() || runCatching {
+                lines.forEach {
+                    moe.matsuri.nb4a.SingBoxDnsServerParser.parseGroupNodeDns(it, "dns-group-validate")
+                }
             }.onFailure {
                 // Resolver paths can contain credentials; errors must not echo the entered URL.
                 Toast.makeText(this@GroupSettingsActivity, R.string.group_node_dns_invalid, Toast.LENGTH_SHORT).show()

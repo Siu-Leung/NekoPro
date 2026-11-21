@@ -39,9 +39,16 @@ data class ProxyGroup(
         subscription?.nodeDns = ""
     }
 
-    /** 返回拨号时使用的解析器；手填优先，自动采纳仅对订阅组有效。 */
-    fun effectiveNodeDns(): String? = manualNodeDns()
-        ?: subscription?.takeIf { type == GroupType.SUBSCRIPTION }?.effectiveNodeDns()
+    /** 返回拨号时使用的解析器列表（每行一个端点）；手填优先，自动采纳仅对订阅组有效。 */
+    fun effectiveNodeDnsList(): List<String> = (manualNodeDns()
+        ?: subscription?.takeIf { type == GroupType.SUBSCRIPTION }?.effectiveNodeDns())
+        ?.split('\n')
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        .orEmpty()
+
+    /** 兼容旧调用方的单值形式（主端点）。 */
+    fun effectiveNodeDns(): String? = effectiveNodeDnsList().firstOrNull()
 
     /** 订阅刷新是否必须携带可用的节点 DNS。手填已经满足要求时，不强制来源额外下发。 */
     fun requiresNodeDnsAdoption(): Boolean = type == GroupType.SUBSCRIPTION &&

@@ -564,7 +564,7 @@
     <string name="route_mode_global">全局代理 (Global)</string>
     <string name="route_mode_switched">已切换至：%1$s</string>
     <string name="subscription_node_dns">节点域名 DNS</string>
-    <string name="subscription_node_dns_sum">可选，仅用于解析本组代理节点的入口域名</string>
+    <string name="subscription_node_dns_sum">用于解析本组节点入口域名。每行一个端点：第一行为主端点，后续为依次回退的镜像。</string>
     <string name="subscription_auto_adopt_node_dns">自动采用订阅节点 DNS</string>
     <string name="subscription_auto_adopt_node_dns_sum">刷新时采纳 Clash YAML 的 dns.proxy-server-nameserver。手填地址优先。</string>
     <string name="subscription_node_dns_status">节点 DNS 状态</string>
