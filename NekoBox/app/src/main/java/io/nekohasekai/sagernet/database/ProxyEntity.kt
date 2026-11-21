@@ -317,6 +317,36 @@ data class ProxyEntity(
         }
     }
 
+    /**
+     * 导出/分享用的链接。
+     *
+     * 私有入口域名（Kuromis 这类）通常只能被机场自己的 DoH 解析：直接导出域名，
+     * 对方导入后既解析不了也连不上。此时改用已探测到的真实入口 IP，
+     * 让链接在别人机器上可以直接使用。没有可用 IP 时保持原样导出。
+     *
+     * @param universal true 导出通用链接，false 导出标准协议链接
+     */
+    fun exportLink(universal: Boolean): String {
+        val bean = runCatching { requireBean() }.getOrNull()
+            ?: return if (universal) toUniversalLink() else toStdLink()
+        val host = bean.serverAddress.orEmpty()
+        val resolved = entryIp.trim()
+        val substitutable = resolved.isNotEmpty() &&
+            io.nekohasekai.sagernet.ipinfo.IpInfoStore.isIpLiteral(resolved) &&
+            host.isNotEmpty() &&
+            !io.nekohasekai.sagernet.ipinfo.IpInfoStore.isIpLiteral(host)
+        if (!substitutable) {
+            return if (universal) bean.toUniversalLink() else toStdLink()
+        }
+        // 只在生成链接的瞬间替换，链接生成后立刻还原，避免影响卡片与连接。
+        return try {
+            bean.serverAddress = resolved
+            if (universal) bean.toUniversalLink() else toStdLink()
+        } finally {
+            bean.serverAddress = host
+        }
+    }
+
     fun exportConfig(): Pair<String, String> {
         var name = "${requireBean().displayName()}.json"
 

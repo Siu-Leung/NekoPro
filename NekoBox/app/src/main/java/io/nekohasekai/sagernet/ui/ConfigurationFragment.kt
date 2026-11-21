@@ -735,6 +735,44 @@ class ConfigurationFragment @JvmOverloads constructor(
     private fun maskIp(ip: String): String = AddressRedactor.maskIp(ip, DataStore.hideNodeAddress)
 
     /**
+     * 导出前确保入口 IP 已解析：卡片通常已触发解析，这里只对“点了分享但还没解析到”的
+     * 节点做一次带超时的即时解析，失败就用现有值导出，不阻塞用户。
+     */
+    private fun exportWithResolvedIp(entity: ProxyEntity, universal: Boolean, action: (String) -> Unit) {
+        val current = entity.entryIp
+        if (current.isNotBlank() && IpInfoStore.isIpLiteral(current)) {
+            action(entity.exportLink(universal))
+            return
+        }
+        runOnDefaultDispatcher {
+            runCatching {
+                val bean = entity.requireBean()
+                val host = bean.serverAddress.orEmpty()
+                if (host.isNotBlank() && !IpInfoStore.isIpLiteral(host)) {
+                    val groupDns = SagerDatabase.groupDao.getById(entity.groupId)?.effectiveNodeDnsList().orEmpty()
+                    val resolved = IpInfoStore.resolveEntry(host, groupDns).orEmpty()
+                    if (resolved.isNotEmpty()) {
+                        entity.entryIp = resolved
+                        entity.entryProvider = IpInfoStore.owner(resolved)?.label().orEmpty()
+                        entity.ipInfoUpdatedAt = System.currentTimeMillis()
+                        SagerDatabase.proxyDao.updateIpInfo(
+                            proxyId = entity.id,
+                            entryIp = entity.entryIp,
+                            entryProvider = entity.entryProvider,
+                            exitIp = entity.exitIp,
+                            exitProvider = entity.exitProvider,
+                            updatedAt = entity.ipInfoUpdatedAt,
+                        )
+                    }
+                }
+            }.onFailure { Logs.w(it) }
+            runOnMainDispatcher {
+                if (isAdded) action(entity.exportLink(universal))
+            }
+        }
+    }
+
+    /**
      * 后台补齐入口/出口 IP 与归属。同一节点只排一次；结果写库后刷新卡片。
      * 入口优先用组私有 DoH 解析（不泄露私有域名），出口仅在节点处于选中且服务运行时探测。
      */
@@ -2241,12 +2279,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 try {
                     currentName = entity.displayName()!!
                     when (item.itemId) {
-                        R.id.action_standard_qr -> showCode(entity.toStdLink())
-                        R.id.action_standard_clipboard -> export(entity.toStdLink())
-                        R.id.action_universal_qr -> showCode(entity.requireBean().toUniversalLink())
-                        R.id.action_universal_clipboard -> export(
-                            entity.requireBean().toUniversalLink()
-                        )
+                        // 私有入口域名导出时改用真实 IP，别人导入后才连得上。
+                        R.id.action_standard_qr -> pf.exportWithResolvedIp(entity, universal = false) { showCode(it) }
+                        R.id.action_standard_clipboard -> pf.exportWithResolvedIp(entity, universal = false) { export(it) }
+                        R.id.action_universal_qr -> pf.exportWithResolvedIp(entity, universal = true) { showCode(it) }
+                        R.id.action_universal_clipboard -> pf.exportWithResolvedIp(entity, universal = true) { export(it) }
 
                         R.id.action_config_export_clipboard -> export(entity.exportConfig().first)
                         R.id.action_config_export_file -> {
