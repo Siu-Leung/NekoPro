@@ -112,6 +112,11 @@ func (c *STDClientConfig) SetECHConfigList(EncryptedClientHelloConfigList []byte
 }
 
 func NewSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
+	// The legacy direct caller (Juicity) can replace VerifyPeerCertificate with its own pin.
+	// Require the normal dispatcher for DER pins so they cannot be silently overwritten.
+	if len(options.CertificateSHA256) > 0 {
+		return nil, E.New("certificate_sha256 requires the standard TLS client dispatcher")
+	}
 	return newSTDClient(ctx, logger, serverAddress, options, false)
 }
 
@@ -134,7 +139,17 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 	} else if options.DisableSNI {
 		tlsConfig.InsecureSkipVerify = true
 	}
-	if len(options.CertificatePublicKeySHA256) > 0 {
+	verifyCertificateSHA256, err := newCertificateSHA256Verifier(options)
+	if err != nil {
+		return nil, err
+	}
+	if verifyCertificateSHA256 != nil {
+		// A DER pin replaces PKI verification and is enforced even with insecure=true.
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyPeerCertificate = verifyCertificateSHA256
+		// VerifyPeerCertificate is skipped on resumed sessions.
+		tlsConfig.SessionTicketsDisabled = true
+	} else if len(options.CertificatePublicKeySHA256) > 0 {
 		if len(options.Certificate) > 0 || options.CertificatePath != "" {
 			return nil, E.New("certificate_public_key_sha256 is conflict with certificate or certificate_path")
 		}
@@ -236,7 +251,7 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 		config:                &tlsConfig,
 		serverName:            serverName,
 		disableSNI:            options.DisableSNI,
-		verifyServerName:      options.DisableSNI && !options.Insecure,
+		verifyServerName:      options.DisableSNI && !options.Insecure && verifyCertificateSHA256 == nil,
 		handshakeTimeout:      handshakeTimeout,
 		fragment:              options.Fragment,
 		fragmentFallbackDelay: time.Duration(options.FragmentFallbackDelay),

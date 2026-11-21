@@ -41,6 +41,12 @@
         app:title="@string/landing_proxy"
         app:useSimpleSummaryProvider="true" />
 
+    <EditTextPreference
+        app:icon="@drawable/ic_action_dns"
+        app:key="subscriptionNodeDns"
+        app:summary="@string/subscription_node_dns_sum"
+        app:title="@string/subscription_node_dns" />
+
     <PreferenceCategory
         app:key="groupSubscription"
         app:title="@string/subscription_settings">
@@ -63,18 +69,16 @@
             app:summary="@string/deduplication_sum"
             app:title="@string/deduplication" />
 
-        <EditTextPreference
-            app:icon="@drawable/ic_action_dns"
-            app:key="subscriptionNodeDns"
-            app:summary="@string/subscription_node_dns_sum"
-            app:title="@string/subscription_node_dns"
-            app:useSimpleSummaryProvider="true" />
-
         <SwitchPreference
             app:icon="@drawable/ic_action_dns"
             app:key="subscriptionAutoAdoptNodeDns"
             app:summary="@string/subscription_auto_adopt_node_dns_sum"
             app:title="@string/subscription_auto_adopt_node_dns" />
+
+        <Preference
+            app:key="subscriptionNodeDnsStatus"
+            app:selectable="false"
+            app:title="@string/subscription_node_dns_status" />
 
     </PreferenceCategory>
 

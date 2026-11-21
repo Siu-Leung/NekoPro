@@ -1,6 +1,7 @@
 package moe.matsuri.nb4a.proxy.anytls
 
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.fmt.toUniversalLink
 import io.nekohasekai.sagernet.ktx.blankAsNull
 import io.nekohasekai.sagernet.ktx.linkBuilder
 import io.nekohasekai.sagernet.ktx.redactLink
@@ -10,7 +11,13 @@ import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.utils.listByLineOrComma
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_AnyTLSOptions {
+fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_AnyTLSOptions =
+    buildSingBoxOutboundAnyTLSBean(bean, DataStore.globalAllowInsecure)
+
+internal fun buildSingBoxOutboundAnyTLSBean(
+    bean: AnyTLSBean,
+    globalAllowInsecure: Boolean,
+): SingBoxOptions.Outbound_AnyTLSOptions {
     return SingBoxOptions.Outbound_AnyTLSOptions().apply {
         type = "anytls"
         server = bean.serverAddress
@@ -20,7 +27,8 @@ fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_An
         tls = SingBoxOptions.OutboundTLSOptions().apply {
             enabled = true
             server_name = bean.sni.blankAsNull()
-            if (bean.allowInsecure == true || DataStore.globalAllowInsecure) insecure = true
+            if (bean.allowInsecure == true || globalAllowInsecure) insecure = true
+            certificate_sha256 = parseAnyTLSCertificatePins(bean.certificateSha256).takeIf { it.isNotEmpty() }
             alpn = bean.alpn.blankAsNull()?.listByLineOrComma()
             bean.certificates.blankAsNull()?.let {
                 certificate = it
@@ -57,6 +65,8 @@ fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_An
 }
 
 fun AnyTLSBean.toUri(): String {
+    // The standard AnyTLS URI has no certificate pin; only universal sharing preserves it.
+    if (!certificateSha256.isNullOrBlank()) return toUniversalLink()
     val builder = linkBuilder()
         .host(serverAddress!!)
         .port(serverPort!!)

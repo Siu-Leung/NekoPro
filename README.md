@@ -29,10 +29,17 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.1`
+`Neko-Pro-1.4.2`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.1)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.1-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.2)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.2-arm64-v8a.apk`
+
+### v1.4.2 改动日志 (2026-11-21)
+
+- 参照 Husi 将「节点域名 DNS」提升为**所有分组**通用的「出站 DNS」，保留订阅组自动采纳和旧手填值；普通订阅即使没有 `dns.proxy-server-nameserver` 也能手填解析器刷新。
+- 精确隔离节点域名：显式 `domain_resolver` 跟随每个节点所属分组（含跨组链与测速）；同名节点域名被两个组指定不同解析器时，TUN 查询直接拒绝，不再任意选一个私有 DNS。
+- 自动采纳仅接受一个可移植的公网 DNS 端点：排除网站 DNS、其他客户端的回环监听和 Mihomo 专有后缀；自动模式缺 DNS 时保留原节点和解析器，并显示明确状态。
+- AnyTLS 导入将证书 DER 的 SHA-256 固定 `fingerprint` 与 uTLS `client-fingerprint` 分开存储，参考 Husi 上游 sing-box 1.15 补齐叶证书固定，修复 `x509: certificate signed by unknown authority` 时“明明有 pin 却被当成浏览器指纹”的问题；**不使用全局跳过证书验证**。
 
 ### v1.4.1 改动日志 (2026-11-21)
 

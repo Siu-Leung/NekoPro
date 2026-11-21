@@ -22,6 +22,10 @@ type SystemTLSValidated struct {
 }
 
 func ValidateSystemTLSOptions(ctx context.Context, options option.OutboundTLSOptions, engineName string) (SystemTLSValidated, error) {
+	// This is also used by the Apple HTTP engine, which bypasses NewClientWithOptions.
+	if len(options.CertificateSHA256) > 0 {
+		return SystemTLSValidated{}, E.New("certificate_sha256 is unsupported in ", engineName)
+	}
 	if options.Reality != nil && options.Reality.Enabled {
 		return SystemTLSValidated{}, E.New("reality is unsupported in ", engineName)
 	}

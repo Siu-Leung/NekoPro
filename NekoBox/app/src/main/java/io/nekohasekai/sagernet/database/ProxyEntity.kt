@@ -266,7 +266,8 @@ data class ProxyEntity(
     }
 
     fun haveStandardLink(): Boolean {
-        return when (requireBean()) {
+        return when (val bean = requireBean()) {
+            is AnyTLSBean -> bean.certificateSha256.isNullOrBlank()
             is SSHBean -> false
             is WireGuardBean -> false
             is ShadowTLSBean -> false

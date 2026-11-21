@@ -209,7 +209,17 @@ func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 			return nil, E.New("disable_sni is unsupported in reality")
 		}
 	}
-	if len(options.CertificatePublicKeySHA256) > 0 {
+	verifyCertificateSHA256, err := newCertificateSHA256Verifier(options)
+	if err != nil {
+		return nil, err
+	}
+	if verifyCertificateSHA256 != nil {
+		// A DER pin replaces PKI verification and is enforced even with insecure=true.
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyPeerCertificate = verifyCertificateSHA256
+		// VerifyPeerCertificate is skipped on resumed sessions.
+		tlsConfig.SessionTicketsDisabled = true
+	} else if len(options.CertificatePublicKeySHA256) > 0 {
 		if len(options.Certificate) > 0 || options.CertificatePath != "" {
 			return nil, E.New("certificate_public_key_sha256 is conflict with certificate or certificate_path")
 		}
@@ -312,7 +322,7 @@ func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 		config:                &tlsConfig,
 		serverName:            serverName,
 		disableSNI:            options.DisableSNI,
-		verifyServerName:      options.DisableSNI && !options.Insecure,
+		verifyServerName:      options.DisableSNI && !options.Insecure && verifyCertificateSHA256 == nil,
 		handshakeTimeout:      handshakeTimeout,
 		id:                    id,
 		fragment:              options.Fragment,

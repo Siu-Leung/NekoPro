@@ -11,11 +11,34 @@ import java.net.URI
  */
 object SingBoxDnsServerParser {
 
+    /**
+     * Builds a direct, group-only resolver, bootstrapped through the existing direct DNS.
+     * sing-box 1.14 treats `path` as a URI path, not a query; reject lossy forms here without
+     * logging the address (the path can be a credential). Global DNS keeps its existing parser.
+     */
+    fun parseGroupNodeDns(rawAddress: String, tag: String): SingBoxOptions.DNSServerOptions {
+        val input = rawAddress.trim()
+        require(input.isNotEmpty() && input.none { it == '?' || it == '#' || it == '@' }) {
+            "Invalid group DNS URL"
+        }
+        val server = try {
+            parse(input, tag, domainResolver = "dns-direct", strict = true)
+        } catch (_: Exception) {
+            throw IllegalArgumentException("Invalid group DNS URL")
+        }
+        // An explicit root path is valid and is different from the implicit /dns-query default.
+        if (server.type in setOf("https", "h3") && input.endsWith('/') && server.path == null) {
+            server.path = "/"
+        }
+        return server
+    }
+
     fun parse(
         rawAddress: String,
         tag: String,
         defaultDetour: String? = null,
         domainResolver: String? = null,
+        strict: Boolean = false,
     ): SingBoxOptions.DNSServerOptions {
         val trimmed = rawAddress.trim()
         require(trimmed.isNotEmpty()) { "Empty DNS server address for $tag" }
@@ -56,6 +79,11 @@ object SingBoxDnsServerParser {
         val host = uriForParse.host?.trim()?.removeSurrounding("[", "]")
         require(!host.isNullOrBlank()) { "Missing DNS server host in '$trimmed'" }
 
+        if (strict) {
+            require(uriForParse.port == -1 || uriForParse.port in 1..65535)
+            require(!uriForParse.rawAuthority.orEmpty().endsWith(':'))
+            require(mappedType in setOf("https", "h3") || uriForParse.rawPath.orEmpty().isEmpty())
+        }
         val explicitPort = uriForParse.port.takeIf { it in 1..65535 }
         val effectiveDetour = if (forceDirect || defaultDetour.isNullOrBlank()) null else defaultDetour
 

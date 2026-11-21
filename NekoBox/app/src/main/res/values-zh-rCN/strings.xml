@@ -189,6 +189,9 @@
     <string name="http_path">HTTP 路径</string>
     <string name="show_bottom_bar">像 SagerNet 一样显示底栏</string>
     <string name="utls_fingerprint">uTLS 指纹</string>
+    <string name="anytls_certificate_sha256">叶证书指纹（SHA-256）</string>
+    <string name="anytls_certificate_sha256_hint">每行输入一个叶证书指纹，支持十六进制（可用冒号分隔）或带填充的标准 Base64。留空则关闭指纹固定。</string>
+    <string name="anytls_certificate_sha256_invalid">SHA-256 证书指纹无效。请确认每项都是 32 字节的摘要。</string>
     <string name="grpc_service_name">gRPC 服务名称</string>
     <string name="alpn">应用层协议协商</string>
     <string name="group_duplicate">重复:
@@ -561,7 +564,16 @@
     <string name="route_mode_global">全局代理 (Global)</string>
     <string name="route_mode_switched">已切换至：%1$s</string>
     <string name="subscription_node_dns">节点域名 DNS</string>
-    <string name="subscription_node_dns_sum">可选，仅用于解析本订阅组内代理节点入口域名（不影响网站与分流规则）</string>
+    <string name="subscription_node_dns_sum">可选，仅用于解析本组代理节点的入口域名</string>
     <string name="subscription_auto_adopt_node_dns">自动采用订阅节点 DNS</string>
-    <string name="subscription_auto_adopt_node_dns_sum">刷新时按 clash-meta / FlClash 协商完整 Clash YAML，仅采纳 dns.proxy-server-nameserver</string>
+    <string name="subscription_auto_adopt_node_dns_sum">刷新时采纳 Clash YAML 的 dns.proxy-server-nameserver。手填地址优先。</string>
+    <string name="subscription_node_dns_status">节点 DNS 状态</string>
+    <string name="group_node_dns_manual">已设置手填解析器</string>
+    <string name="group_node_dns_default">未设置组解析器，使用直连 DNS</string>
+    <string name="group_node_dns_adopted">正在使用从订阅采纳的解析器</string>
+    <string name="group_node_dns_waiting">尚未采纳。请刷新订阅，或手填「节点域名 DNS」。</string>
+    <string name="group_node_dns_invalid">节点 DNS 无效。DoH 请使用有效的 HTTPS 地址和路径，不带查询参数或片段。</string>
+    <string name="group_node_dns_refresh_missing">订阅没有提供可用的 dns.proxy-server-nameserver，已保留原节点和 DNS。可手填「节点域名 DNS」后刷新。</string>
+    <string name="group_node_dns_required">分组 %1$s 尚未取得节点 DNS。请刷新订阅或手填「节点域名 DNS」。</string>
+    <string name="group_node_dns_unsupported_outbound">分组 %1$s 的此类节点无法使用组解析器。</string>
 </resources>

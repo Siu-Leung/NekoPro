@@ -43,6 +43,12 @@
             app:key="certificates"
             app:title="@string/certificates"
             app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:icon="@drawable/ic_baseline_fingerprint_24"
+            app:key="certificateSha256"
+            app:title="@string/anytls_certificate_sha256"
+            app:dialogMessage="@string/anytls_certificate_sha256_hint"
+            app:useSimpleSummaryProvider="true" />
         <moe.matsuri.nb4a.ui.SimpleMenuPreference
             app:defaultValue=""
             app:entries="@array/utls_fingerprint_entry"

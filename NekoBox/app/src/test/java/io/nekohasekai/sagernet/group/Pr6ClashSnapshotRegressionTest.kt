@@ -65,6 +65,25 @@ class Pr6ClashSnapshotRegressionTest {
         assertEquals(null, RawUpdater.extractClashProxyServerNameserver(queryYaml))
     }
 
+    /** Auto-adoption must never promote website DNS or another client's local listener. */
+    @Test
+    fun autoAdoptionRefusesNonportableResolvers() {
+        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(valid))
+        val websiteDns = "dns:\n  nameserver: [https://resolver.example/dns-query]\n$valid"
+        assertEquals(null, RawUpdater.extractClashProxyServerNameserver(websiteDns))
+        for (candidate in listOf(
+            "['udp://127.0.0.1:7874']",
+            "['http://[::1]:7874/dns-query']",
+            "['tcp://localhost:53']",
+            "['https://resolver.example:65536/dns-query']",
+            "['https://resolver-a.example/dns-query', 'https://resolver-b.example/dns-query']",
+            "['https://resolver.example/dns-query', {unexpected: mapping}]",
+        )) {
+            val text = "dns:\n  proxy-server-nameserver: $candidate\n$valid"
+            assertEquals(null, RawUpdater.extractClashProxyServerNameserver(text))
+        }
+    }
+
     @Test
     fun clashYamlImportsMieruAndSnellUserkey() = runBlocking<Unit> {
         val yaml = """

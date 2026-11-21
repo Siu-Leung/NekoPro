@@ -52,6 +52,10 @@ object RawUpdater : GroupUpdater() {
     ) {
 
         val link = subscription.link
+        // An explicit group DNS is sufficient; a nodes-only subscription can still refresh.
+        val requireAdoptedDns = proxyGroup.requiresNodeDnsAdoption()
+        val savedManualDns = proxyGroup.manualNodeDns()
+        var adoptedNodeDnsCandidate: String? = null
         var proxies: List<AbstractBean>
         if (link!!.startsWith("content://")) {
             val maxChars = 16 * 1024 * 1024
@@ -69,18 +73,22 @@ object RawUpdater : GroupUpdater() {
                 sb.toString()
             }
 
-            proxies = contentText?.let { parseSubscription(it) }
+            proxies = contentText?.let { parseSubscription(it)?.takeIf(List<AbstractBean>::isNotEmpty) }
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
+            if (requireAdoptedDns) {
+                adoptedNodeDnsCandidate = extractClashProxyServerNameserver(contentText)
+                    ?: error(app.getString(R.string.group_node_dns_refresh_missing))
+            }
         } else {
-
-            val autoAdoptNodeDns = subscription.autoAdoptNodeDns == true
-            // 候选 UA 链：自动采用节点 DNS 模式优先协商完整 Clash YAML（clash-meta -> FlClash），否则沿用常规回退链
+            // Keep both Clash UAs for automatic subscription DNS. Prefer Clash with a manual
+            // group resolver too: a nodes-only Clash response can carry protocol pinning fields.
             val candidateUserAgents = buildList {
                 subscription.customUserAgent?.takeIf { it.isNotBlank() }?.let { add(it) }
-                if (autoAdoptNodeDns) {
+                if (requireAdoptedDns || savedManualDns != null) {
                     add("clash-meta")
                     add("FlClash/v0.9.4 clash-verge Platform/android")
-                } else {
+                }
+                if (!requireAdoptedDns) {
                     add(USER_AGENT)
                     add("clash-meta")
                     add("v2rayN/7.8.2")
@@ -89,9 +97,9 @@ object RawUpdater : GroupUpdater() {
             }.distinct()
 
             var lastError: Throwable? = null
+            var validNodesWithoutDns = false
             var lastUserinfo = ""
             var lastDisposition = ""
-            var adoptedNodeDnsCandidate: String? = null
             proxies = emptyList()
 
             val forceProxy = DataStore.serviceState.connected ||
@@ -122,12 +130,11 @@ object RawUpdater : GroupUpdater() {
                     if (parsed.isNullOrEmpty()) {
                         throw IllegalStateException("no proxies found with UA: $candidate")
                     }
-                    if (autoAdoptNodeDns) {
-                        val extractedDns = extractClashProxyServerNameserver(responseText)
-                            ?: throw IllegalStateException("no supported dns.proxy-server-nameserver with UA: $candidate")
-                        adoptedNodeDnsCandidate = extractedDns
+                    val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameserver(responseText) else null
+                    if (requireAdoptedDns && candidateDns == null) {
+                        validNodesWithoutDns = true
+                        continue
                     }
-                    proxies = parsed
 
                     Util.getStringBox(response.getHeader("Subscription-Userinfo"))
                         .takeIf { it.isNotBlank() }?.let { lastUserinfo = it }
@@ -137,6 +144,8 @@ object RawUpdater : GroupUpdater() {
                             lastDisposition = remoteName
                         }
                     }
+                    proxies = parsed
+                    adoptedNodeDnsCandidate = candidateDns
                     break
                 } catch (e: CancellationException) {
                     throw e
@@ -151,13 +160,11 @@ object RawUpdater : GroupUpdater() {
             }
 
             if (proxies.isEmpty()) {
+                if (validNodesWithoutDns) error(app.getString(R.string.group_node_dns_refresh_missing))
                 throw (lastError ?: error(app.getString(R.string.no_proxies_found)))
             }
 
             subscription.subscriptionUserinfo = lastUserinfo
-            if (autoAdoptNodeDns && !adoptedNodeDnsCandidate.isNullOrBlank()) {
-                subscription.adoptedNodeDns = adoptedNodeDnsCandidate
-            }
 
             // 修改默认名字
             if (proxyGroup.name?.startsWith("Subscription #") == true && lastDisposition.isNotBlank()) {
@@ -182,7 +189,8 @@ object RawUpdater : GroupUpdater() {
         }
         proxies = proxiesMap.values.toList()
 
-        if (subscription.forceResolve == true && subscription.effectiveNodeDns() == null) {
+        // A group resolver must see the original node hostname, not a public DNS result.
+        if (subscription.forceResolve == true && savedManualDns == null && adoptedNodeDnsCandidate == null) {
             forceResolve(proxies, proxyGroup.id)
         }
 
@@ -311,6 +319,8 @@ object RawUpdater : GroupUpdater() {
                 Logs.e("Exist profiles: $existCount, new profiles: ${proxies.size}")
             }
 
+            // The source DNS and node list are one snapshot; a failed refresh changes neither.
+            if (adoptedNodeDnsCandidate != null) subscription.adoptedNodeDns = adoptedNodeDnsCandidate
             subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
             SagerDatabase.groupDao.updateGroup(proxyGroup)
         }
@@ -323,6 +333,7 @@ object RawUpdater : GroupUpdater() {
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? =
         parseRaw(text, fileName, forSubscription = false)
 
+    /** Read exactly one usable node resolver from a Clash snapshot, never ordinary website DNS. */
     internal fun extractClashProxyServerNameserver(text: String): String? {
         if (!clashProxiesKey.containsMatchIn(text)) return null
         val loaderOptions = LoaderOptions().apply {
@@ -334,23 +345,20 @@ object RawUpdater : GroupUpdater() {
         val dns = yaml["dns"] as? Map<*, *> ?: return null
         val raw = dns["proxy-server-nameserver"] ?: return null
         val entries = when (raw) {
-            is String -> listOf(raw.trim()).filter { it.isNotEmpty() }
-            is List<*> -> raw.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+            is String -> listOf(raw.trim())
+            is List<*> -> raw.map { (it as? String)?.trim() ?: return null }
             else -> return null
         }.distinct()
-        if (entries.size != 1) return null
-        val candidate = entries[0]
-        // Reject Mihomo-specific proxy suffix modifiers (#PROXY, #DIRECT) or query params not faithfully supported by sing-box DoH path.
-        if (candidate.contains('#') || candidate.contains('?')) return null
-        val lower = candidate.lowercase()
-        if (lower == "system" || lower == "local" || lower.startsWith("dhcp://")) return null
+        val candidate = entries.singleOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        // Bare words are parsed as plaintext UDP hosts. Only an explicit transport or a literal
+        // IP is an unambiguous, portable resolver; never adopt an unknown hostname from site DNS.
+        if (!candidate.contains("://") && !SingBoxDnsServerParser.isIpLiteral(candidate)) return null
         return runCatching {
-            SingBoxDnsServerParser.parse(
-                rawAddress = candidate,
-                tag = "probe-node-dns",
-                defaultDetour = null,
-                domainResolver = "dns-direct",
-            )
+            val transport = SingBoxDnsServerParser.parseGroupNodeDns(candidate, "probe-node-dns")
+            // Other apps may publish their own loopback listener. It is not a portable resolver.
+            val host = transport.server?.trimEnd('.')?.lowercase() ?: return null
+            if (host == "localhost" || host.endsWith(".localhost") || host == "::1" ||
+                (SingBoxDnsServerParser.isIpLiteral(host) && host.startsWith("127."))) return null
             candidate
         }.getOrNull()
     }
@@ -778,8 +786,9 @@ object RawUpdater : GroupUpdater() {
                                         "server" -> bean.serverAddress = rawVal.toString()
                                         "port" -> bean.serverPort = rawVal.toString().toIntOrNull() ?: return@runCatching
                                         "password" -> bean.password = rawVal.toString()
-                                        "client-fingerprint", "fingerprint" -> bean.utlsFingerprint =
-                                            rawVal.toString()
+                                        "client-fingerprint" -> bean.utlsFingerprint = rawVal.toString()
+                                        "fingerprint" -> bean.certificateSha256 =
+                                            moe.matsuri.nb4a.proxy.anytls.parseAnyTLSClashCertificatePin(rawVal)
 
                                         "sni", "server-name" -> bean.sni = rawVal.toString()
                                         "skip-cert-verify", "insecure", "allow-insecure" -> bean.allowInsecure =

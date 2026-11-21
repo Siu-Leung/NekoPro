@@ -40,7 +40,10 @@ class GroupSettingsActivity(
 
     private lateinit var frontProxyPreference: OutboundPreference
     private lateinit var landingProxyPreference: OutboundPreference
+    private var savedAdoptedDns: Boolean = false
+    private var savedSubscriptionLink: String = ""
 
+    /** Populate the editor from Room, including manual DNS saved by older releases. */
     fun ProxyGroup.init() {
         DataStore.groupName = name ?: ""
         DataStore.groupType = type
@@ -60,10 +63,13 @@ class GroupSettingsActivity(
         DataStore.subscriptionUserAgent = subscription.customUserAgent!!
         DataStore.subscriptionAutoUpdate = subscription.autoUpdate!!
         DataStore.subscriptionAutoUpdateDelay = subscription.autoUpdateDelay!!
-        DataStore.subscriptionNodeDns = subscription.nodeDns ?: ""
+        DataStore.subscriptionNodeDns = manualNodeDns().orEmpty()
         DataStore.subscriptionAutoAdoptNodeDns = subscription.autoAdoptNodeDns == true
+        savedAdoptedDns = !subscription.adoptedNodeDns.isNullOrBlank()
+        savedSubscriptionLink = subscription.link.orEmpty()
     }
 
+    /** Store the group preference independently of the subscription source. */
     fun ProxyGroup.serialize() {
         name = DataStore.groupName.takeIf { it.isNotBlank() } ?: "My group"
         type = DataStore.groupType
@@ -76,6 +82,11 @@ class GroupSettingsActivity(
         val isSubscription = type == GroupType.SUBSCRIPTION
         if (isSubscription) {
             subscription = (subscription ?: SubscriptionBean().applyDefaultValues()).apply {
+                if (link != DataStore.subscriptionLink) {
+                    // An adopted resolver belongs to the exact old source, not the group name.
+                    adoptedNodeDns = ""
+                    subscriptionUserinfo = ""
+                }
                 link = DataStore.subscriptionLink
                 forceResolve = DataStore.subscriptionForceResolve
                 deduplication = DataStore.subscriptionDeduplication
@@ -83,10 +94,13 @@ class GroupSettingsActivity(
                 customUserAgent = DataStore.subscriptionUserAgent
                 autoUpdate = DataStore.subscriptionAutoUpdate
                 autoUpdateDelay = DataStore.subscriptionAutoUpdateDelay
-                nodeDns = DataStore.subscriptionNodeDns.trim()
                 autoAdoptNodeDns = DataStore.subscriptionAutoAdoptNodeDns
             }
+        } else {
+            // A basic group has no subscription DNS state; its manual setting still applies.
+            subscription = null
         }
+        saveManualNodeDns(DataStore.subscriptionNodeDns)
     }
 
     fun needSave(): Boolean {
@@ -167,25 +181,29 @@ class GroupSettingsActivity(
 
         findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnPreferenceChangeListener { _, newValue ->
             val raw = (newValue as? String)?.trim().orEmpty()
-            if (raw.isEmpty()) {
-                true
-            } else {
-                runCatching {
-                    moe.matsuri.nb4a.SingBoxDnsServerParser.parse(
-                        rawAddress = raw,
-                        tag = "dns-group-validate",
-                        defaultDetour = null,
-                        domainResolver = "dns-direct",
-                    )
-                }.onFailure { err ->
-                    android.widget.Toast.makeText(
-                        this@GroupSettingsActivity,
-                        err.message ?: getString(R.string.invalid_server),
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }.isSuccess
-            }
+            raw.isEmpty() || runCatching {
+                moe.matsuri.nb4a.SingBoxDnsServerParser.parseGroupNodeDns(raw, "dns-group-validate")
+            }.onFailure {
+                // Resolver paths can contain credentials; errors must not echo the entered URL.
+                Toast.makeText(this@GroupSettingsActivity, R.string.group_node_dns_invalid, Toast.LENGTH_SHORT).show()
+            }.isSuccess
         }
+        updateNodeDnsStatus(this)
+    }
+
+    /** Show the source of the yet-to-be-saved DNS setting, never its credential-bearing URL. */
+    private fun updateNodeDnsStatus(fragment: PreferenceFragmentCompat) {
+        val manual = DataStore.subscriptionNodeDns.isNotBlank()
+        fragment.findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setSummary(
+            if (manual) R.string.group_node_dns_manual else R.string.subscription_node_dns_sum,
+        )
+        val status = when {
+            manual -> R.string.group_node_dns_manual
+            !DataStore.subscriptionAutoAdoptNodeDns -> R.string.group_node_dns_default
+            savedAdoptedDns && savedSubscriptionLink == DataStore.subscriptionLink -> R.string.group_node_dns_adopted
+            else -> R.string.group_node_dns_waiting
+        }
+        fragment.findPreference<Preference>("subscriptionNodeDnsStatus")?.setSummary(status)
     }
 
     class UnsavedChangesDialogFragment : AlertDialogFragment<Empty, Empty>() {
@@ -261,32 +279,28 @@ class GroupSettingsActivity(
 
         } else {
             DataStore.profileCacheStore.registerChangeListener(this)
+            runOnDefaultDispatcher {
+                val sub = SagerDatabase.groupDao.getById(DataStore.editingId)?.subscription
+                onMainDispatcher {
+                    savedAdoptedDns = !sub?.adoptedNodeDns.isNullOrBlank()
+                    savedSubscriptionLink = sub?.link.orEmpty()
+                    (supportFragmentManager.findFragmentById(R.id.settings) as? PreferenceFragmentCompat)
+                        ?.let { updateNodeDnsStatus(it) }
+                }
+            }
         }
-
     }
 
+    /** Save the user's explicit resolver without performing a subscription refresh. */
     suspend fun saveAndExit() {
-
         val editingId = DataStore.editingId
         if (editingId == 0L) {
             GroupManager.createGroup(ProxyGroup().apply { serialize() })
         } else if (needSave()) {
-            val entity = SagerDatabase.groupDao.getById(DataStore.editingId)
-            if (entity == null) {
-                finish()
-                return
-            }
-            val keepUserInfo = (entity.type == GroupType.SUBSCRIPTION &&
-                    DataStore.groupType == GroupType.SUBSCRIPTION &&
-                    entity.subscription?.link == DataStore.subscriptionLink)
-            if (!keepUserInfo) {
-                entity.subscription?.subscriptionUserinfo = "";
-            }
-            GroupManager.updateGroup(entity.apply { serialize() })
+            val entity = SagerDatabase.groupDao.getById(editingId)
+            if (entity != null) GroupManager.updateGroup(entity.apply { serialize() })
         }
-
         finish()
-
     }
 
     val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
@@ -317,6 +331,14 @@ class GroupSettingsActivity(
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         if (key != Key.PROFILE_DIRTY) {
             DataStore.dirty = true
+        }
+        if (key == Key.SUBSCRIPTION_NODE_DNS || key == Key.SUBSCRIPTION_AUTO_ADOPT_NODE_DNS || key == Key.SUBSCRIPTION_LINK) {
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    val fragment = supportFragmentManager.findFragmentById(R.id.settings) as? PreferenceFragmentCompat
+                    if (fragment != null) updateNodeDnsStatus(fragment)
+                }
+            }
         }
     }
 

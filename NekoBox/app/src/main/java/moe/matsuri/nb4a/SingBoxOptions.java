@@ -1926,6 +1926,9 @@ public class SingBoxOptions {
 
         public String certificate_path;
 
+        // SHA-256 of the leaf certificate DER, encoded as standard Base64.
+        public List<String> certificate_sha256;
+
         public OutboundECHOptions ech;
 
         public OutboundUTLSOptions utls;

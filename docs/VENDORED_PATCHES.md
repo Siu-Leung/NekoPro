@@ -3,6 +3,7 @@
 NekoPro vendors `sing-box` (`v1.14.4`) and `mihomo` (`v1.19.34`) directly in the repository for reproducible offline Android builds. This document tracks NekoPro-specific additions and patches on top of upstream so future upstream security updates can be merged cleanly.
 
 ## `sing-box/` (based on `SagerNet/sing-box v1.14.4`)
+- `common/tls/`: Backport the leaf-certificate SHA-256 pin from `SagerNet/sing-box v1.15.0-alpha.13` (`option.OutboundTLSOptions.certificate_sha256`, padded Base64). It is distinct from SPKI `certificate_public_key_sha256`; the pin verifier runs even when `insecure` is set, and conflicts or unsupported TLS engines fail closed. Adapted from Husi's pinned upstream design; TLS client verification remains local, not a remote service.
 - `protocol/mihomo_adapter/`: Process-global Android VPN socket protection (`InstallProtectHook`), strict DNS router bridge (`activeDNSRouter`, `strict: true` fail-closed lookup/exchange blocking both `SystemResolver` and non-test `dns-direct`/`dns-local` fallback), per-outbound `NewOutboundResolver` bridge for QUIC/ECH server resolution, and UDP resolved packet wrapper.
 - `protocol/vless_xhttp/`: VLESS-XHTTP (`splithttp`) outbound adapter backed by mihomo XHTTP transport (`DialerForAPI`, `BasicOption.Resolver`, REALITY, XMUX `extra`, ECH with per-outbound `Resolver`, uTLS).
 - `protocol/masque/`: Cloudflare WARP / MASQUE (`h3`, `h2`, `h3-l4proxy`) outbound adapter backed by mihomo MASQUE outbound (`DialerForAPI` + `BasicOption.Resolver` for QUIC server domain resolution).

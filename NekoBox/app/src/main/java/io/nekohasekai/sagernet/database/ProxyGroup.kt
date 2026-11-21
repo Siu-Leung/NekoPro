@@ -21,11 +21,31 @@ data class ProxyGroup(
     var order: Int = GroupOrder.ORIGIN,
     var isSelector: Boolean = false,
     var frontProxy: Long = -1L,
-    var landingProxy: Long = -1L
+    var landingProxy: Long = -1L,
+    // 本组所有内置节点共用的手填入口 DNS。旧订阅将手填值存于 SubscriptionBean；读取时兼容。
+    var outboundDns: String? = null,
 ) : Serializable() {
 
     @Transient
     var export = false
+
+    /** 返回组级手填 DNS；未编辑的旧订阅仍可使用原来的手填值。 */
+    fun manualNodeDns(): String? = outboundDns?.trim()?.takeIf { it.isNotEmpty() }
+        ?: subscription?.nodeDns?.trim()?.takeIf { type == GroupType.SUBSCRIPTION && it.isNotEmpty() }
+
+    /** 保存组级 DNS，清掉旧字段，避免用户清空输入后又意外恢复旧值。 */
+    fun saveManualNodeDns(value: String) {
+        outboundDns = value.trim().takeIf { it.isNotEmpty() }
+        subscription?.nodeDns = ""
+    }
+
+    /** 返回拨号时使用的解析器；手填优先，自动采纳仅对订阅组有效。 */
+    fun effectiveNodeDns(): String? = manualNodeDns()
+        ?: subscription?.takeIf { type == GroupType.SUBSCRIPTION }?.effectiveNodeDns()
+
+    /** 订阅刷新是否必须携带可用的节点 DNS。手填已经满足要求时，不强制来源额外下发。 */
+    fun requiresNodeDnsAdoption(): Boolean = type == GroupType.SUBSCRIPTION &&
+        subscription?.autoAdoptNodeDns == true && manualNodeDns() == null
 
     override fun initializeDefaultValues() {
         subscription?.applyDefaultValues()
@@ -33,15 +53,14 @@ data class ProxyGroup(
 
     override fun serializeToBuffer(output: ByteBufferOutput) {
         if (export) {
-
+            // 分享链接会离开本机；不要把可能带凭据的 DNS URL 放进去。
             output.writeInt(0)
             output.writeString(name)
             output.writeInt(type)
             val subscription = subscription!!
             subscription.serializeForShare(output)
-
         } else {
-            output.writeInt(1)
+            output.writeInt(2)
             output.writeLong(id)
             output.writeLong(userOrder)
             output.writeBoolean(ungrouped)
@@ -57,10 +76,12 @@ data class ProxyGroup(
             output.writeBoolean(isSelector)
             output.writeLong(frontProxy)
             output.writeLong(landingProxy)
+            output.writeString(outboundDns)
         }
     }
 
     override fun deserializeFromBuffer(input: ByteBufferInput) {
+        outboundDns = null
         if (export) {
             val version = input.readInt()
 
@@ -96,6 +117,8 @@ data class ProxyGroup(
                 frontProxy = input.readLong()
                 landingProxy = input.readLong()
             }
+            // 按版本读取，而非用当前缓冲区剩余长度判断，避免跨块时读错后续记录。
+            if (version >= 2) outboundDns = input.readString()
         }
     }
 

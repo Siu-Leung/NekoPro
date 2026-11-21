@@ -8,10 +8,24 @@ import (
 	"testing"
 
 	tf "github.com/sagernet/sing-box/common/tlsfragment"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/logger"
 
 	utls "github.com/metacubex/utls"
 	"github.com/stretchr/testify/require"
 )
+
+func TestClientCertificateSHA256UTLS(t *testing.T) {
+	testClientCertificateSHA256(t, &option.OutboundUTLSOptions{Enabled: true, Fingerprint: "chrome"})
+}
+
+func TestCertificateSHA256RejectsDirectRealityClient(t *testing.T) {
+	// The direct REALITY constructor forces REALITY independently of the enabled flag.
+	_, err := NewRealityClient(context.Background(), logger.NOP(), "localhost", option.OutboundTLSOptions{
+		CertificateSHA256: [][]byte{make([]byte, 32)},
+	})
+	require.ErrorIs(t, err, errCertificateSHA256Reality)
+}
 
 // Guards the wrap gate in UTLSClientConfig.Client(): tf.Conn must wrap the
 // underlying connection whenever either `fragment` or `record_fragment` is

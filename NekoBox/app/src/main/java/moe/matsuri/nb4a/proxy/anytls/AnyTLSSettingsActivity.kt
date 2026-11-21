@@ -1,6 +1,8 @@
 package moe.matsuri.nb4a.proxy.anytls
 
 import android.os.Bundle
+import android.text.InputType
+import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceFragmentCompat
 import io.nekohasekai.sagernet.Key
@@ -23,6 +25,7 @@ class AnyTLSSettingsActivity : ProfileSettingsActivity<AnyTLSBean>() {
     private val sni = pbm.add(PreferenceBinding(Type.Text, "sni"))
     private val alpn = pbm.add(PreferenceBinding(Type.Text, "alpn"))
     private val certificates = pbm.add(PreferenceBinding(Type.Text, "certificates"))
+    private val certificateSha256 = pbm.add(PreferenceBinding(Type.Text, "certificateSha256"))
     private val allowInsecure = pbm.add(PreferenceBinding(Type.Bool, "allowInsecure"))
     private val utlsFingerprint = pbm.add(PreferenceBinding(Type.Text, "utlsFingerprint"))
     private val idleSessionCheckInterval = pbm.add(PreferenceBinding(Type.Text, "idleSessionCheckInterval"))
@@ -32,11 +35,11 @@ class AnyTLSSettingsActivity : ProfileSettingsActivity<AnyTLSBean>() {
 
     override fun AnyTLSBean.init() {
         pbm.writeToCacheAll(this)
-
     }
 
     override fun AnyTLSBean.serialize() {
         pbm.fromCacheAll(this)
+        this.certificateSha256 = parseAnyTLSCertificatePins(this.certificateSha256).joinToString("\n")
     }
 
     override fun PreferenceFragmentCompat.createPreferences(
@@ -54,6 +57,21 @@ class AnyTLSSettingsActivity : ProfileSettingsActivity<AnyTLSBean>() {
         }
         findPreference<EditTextPreference>("minIdleSession")?.apply {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Number)
+        }
+        findPreference<EditTextPreference>(certificateSha256.cacheName)!!.apply {
+            setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            }
+            setOnPreferenceChangeListener { _, value ->
+                try {
+                    parseAnyTLSCertificatePins(value as String)
+                    true
+                } catch (_: IllegalArgumentException) {
+                    Toast.makeText(context, R.string.anytls_certificate_sha256_invalid, Toast.LENGTH_LONG).show()
+                    false
+                }
+            }
         }
     }
 }

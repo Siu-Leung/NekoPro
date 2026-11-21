@@ -83,6 +83,9 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	if !options.Options.Enabled {
 		return nil, nil
 	}
+	if err := checkCertificateSHA256Support(options.Options); err != nil {
+		return nil, err
+	}
 	if !options.KTLSCompatible {
 		if options.Options.KernelTx {
 			options.Logger.Warn("enabling kTLS TX in current scenarios will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_tx")

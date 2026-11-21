@@ -89,8 +89,7 @@ fun buildConfig(
     val trafficMap = HashMap<String, List<ProxyEntity>>()
     val tagMap = HashMap<Long, String>()
     val globalOutbounds = HashMap<Long, String>()
-    val groupNodeDnsTags = LinkedHashMap<Long, String>()
-    val groupNodeDnsServers = ArrayList<DNSServerOptions>()
+    val groupNodeDnsPlan = GroupNodeDnsPlan()
     val selectorNames = ArrayList<String>()
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
 
@@ -330,7 +329,21 @@ fun buildConfig(
                 var needGlobal = false
 
                 val entityGroup = SagerDatabase.groupDao.getById(proxyEntity.groupId)
-                val groupNodeDns = entityGroup?.subscription?.effectiveNodeDns()
+                val groupNodeDns = entityGroup?.effectiveNodeDns()
+                // A custom outbound owns its `server` setting, not the bean's default placeholder.
+                val entryHost = if (bean is ConfigBean) {
+                    (gson.fromJson(bean.config, Map::class.java)?.get("server") as? String).orEmpty()
+                } else bean.serverAddress.orEmpty()
+                val entryIsDomain = entryHost.isNotBlank() && !SingBoxDnsServerParser.isIpLiteral(entryHost)
+                if (entryIsDomain && groupNodeDns == null && entityGroup?.requiresNodeDnsAdoption() == true) {
+                    val groupName = entityGroup.displayName()
+                    throw IllegalArgumentException(app.getString(R.string.group_node_dns_required, groupName))
+                }
+                if (entryIsDomain && groupNodeDns != null && proxyEntity.needExternal()) {
+                    // A group resolver on the loopback SOCKS placeholder cannot resolve the plugin's host.
+                    val groupName = entityGroup?.displayName() ?: proxyEntity.groupId.toString()
+                    throw IllegalArgumentException(app.getString(R.string.group_node_dns_unsupported_outbound, groupName))
+                }
 
                 // first profile set as global
                 if (index == profileList.lastIndex) {
@@ -457,29 +470,13 @@ fun buildConfig(
                     _hack_config_map["domain_strategy"] =
                         if (forTest) "" else defaultServerDomainStrategy
 
-                    // Per-group node DNS: resolves only this group's proxy entry server hostnames.
-                    // Fail closed if configured node DNS is malformed so private node hostnames never
-                    // silently downgrade to default_domain_resolver ("dns-direct").
-                    if (!groupNodeDns.isNullOrBlank() && !proxyEntity.needExternal()) {
-                        val nodeDnsTag = groupNodeDnsTags.getOrPut(proxyEntity.groupId) {
-                            val tag = "dns-group-${proxyEntity.groupId}"
-                            val serverOpt = try {
-                                SingBoxDnsServerParser.parse(
-                                    rawAddress = groupNodeDns,
-                                    tag = tag,
-                                    defaultDetour = null,
-                                    domainResolver = "dns-direct",
-                                )
-                            } catch (err: Exception) {
-                                throw IllegalArgumentException(
-                                    "Invalid node DNS for group '${entityGroup?.displayName() ?: proxyEntity.groupId}': ${err.message}",
-                                    err
-                                )
-                            }
-                            groupNodeDnsServers.add(serverOpt)
-                            tag
+                    // Explicit resolver also applies in URL tests and on detoured chain hops.
+                    if (groupNodeDns != null && !proxyEntity.needExternal()) {
+                        _hack_config_map["domain_resolver"] = try {
+                            groupNodeDnsPlan.bind(proxyEntity.groupId, groupNodeDns, entryHost)
+                        } catch (_: IllegalArgumentException) {
+                            throw IllegalArgumentException(app.getString(R.string.group_node_dns_invalid))
                         }
-                        _hack_config_map["domain_resolver"] = nodeDnsTag
                     }
 
                     _hack_config_map["tag"] = tagOut
@@ -748,11 +745,16 @@ fun buildConfig(
             }
         }
 
-        groupNodeDnsServers.forEach { serverOpt ->
+        // Group DoH bootstraps through its explicit `dns-direct` resolver; that socket lookup
+        // bypasses TUN rules. Do not route a node's exact host to public DNS if the names overlap.
+        val groupNodeDnsRules = groupNodeDnsPlan.domainRules()
+        val privateNodeHosts = groupNodeDnsRules.flatMap { it.domain.orEmpty() }.toHashSet()
+        groupNodeDnsPlan.servers.forEach { serverOpt ->
             serverOpt.server?.takeIf { it.isNotBlank() && !it.isIpAddress() }?.let { host ->
                 domainListDNSDirectForce.add("full:$host")
             }
         }
+        domainListDNSDirectForce.removeAll { it.removePrefix("full:").trimEnd('.').lowercase() in privateNodeHosts }
 
         // sing-box 1.14 typed DNS servers (legacy address format and top-level dns.fakeip removed)
         dns.servers.add(DNSServerOptions().apply {
@@ -784,7 +786,7 @@ fun buildConfig(
             )
         }
 
-        groupNodeDnsServers.forEach { dns.servers.add(it) }
+        dns.servers.addAll(groupNodeDnsPlan.servers)
 
         dns.strategy = autoDnsDomainStrategy(
             SingBoxOptionsUtil.domainStrategy(if (forTest) "dns-direct" else "dns-remote")
@@ -845,13 +847,15 @@ fun buildConfig(
                     disable_cache = true
                 })
             }
-            // force bypass (always top DNS rule)
+            // Bootstrap and legacy direct targets keep their priority over ordinary DNS rules.
             if (domainListDNSDirectForce.isNotEmpty()) {
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {
                     makeSingBoxRule(domainListDNSDirectForce.toHashSet().toList())
                     server = "dns-direct"
                 })
             }
+            // Only exact node-hostname requests are covered. Normal website and FakeIP rules stay intact.
+            dns.rules.addAll(0, groupNodeDnsRules)
         }
 
         if (!forTest) _hack_custom_config = DataStore.globalCustomConfig

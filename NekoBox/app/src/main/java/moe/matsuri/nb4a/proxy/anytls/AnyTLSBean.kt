@@ -18,6 +18,7 @@ class AnyTLSBean : AbstractBean() {
     @JvmField var idleSessionTimeout: String? = null
     @JvmField var minIdleSession: Int? = null
     @JvmField var clientMetadata: String? = null
+    @JvmField var certificateSha256: String? = null
 
     override fun initializeDefaultValues() {
         super.initializeDefaultValues()
@@ -32,15 +33,17 @@ class AnyTLSBean : AbstractBean() {
         if (idleSessionTimeout == null) idleSessionTimeout = ""
         if (minIdleSession == null) minIdleSession = 0
         if (clientMetadata == null) clientMetadata = ""
+        if (certificateSha256 == null) certificateSha256 = ""
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(1); super.serialize(output)
+        output.writeInt(2); super.serialize(output)
         output.writeString(password); output.writeString(sni); output.writeString(alpn)
         output.writeString(certificates); output.writeString(utlsFingerprint)
         output.writeBoolean(allowInsecure!!); output.writeString(echConfig)
         output.writeString(idleSessionCheckInterval); output.writeString(idleSessionTimeout)
         output.writeInt(minIdleSession ?: 0); output.writeString(clientMetadata)
+        output.writeString(certificateSha256)
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -53,6 +56,13 @@ class AnyTLSBean : AbstractBean() {
             idleSessionTimeout = input.readString()
             minIdleSession = input.readInt()
             clientMetadata = input.readString()
+        }
+        certificateSha256 = if (version >= 2) {
+            input.readString()
+        } else {
+            // Older Clash imports conflated the two fingerprints. Recover a remaining
+            // hex digest, but leave actual uTLS names alone; overwritten pins are lost.
+            utlsFingerprint?.let(::anyTLSHexCertificatePin)?.also { utlsFingerprint = "" }
         }
     }
 

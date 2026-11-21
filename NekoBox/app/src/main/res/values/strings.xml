@@ -527,6 +527,9 @@
     <string name="domain_strategy_for_server">Domain strategy for Server address</string>
     <string name="show_bottom_bar">Show bottom bar like SagerNet</string>
     <string name="utls_fingerprint">uTLS fingerprint</string>
+    <string name="anytls_certificate_sha256">Leaf certificate fingerprint (SHA-256)</string>
+    <string name="anytls_certificate_sha256_hint">Enter one leaf certificate fingerprint per line, as hex (with or without colons) or standard padded Base64. Leave empty to disable pinning.</string>
+    <string name="anytls_certificate_sha256_invalid">Invalid SHA-256 certificate fingerprint. Check that each entry is a 32-byte digest.</string>
     <string name="custom_outbound_json">Custom outbound JSON</string>
     <string name="custom_config_json">Custom config JSON</string>
     <string name="is_outbound_only">The JSON set is outbound</string>
@@ -647,5 +650,14 @@
     <string name="subscription_node_dns">Node Domain DNS</string>
     <string name="subscription_node_dns_sum">Optional DNS used only to resolve proxy server hostnames in this group</string>
     <string name="subscription_auto_adopt_node_dns">Auto-adopt Node DNS from Clash YAML</string>
-    <string name="subscription_auto_adopt_node_dns_sum">Fetch full Clash YAML (clash-meta / FlClash) and adopt dns.proxy-server-nameserver for this group only</string>
+    <string name="subscription_auto_adopt_node_dns_sum">Adopt dns.proxy-server-nameserver from Clash YAML on refresh. Manual DNS takes priority.</string>
+    <string name="subscription_node_dns_status">Node DNS status</string>
+    <string name="group_node_dns_manual">Manual resolver configured</string>
+    <string name="group_node_dns_default">No group resolver; using direct DNS</string>
+    <string name="group_node_dns_adopted">Using resolver adopted from the subscription</string>
+    <string name="group_node_dns_waiting">No resolver adopted. Refresh the group, or enter Node Domain DNS manually.</string>
+    <string name="group_node_dns_invalid">Invalid node DNS. For DoH, use a valid HTTPS URL with a path, without a query or fragment.</string>
+    <string name="group_node_dns_refresh_missing">The subscription does not provide a supported dns.proxy-server-nameserver. Existing nodes and DNS were kept. Enter Node Domain DNS manually to refresh this group.</string>
+    <string name="group_node_dns_required">No node DNS is configured for group %1$s. Refresh the subscription or enter Node Domain DNS manually.</string>
+    <string name="group_node_dns_unsupported_outbound">The group resolver cannot be applied to the selected type of node in group %1$s.</string>
 </resources>
