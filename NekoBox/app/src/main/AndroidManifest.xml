@@ -360,7 +360,8 @@
             android:process=":bg" />
         <service
             android:name="androidx.work.impl.background.systemjob.SystemJobService"
-            android:process=":bg" />
+            android:process=":bg"
+            tools:targetApi="m" />
         <service
             android:name="androidx.work.impl.background.systemalarm.SystemAlarmService"
             android:process=":bg" />
