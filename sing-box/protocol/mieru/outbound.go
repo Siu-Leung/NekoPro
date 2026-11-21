@@ -37,15 +37,18 @@ type Outbound struct {
 }
 
 // normalizeMieruPortRange normalizes whitespace and converts colon-delimited
-// port ranges (e.g. "20000:20100") to the hyphen-delimited format ("20000-20100")
-// required by mihomo's Mieru validator.
+// port ranges (e.g. "20000:20100" or "20000 : 20100") to the hyphen-delimited
+// format ("20000-20100") required by mihomo's Mieru validator.
 func normalizeMieruPortRange(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return ""
 	}
-	if strings.Contains(trimmed, ":") && !strings.Contains(trimmed, "-") {
-		return strings.Replace(trimmed, ":", "-", 1)
+	if start, end, found := strings.Cut(trimmed, ":"); found && !strings.Contains(trimmed, "-") {
+		return strings.TrimSpace(start) + "-" + strings.TrimSpace(end)
+	}
+	if start, end, found := strings.Cut(trimmed, "-"); found {
+		return strings.TrimSpace(start) + "-" + strings.TrimSpace(end)
 	}
 	return trimmed
 }
