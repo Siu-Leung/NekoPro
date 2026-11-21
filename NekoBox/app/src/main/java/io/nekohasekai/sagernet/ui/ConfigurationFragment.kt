@@ -733,7 +733,13 @@ class ConfigurationFragment @JvmOverloads constructor(
     fun speedTest(targetProfile: ProxyEntity? = null, targetProfiles: List<ProxyEntity>? = null) {
         if (!isAdded) return
         val testToken = DataStore.acquireTestToken()
-        if (testToken == 0) return
+        if (testToken == 0) {
+            // 逻辑修正：此前占用令牌时静默返回，长按无任何反馈像"没反应"。
+            runOnMainDispatcher {
+                if (isAdded) snackbar(getString(R.string.connection_test_running)).show()
+            }
+            return
+        }
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
         val titleText = when {

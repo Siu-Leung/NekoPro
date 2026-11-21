@@ -337,13 +337,18 @@ fun buildConfig(
                 } else bean.serverAddress.orEmpty()
                 val entryIsDomain = entryHost.isNotBlank() && !SingBoxDnsServerParser.isIpLiteral(entryHost)
                 if (entryIsDomain && groupNodeDns == null && entityGroup?.requiresNodeDnsAdoption() == true) {
-                    val groupName = entityGroup.displayName()
-                    throw IllegalArgumentException(app.getString(R.string.group_node_dns_required, groupName))
+                    // 逻辑修正（2026-11-21）：不再硬性中止构建。自动采纳开启但订阅源从不提供
+                    // dns.proxy-server-nameserver 时（如纯节点订阅），旧行为（≤1.4.1）是回退
+                    // default_domain_resolver=dns-direct 拨号；公网可解析的节点仍可用，私有
+                    // 入口域名会在拨号期报明确的 SERVFAIL。硬抛错会让整组节点连测速都起不来，
+                    // 且用户无从在测速界面补救。此处降级为警告，由 GroupSettings 的状态行和
+                    // 刷新提示引导手填。
+                    Logs.w("Group '${entityGroup.displayName()}' has auto-adopt node DNS enabled but no resolver; falling back to the default resolver for ${bean.displayName()}")
                 }
                 if (entryIsDomain && groupNodeDns != null && proxyEntity.needExternal()) {
-                    // A group resolver on the loopback SOCKS placeholder cannot resolve the plugin's host.
-                    val groupName = entityGroup?.displayName() ?: proxyEntity.groupId.toString()
-                    throw IllegalArgumentException(app.getString(R.string.group_node_dns_unsupported_outbound, groupName))
+                    // 组解析器无法绑定到外部插件的本地 SOCKS 占位出站（占位是 127.0.0.1）。
+                    // 与上一条同理改为警告：插件自身仍按其原有方式解析入口域名。
+                    Logs.w("Group resolver cannot bind to external plugin outbound ${bean.displayName()}; skipping explicit domain_resolver")
                 }
 
                 // first profile set as global
