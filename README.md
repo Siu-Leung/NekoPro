@@ -29,10 +29,17 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.4`
+`Neko-Pro-1.4.5`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.4)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.4-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.5)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.5-arm64-v8a.apk`
+
+### v1.4.5 改动日志 (2026-11-21)
+
+- **订阅 DNS 识别改为按客户端回退**：默认先用 FlClash 的 UA 请求完整配置，拿不到 DNS 就依次换 Clash Verge、Clash Meta、NekoPro；只要某个客户端返回了带 `dns` 的完整配置就采用。仍然只读解析，不访问候选端点。
+- **可手动指定客户端**：识别失败或只返回纯节点时，弹窗提供「换个客户端重试」，可指定用哪个客户端 UA 再拉一次，不再只能靠默认顺序碰运气。
+- **测速可强制打断**：卡住的测试会一直占着令牌，导致之后点测速无反应。现在令牌被占用时会提示「强制开始」，打断上一个测试（URL Test / ping / 测速）并立即开始新的。三个入口都支持。
+- 组 DNS 输入框继续支持多行；提示文案区分「已有测试仍在运行」与「强制打断」。
 
 ### v1.4.4 改动日志 (2026-11-21)
 

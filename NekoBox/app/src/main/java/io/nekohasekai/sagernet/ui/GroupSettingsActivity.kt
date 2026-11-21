@@ -242,12 +242,21 @@ class GroupSettingsActivity(
         }
     }
 
+    /** Populated when the user picks a specific client UA for one inspection. */
+    private var dnsCandidateUserAgents: List<String>? = null
+
+    /** The preferences fragment that owns the DNS row, reused by follow-up dialogs. */
+    private var dnsCandidateFragment: PreferenceFragmentCompat? = null
+
     private fun fetchDnsCandidates(fragment: PreferenceFragmentCompat, link: String) {
+        dnsCandidateFragment = fragment
         loadingDnsCandidates = true
         updateNodeDnsStatus(fragment)
         lifecycleScope.launch {
             val profile = try {
-                withContext(Dispatchers.IO) { RawUpdater.inspectSubscriptionDns(link) }
+                withContext(Dispatchers.IO) {
+                    RawUpdater.inspectSubscriptionDns(link, dnsCandidateUserAgents ?: RawUpdater.DNS_CANDIDATE_USER_AGENTS)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -259,11 +268,14 @@ class GroupSettingsActivity(
             if (isFinishing || isDestroyed || link != DataStore.subscriptionLink ||
                 DataStore.groupType != GroupType.SUBSCRIPTION) return@launch
             when {
-                profile == null -> showDnsCandidatesMessage(R.string.group_dns_candidates_failed)
+                profile == null -> showDnsCandidatesMessage(
+                    R.string.group_dns_candidates_failed, allowClientSwitch = true,
+                )
                 profile.malformed -> showDnsCandidatesMessage(R.string.group_dns_candidates_malformed)
                 !profile.hasDns -> showDnsCandidatesMessage(
                     if (link.startsWith("content://")) R.string.group_dns_candidates_no_dns_file
                     else R.string.group_dns_candidates_no_dns_meta,
+                    allowClientSwitch = !link.startsWith("content://"),
                 )
                 profile.rows.isEmpty() -> showDnsCandidatesMessage(R.string.group_dns_candidates_empty)
                 else -> showDnsCandidatesPicker(fragment, link, profile)
@@ -271,9 +283,46 @@ class GroupSettingsActivity(
         }
     }
 
-    private fun showDnsCandidatesMessage(message: Int) {
-        dnsCandidatesDialog = AlertDialog.Builder(this).setTitle(R.string.group_dns_candidates_title)
-            .setMessage(message).setPositiveButton(android.R.string.ok, null).show()
+    /**
+     * Show an inspection result. When the provider answered with a nodes-only body, offer a
+     * client switch: some providers only serialize the DNS section for specific clients, and
+     * guessing on their behalf is never safe.
+     */
+    private fun showDnsCandidatesMessage(message: Int, allowClientSwitch: Boolean = false) {
+        val builder = AlertDialog.Builder(this).setTitle(R.string.group_dns_candidates_title)
+            .setMessage(message).setPositiveButton(android.R.string.ok, null)
+        if (allowClientSwitch) {
+            builder.setNeutralButton(R.string.group_dns_candidates_pick_client) { _, _ ->
+                showDnsClientPicker()
+            }
+        }
+        dnsCandidatesDialog = builder.show()
+    }
+
+    /** Let the user choose which client the subscription should think is downloading it. */
+    private fun showDnsClientPicker() {
+        val labels = arrayOf(
+            getString(R.string.group_dns_client_flclash),
+            getString(R.string.group_dns_client_verge),
+            getString(R.string.group_dns_client_meta),
+            getString(R.string.group_dns_client_nekopro),
+        )
+        val agents = RawUpdater.DNS_CANDIDATE_USER_AGENTS
+        dnsCandidatesDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.group_dns_candidates_pick_client)
+            .setItems(labels) { _, which ->
+                dnsCandidateUserAgents = listOfNotNull(agents.getOrNull(which))
+                showCandidatesAfterClientPick()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showCandidatesAfterClientPick() {
+        val fragment = dnsCandidateFragment ?: return
+        val link = DataStore.subscriptionLink
+        if (link.isBlank()) return
+        fetchDnsCandidates(fragment, link)
     }
 
     private fun showDnsCandidatesPicker(

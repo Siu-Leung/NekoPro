@@ -81,6 +81,8 @@
     <string name="speed">%s/s</string>
     <string name="connection_test_testing">Testing…</string>
     <string name="connection_test_running">Another connection test is already running</string>
+    <string name="connection_test_running_force">Another test is still running. Force-stop it and start the new one?</string>
+    <string name="connection_test_force">Force start</string>
     <string name="connection_test_available">Success: HTTPS handshake took %dms</string>
     <string name="connection_test_available_http">Success: HTTP handshake took %dms</string>
     <string name="connection_test_error">Failed: %s</string>

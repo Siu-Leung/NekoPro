@@ -44,6 +44,13 @@ object RawUpdater : GroupUpdater() {
 
     private const val CLASH_META_USER_AGENT = "clash-meta"
 
+    /**
+     * Default DNS-inspection clients, most reliable first. FlClash and Clash Verge are
+     * commonly served the complete profile, while plain `clash-meta` is often answered
+     * with a nodes-only payload.
+     */
+    internal val DNS_CANDIDATE_USER_AGENTS = ClashDnsCandidates.CLIENT_USER_AGENTS
+
     @SuppressLint("Recycle")
     private fun readSubscriptionFile(link: String): String =
         app.contentResolver.openInputStream(link.toUri())?.bufferedReader()?.use { reader ->
@@ -82,18 +89,45 @@ object RawUpdater : GroupUpdater() {
     }
 
     /** Read-only, on demand: same source/transport as refresh, without committing a node snapshot. */
-    internal suspend fun inspectSubscriptionDns(link: String): ClashDnsCandidates.Profile {
+    internal suspend fun inspectSubscriptionDns(link: String): ClashDnsCandidates.Profile =
+        inspectSubscriptionDns(link, DNS_CANDIDATE_USER_AGENTS)
+
+    /**
+     * Read the DNS section using a caller-supplied UA order.
+     *
+     * Providers gate full profiles behind specific clients: `clash-meta` may return a
+     * nodes-only body while FlClash/Clash Verge receive the complete YAML. Try each UA in
+     * turn and keep the first response that actually carries a DNS section; a nodes-only
+     * answer from one client must not hide a complete one from the next.
+     *
+     * @param userAgents ordered client identifiers; the first usable answer wins
+     */
+    internal suspend fun inspectSubscriptionDns(
+        link: String, userAgents: List<String>,
+    ): ClashDnsCandidates.Profile {
         currentCoroutineContext().ensureActive()
-        val profile = if (link.startsWith("content://")) {
-            ClashDnsCandidates.parse(readSubscriptionFile(link))
-        } else {
-            require(link.startsWith("http://", true) || link.startsWith("https://", true))
-            withSubscriptionResponse(link, CLASH_META_USER_AGENT, DataStore.serviceState.connected) {
-                ClashDnsCandidates.parse(Util.getStringBox(it.contentString))
-            }
+        if (link.startsWith("content://")) {
+            return ClashDnsCandidates.parse(readSubscriptionFile(link))
         }
-        currentCoroutineContext().ensureActive()
-        return profile
+        require(link.startsWith("http://", true) || link.startsWith("https://", true))
+        var lastProfile: ClashDnsCandidates.Profile? = null
+        for (userAgent in userAgents.ifEmpty { DNS_CANDIDATE_USER_AGENTS }) {
+            currentCoroutineContext().ensureActive()
+            val profile = try {
+                withSubscriptionResponse(link, userAgent, DataStore.serviceState.connected) {
+                    ClashDnsCandidates.parse(Util.getStringBox(it.contentString))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                continue
+            }
+            if (profile.hasDns && profile.rows.any { it.selectable != null }) return profile
+            if (lastProfile == null || (profile.hasDns && !lastProfile.hasDns)) lastProfile = profile
+        }
+        return lastProfile ?: ClashDnsCandidates.Profile(
+            emptyList(), emptyList(), false, false,
+        )
     }
 
     override suspend fun doUpdate(

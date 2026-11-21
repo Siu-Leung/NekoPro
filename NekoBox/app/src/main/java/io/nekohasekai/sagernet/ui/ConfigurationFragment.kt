@@ -841,6 +841,19 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
+    /** Cancel any running URL test, ping test or speed test and free the token. */
+    private fun cancelAllTests() {
+        runCatching { speedTestRunner?.cancel() }
+        speedTestJob?.cancel()
+        speedTestRunner = null
+        runCatching { speedTestDialog?.dismiss() }
+        speedTestDialog = null
+        speedTestHidden = false
+        // The next acquireTestToken must succeed even if a cancelled run never reached
+        // its finally block: invalidate the old token, then hand the slot back.
+        DataStore.releaseTestToken(DataStore.forceTestToken())
+    }
+
     private fun retryFailedSpeedTest() {
         if (DataStore.runningTest) return
         val group = DataStore.currentGroup()
@@ -871,16 +884,38 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
-    fun speedTest(targetProfile: ProxyEntity? = null, targetProfiles: List<ProxyEntity>? = null) {
+    fun speedTest(
+        targetProfile: ProxyEntity? = null,
+        targetProfiles: List<ProxyEntity>? = null,
+        force: Boolean = false,
+    ) {
         if (!isAdded) return
-        val testToken = DataStore.acquireTestToken()
+        // A forced run must clear the previous one *before* taking the slot, otherwise it
+        // would cancel (and release) the token it just acquired.
+        if (force) cancelAllTests()
+        var testToken = DataStore.acquireTestToken()
+        if (testToken == 0 && force) {
+            // The cancelled run may not have reached its finally block yet; take the slot
+            // unconditionally so a stuck test cannot keep the button dead.
+            testToken = DataStore.forceTestToken()
+        }
         if (testToken == 0) {
-            // 逻辑修正：此前占用令牌时静默返回，长按无任何反馈像"没反应"。
+            // A stalled run can hold the token forever. Offer an explicit override instead
+            // of leaving the button permanently dead.
             runOnMainDispatcher {
-                if (isAdded) snackbar(getString(R.string.connection_test_running)).show()
+                if (isAdded) {
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setMessage(R.string.connection_test_running_force)
+                        .setPositiveButton(R.string.connection_test_force) { _, _ ->
+                            speedTest(targetProfile, targetProfiles, force = true)
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                }
             }
             return
         }
+
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
         val titleText = when {
@@ -1172,9 +1207,24 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("EXPERIMENTAL_API_USAGE")
-    fun pingTest(icmpPing: Boolean) {
-        val testToken = DataStore.acquireTestToken()
-        if (testToken == 0) return
+    fun pingTest(icmpPing: Boolean, force: Boolean = false) {
+        if (force) cancelAllTests()
+        var testToken = DataStore.acquireTestToken()
+        if (testToken == 0 && force) testToken = DataStore.forceTestToken()
+        if (testToken == 0) {
+            runOnMainDispatcher {
+                if (isAdded) {
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setMessage(R.string.connection_test_running_force)
+                        .setPositiveButton(R.string.connection_test_force) { _, _ ->
+                            pingTest(icmpPing, force = true)
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                }
+            }
+            return
+        }
         val test = TestDialog()
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
@@ -1315,9 +1365,24 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    fun urlTest() {
-        val testToken = DataStore.acquireTestToken()
-        if (testToken == 0) return
+    fun urlTest(force: Boolean = false) {
+        if (force) cancelAllTests()
+        var testToken = DataStore.acquireTestToken()
+        if (testToken == 0 && force) testToken = DataStore.forceTestToken()
+        if (testToken == 0) {
+            runOnMainDispatcher {
+                if (isAdded) {
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setMessage(R.string.connection_test_running_force)
+                        .setPositiveButton(R.string.connection_test_force) { _, _ ->
+                            urlTest(force = true)
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                }
+            }
+            return
+        }
         val test = TestDialog()
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()

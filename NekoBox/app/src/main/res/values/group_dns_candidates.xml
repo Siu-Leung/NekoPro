@@ -22,4 +22,9 @@
     <string name="group_dns_candidates_unsafe">Not selectable: routing parameter, credentials in the authority, query, or ambiguous address</string>
     <string name="group_dns_candidates_invalid">Not selectable: invalid DNS entry</string>
     <string name="group_dns_candidates_unavailable">%1$s\n%2$s</string>
+    <string name="group_dns_candidates_pick_client">Try another client</string>
+    <string name="group_dns_client_flclash">FlClash (default)</string>
+    <string name="group_dns_client_verge">Clash Verge</string>
+    <string name="group_dns_client_meta">Clash Meta</string>
+    <string name="group_dns_client_nekopro">NekoPro</string>
 </resources>

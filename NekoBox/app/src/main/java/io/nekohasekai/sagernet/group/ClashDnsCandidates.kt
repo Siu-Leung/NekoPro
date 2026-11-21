@@ -30,6 +30,20 @@ internal object ClashDnsCandidates {
         val malformed: Boolean = false,
     )
 
+    /**
+     * Default inspection clients, most likely to return a complete profile first.
+     *
+     * Providers commonly serve a nodes-only body to plain `clash-meta` while answering
+     * FlClash or Clash Verge with the full YAML including `dns`. The order is therefore a
+     * fallback chain, not a preference: the first response that carries a DNS section wins.
+     */
+    val CLIENT_USER_AGENTS = listOf(
+        "FlClash/v0.9.4 clash-verge Platform/android",
+        "clash-verge/v2.0.0",
+        "clash-meta",
+        "NekoPro/Android",
+    )
+
     const val MAX_ROWS = 128
     private const val MAX_ENDPOINT_LENGTH = 2048
     private val portableSchemes = setOf("udp", "tcp", "tls", "https", "quic")

@@ -22,4 +22,9 @@
     <string name="group_dns_candidates_unsafe">不可选择：含路由参数、主机凭据、查询参数，或地址含义不明确</string>
     <string name="group_dns_candidates_invalid">不可选择：无效 DNS 条目</string>
     <string name="group_dns_candidates_unavailable">%1$s\n%2$s</string>
+    <string name="group_dns_candidates_pick_client">换个客户端重试</string>
+    <string name="group_dns_client_flclash">FlClash（默认）</string>
+    <string name="group_dns_client_verge">Clash Verge</string>
+    <string name="group_dns_client_meta">Clash Meta</string>
+    <string name="group_dns_client_nekopro">NekoPro</string>
 </resources>

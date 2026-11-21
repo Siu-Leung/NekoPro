@@ -54,6 +54,21 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         return if (activeTestToken.compareAndSet(0, next)) next else 0
     }
 
+    /**
+     * Force a new test token, invalidating whichever run holds the current one.
+     *
+     * A stalled test (plugin start, blocked DNS, a hung node) can hold the token
+     * indefinitely and make every later test a silent no-op. The caller is responsible
+     * for cancelling the previous run; the token comparison inside each run then makes
+     * its late results unable to overwrite the new run.
+     */
+    fun forceTestToken(): Int {
+        var next = runningTestGeneration.incrementAndGet()
+        if (next == 0) next = runningTestGeneration.incrementAndGet()
+        activeTestToken.set(next)
+        return next
+    }
+
     fun releaseTestToken(token: Int) {
         if (token != 0) {
             activeTestToken.compareAndSet(token, 0)

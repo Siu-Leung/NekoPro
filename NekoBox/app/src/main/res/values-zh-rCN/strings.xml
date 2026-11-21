@@ -59,7 +59,10 @@
         \n直连： %3$s↑ %4$s↓</string>
     <string name="speed">%s/s</string>
     <string name="connection_test_testing">测试中…</string>
-    <string name="connection_test_running">已有连接测试在进行中</string>    <string name="connection_test_available">连接成功: HTTPS 握手耗时 %dms</string>
+    <string name="connection_test_running">已有连接测试在进行中</string>
+    <string name="connection_test_running_force">已有测试仍在运行，强制打断并开始新的测试？</string>
+    <string name="connection_test_force">强制开始</string>
+    <string name="connection_test_available">连接成功: HTTPS 握手耗时 %dms</string>
     <string name="connection_test_error">失败: %s</string>
     <string name="connection_test_fail">网络不可用</string>
     <string name="connection_test_error_status_code">错误代码: #%d</string>

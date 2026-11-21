@@ -102,4 +102,28 @@ class ClashDnsCandidatesTest {
         assertEquals(ClashDnsCandidates.MAX_ROWS, tooMany.rows.size)
         assertTrue(tooMany.auto.isEmpty())
     }
+
+    @Test
+    fun clientFallbackOrderPrefersCompleteProfiles() {
+        // The default chain must try a full-profile client before a nodes-only one, so a
+        // provider that gates the dns section behind FlClash/Verge is still readable.
+        val chain = ClashDnsCandidates.CLIENT_USER_AGENTS
+        assertTrue(chain.size >= 2)
+        assertTrue(chain.first().contains("FlClash", ignoreCase = true))
+        assertTrue(chain.any { it.contains("clash-verge", ignoreCase = true) })
+        assertTrue(chain.any { it == "clash-meta" })
+        assertEquals(chain.size, chain.distinct().size)
+    }
+
+    @Test
+    fun nodesOnlyProfileIsNotTreatedAsDns() {
+        val nodesOnly = """
+            proxies:
+              - {name: a, type: anytls, server: node.example, port: 443}
+        """.trimIndent()
+        val profile = ClashDnsCandidates.parse(nodesOnly)
+        assertFalse(profile.hasDns)
+        assertTrue(profile.auto.isEmpty())
+        assertTrue(profile.rows.isEmpty())
+    }
 }
