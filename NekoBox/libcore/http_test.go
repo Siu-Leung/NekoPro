@@ -344,12 +344,12 @@ func TestValidateRedirectPolicyBlocksDowngradeAndSSRF(t *testing.T) {
 	}
 }
 
-type countingReader struct {
+type errorBodyCountingReader struct {
 	remaining int
 	readBytes int
 }
 
-func (r *countingReader) Read(p []byte) (int, error) {
+func (r *errorBodyCountingReader) Read(p []byte) (int, error) {
 	if r.remaining <= 0 {
 		return 0, io.EOF
 	}
@@ -366,7 +366,7 @@ func (r *countingReader) Read(p []byte) (int, error) {
 }
 
 func TestHTTPErrorStringCapsBytesRead(t *testing.T) {
-	reader := &countingReader{remaining: 1 << 20} // 1 MiB error payload
+	reader := &errorBodyCountingReader{remaining: 1 << 20} // 1 MiB error payload
 	resp := &httpResponse{
 		Response: &http.Response{
 			StatusCode: http.StatusInternalServerError,
