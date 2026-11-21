@@ -140,6 +140,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
+	outboundResolver, err := mihomo_adapter.NewOutboundResolver(ctx, options.DialerOptions, outboundDialer)
+	if err != nil {
+		return nil, err
+	}
 
 	clientFP := options.ClientFingerprint
 	if clientFP == "" {
@@ -153,6 +157,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	vlessOption := &outbound.VlessOption{
 		BasicOption: outbound.BasicOption{
 			DialerForAPI: mihomo_adapter.NewDialer(outboundDialer),
+			Resolver:     outboundResolver,
 		},
 		Name:              tag,
 		Server:            options.Server,
@@ -178,8 +183,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 	if options.ECHEnabled {
 		vlessOption.ECHOpts = outbound.ECHOptions{
-			Enable: true,
-			Config: strings.TrimSpace(options.ECHConfig),
+			Enable:   true,
+			Config:   strings.TrimSpace(options.ECHConfig),
+			Resolver: outboundResolver,
 		}
 	}
 	if options.RealityPublicKey != "" {

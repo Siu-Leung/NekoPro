@@ -75,15 +75,15 @@ class SubscriptionBean : Serializable() {
         deduplication = input.readBoolean()
         updateWhenConnectedOnly = input.readBoolean()
         customUserAgent = input.readString()
-        if (input.limit() - input.position() > 0) {
+        if (version >= 1 || input.limit() - input.position() > 0) {
             autoUpdate = input.readBoolean()
             autoUpdateDelay = input.readInt()
             lastUpdated = input.readInt()
         }
-        if (version >= 1 && input.limit() - input.position() > 0) {
+        if (version >= 1) {
             subscriptionUserinfo = input.readString()
         }
-        if (version >= 2 && input.limit() - input.position() > 0) {
+        if (version >= 2) {
             nodeDns = input.readString()
             autoAdoptNodeDns = input.readBoolean()
             adoptedNodeDns = input.readString()

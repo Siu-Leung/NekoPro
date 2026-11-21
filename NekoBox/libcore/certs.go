@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"log"
 	"sync"
+	"sync/atomic"
 
 	mihomoCA "github.com/metacubex/mihomo/component/ca"
 )
@@ -14,6 +15,7 @@ var (
 	baseSystemRoots     *x509.CertPool
 	customRootPool      *x509.CertPool
 	customCertPEM       string
+	customCertGen       atomic.Uint64
 )
 
 func cloneBaseSystemRoots() *x509.CertPool {
@@ -41,6 +43,10 @@ func currentRootCAs() *x509.CertPool {
 	return nil
 }
 
+func currentCustomCAGen() uint64 {
+	return customCertGen.Load()
+}
+
 func currentCustomCAPEM() string {
 	customCertMu.RLock()
 	pem := customCertPEM
@@ -63,6 +69,7 @@ func UpdateRootCACerts(pem []byte) bool {
 	if len(pem) == 0 {
 		customRootPool = nil
 		customCertPEM = ""
+		customCertGen.Add(1)
 		mihomoCA.ResetCertificate()
 		log.Println("system root CAs restored")
 		return true
@@ -73,6 +80,7 @@ func UpdateRootCACerts(pem []byte) bool {
 	}
 	customRootPool = roots
 	customCertPEM = string(pem)
+	customCertGen.Add(1)
 	mihomoCA.ResetCertificate()
 	_ = mihomoCA.AddCertificate(customCertPEM)
 	log.Println("internal ca.pem was loaded")

@@ -1,8 +1,12 @@
 package io.nekohasekai.sagernet.fmt
 
+import com.esotericsoftware.kryo.io.ByteBufferInput
+import com.esotericsoftware.kryo.io.ByteBufferOutput
+import io.nekohasekai.sagernet.GroupType
+import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.fmt.hysteria.getFirstPort
 import io.nekohasekai.sagernet.fmt.hysteria.hopPortsToSingboxList
-import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.mieru.buildSingBoxOutboundMieruBean
 import io.nekohasekai.sagernet.fmt.mieru.parseMieru
@@ -17,6 +21,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 
 class FormatAndMigrationFixesTest {
 
@@ -122,6 +128,14 @@ class FormatAndMigrationFixesTest {
 
     @Test
     fun mieruPortRangeAndUriRoundTrip() {
+        val rangeOnly = MieruBean().apply {
+            serverAddress = "mieru.example.com"
+            serverPort = 0
+            portRange = "20000-20100"
+            initializeDefaultValues()
+        }
+        assertEquals(20000, rangeOnly.serverPort)
+
         val bean = MieruBean().apply {
             initializeDefaultValues()
             name = "m1"
@@ -163,5 +177,151 @@ class FormatAndMigrationFixesTest {
         sub.nodeDns = ""
         sub.autoAdoptNodeDns = false
         assertEquals(null, sub.effectiveNodeDns())
+    }
+
+    @Test
+    fun kryoDeserializationAcrossSmallStreamChunksPreservesTrailingFields() {
+        val longPad = "p".repeat(5000)
+        val mieru = MieruBean().apply {
+            initializeDefaultValues()
+            name = "mieru-node"
+            serverAddress = "m.example.com"
+            serverPort = 20000
+            username = longPad
+            password = "pw"
+            portRange = "20000-20100"
+            multiplexing = "MULTIPLEXING_HIGH"
+            handshakeMode = "HANDSHAKE_NO_WAIT"
+            customOutboundJson = "{\"detour\":\"front\"}"
+        }
+        val wg = WireGuardBean().apply {
+            initializeDefaultValues()
+            name = "wg-node"
+            serverAddress = "wg.example.com"
+            serverPort = 51820
+            localAddress = "10.0.0.2/32"
+            privateKey = longPad
+            peerPublicKey = "pub"
+            allowedIps = "10.0.0.0/8"
+            persistentKeepalive = 25
+            customConfigJson = "{\"log\":{\"level\":\"warn\"}}"
+        }
+        val snell = SnellBean().apply {
+            initializeDefaultValues()
+            name = "snell-node"
+            serverAddress = "s.example.com"
+            serverPort = 8443
+            psk = longPad
+            version = 6
+            userkey = "ukey-999"
+            customOutboundJson = "{\"tcp_fast_open\":true}"
+        }
+        val group = ProxyGroup(
+            id = 42L,
+            userOrder = 3L,
+            ungrouped = false,
+            name = "SubGroup",
+            type = GroupType.SUBSCRIPTION,
+            subscription = SubscriptionBean().apply {
+                initializeDefaultValues()
+                link = "https://sub.example.com/$longPad"
+                nodeDns = "https://dns.node.example/dns-query"
+                autoAdoptNodeDns = true
+                adoptedNodeDns = "tls://1.1.1.1"
+            },
+            order = 1,
+            isSelector = true,
+            frontProxy = 11L,
+            landingProxy = 22L,
+        )
+
+        // 1) KryoConverters (>4KB ByteArray) round-trip
+        val mieruClone = mieru.clone()
+        assertEquals("mieru-node", mieruClone.name)
+        assertEquals("20000-20100", mieruClone.portRange)
+        assertEquals("{\"detour\":\"front\"}", mieruClone.customOutboundJson)
+
+        val wgClone = wg.clone()
+        assertEquals("wg-node", wgClone.name)
+        assertEquals("10.0.0.0/8", wgClone.allowedIps)
+        assertEquals(25, wgClone.persistentKeepalive)
+        assertEquals("{\"log\":{\"level\":\"warn\"}}", wgClone.customConfigJson)
+
+        val snellClone = snell.clone()
+        assertEquals("snell-node", snellClone.name)
+        assertEquals("ukey-999", snellClone.userkey)
+        assertEquals("{\"tcp_fast_open\":true}", snellClone.customOutboundJson)
+
+        // 2) Backup stream deserialization with tiny 32-byte ByteBufferInput chunks
+        //    forcing chunk exhaustion at every versioned field boundary
+        val rawOut = ByteArrayOutputStream()
+        ByteBufferOutput(rawOut).use { out ->
+            mieru.serializeToBuffer(out)
+            wg.serializeToBuffer(out)
+            snell.serializeToBuffer(out)
+            group.serializeToBuffer(out)
+            out.flush()
+        }
+        ByteBufferInput(ByteArrayInputStream(rawOut.toByteArray()), 32).use { input ->
+            val m2 = MieruBean().apply { deserializeFromBuffer(input); initializeDefaultValues() }
+            val w2 = WireGuardBean().apply { deserializeFromBuffer(input); initializeDefaultValues() }
+            val s2 = SnellBean().apply { deserializeFromBuffer(input); initializeDefaultValues() }
+            val g2 = ProxyGroup().apply { deserializeFromBuffer(input); initializeDefaultValues() }
+
+            assertEquals("mieru-node", m2.name)
+            assertEquals("20000-20100", m2.portRange)
+            assertEquals("{\"detour\":\"front\"}", m2.customOutboundJson)
+
+            assertEquals("wg-node", w2.name)
+            assertEquals("10.0.0.0/8", w2.allowedIps)
+            assertEquals(25, w2.persistentKeepalive)
+            assertEquals("{\"log\":{\"level\":\"warn\"}}", w2.customConfigJson)
+
+            assertEquals("snell-node", s2.name)
+            assertEquals("ukey-999", s2.userkey)
+            assertEquals("{\"tcp_fast_open\":true}", s2.customOutboundJson)
+
+            assertEquals(42L, g2.id)
+            assertEquals("https://dns.node.example/dns-query", g2.subscription?.nodeDns)
+            assertEquals(true, g2.subscription?.autoAdoptNodeDns)
+            assertEquals("tls://1.1.1.1", g2.subscription?.adoptedNodeDns)
+            assertEquals(1, g2.order)
+            assertEquals(true, g2.isSelector)
+            assertEquals(11L, g2.frontProxy)
+            assertEquals(22L, g2.landingProxy)
+        }
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun singBoxOptionAsMapSerializesWithoutInfiniteRecursion() {
+        val wg = WireGuardBean().apply {
+            initializeDefaultValues()
+            localAddress = "10.0.0.2/32"
+            privateKey = "priv"
+            serverAddress = "wg.example.com"
+            serverPort = 51820
+            peerPublicKey = "pub"
+            allowedIps = "10.0.0.0/8"
+            persistentKeepalive = 25
+        }
+        val ep = buildSingBoxEndpointWireGuardBean(wg).apply {
+            _hack_config_map["tag"] = "proxy"
+            _hack_config_map["domain_resolver"] = "dns-group-1"
+            _hack_custom_config = "{\"mtu\": 1380}"
+        }
+        val root = moe.matsuri.nb4a.SingBoxOptions.MyOptions().apply {
+            endpoints = mutableListOf(ep)
+            outbounds = mutableListOf(
+                moe.matsuri.nb4a.SingBoxOptions.CustomSingBoxOption("{\"type\":\"direct\",\"tag\":\"direct\"}")
+            )
+        }
+        val map = root.asMap()
+        val endpoints = map["endpoints"] as List<Map<String, Any?>>
+        assertEquals("proxy", endpoints[0]["tag"])
+        assertEquals("dns-group-1", endpoints[0]["domain_resolver"])
+        assertEquals(1380L, endpoints[0]["mtu"])
+        val outbounds = map["outbounds"] as List<Map<String, Any?>>
+        assertEquals("direct", outbounds[0]["tag"])
     }
 }

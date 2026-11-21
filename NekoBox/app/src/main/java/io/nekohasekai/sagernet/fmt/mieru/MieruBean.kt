@@ -16,7 +16,12 @@ class MieruBean : AbstractBean() {
     @JvmField var handshakeMode: String? = null
 
     override fun initializeDefaultValues() {
+        if ((serverPort ?: 0) !in 1..65535 && !portRange.isNullOrBlank()) {
+            serverPort = portRange!!.substringBefore('-').substringBefore(':').trim()
+                .toIntOrNull()?.takeIf { it in 1..65535 } ?: 1080
+        }
         super.initializeDefaultValues()
+        if ((serverPort ?: 0) !in 1..65535) serverPort = 1080
         if (protocol == null) protocol = "TCP"
         if (username == null) username = ""
         if (password == null) password = ""
@@ -45,7 +50,7 @@ class MieruBean : AbstractBean() {
         username = input.readString()
         password = input.readString()
         if (protocol == "UDP") mtu = input.readInt()
-        if (version >= 1 && input.limit() - input.position() > 0) {
+        if (version >= 1) {
             portRange = input.readString()
             multiplexing = input.readString()
             handshakeMode = input.readString()

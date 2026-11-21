@@ -2,6 +2,7 @@ package libcore
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -119,7 +120,6 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
 	injectCustomRootCA(&options)
-	injectCustomRootCA(&options)
 
 	// create box
 	instance, err := box.New(box.Options{
@@ -169,6 +169,7 @@ func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b 
 		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
+	injectCustomRootCA(&options)
 
 	instance, err := box.New(box.Options{
 		Options: options,
@@ -348,6 +349,9 @@ func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker,
 		MaxIdleConns:          2,
 		IdleConnTimeout:       timeout,
 	}
+	if roots := currentRootCAs(); roots != nil {
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+	}
 	client := &http.Client{
 		Transport: transport,
 	}
@@ -382,6 +386,9 @@ func goServeProtect(start bool) {
 func injectCustomRootCA(options *option.Options) {
 	pemStr := currentCustomCAPEM()
 	if pemStr == "" || options == nil {
+		return
+	}
+	if options.Certificate != nil && options.Certificate.Store == constant.CertificateStoreNone {
 		return
 	}
 	if options.Certificate == nil {

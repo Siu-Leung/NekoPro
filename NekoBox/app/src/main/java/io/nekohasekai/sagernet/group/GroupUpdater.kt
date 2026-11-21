@@ -154,7 +154,7 @@ abstract class GroupUpdater {
 
         suspend fun executeUpdate(proxyGroup: ProxyGroup, byUser: Boolean): Boolean {
             return coroutineScope {
-                if (!updating.add(proxyGroup.id)) cancel()
+                if (!updating.add(proxyGroup.id)) return@coroutineScope false
                 try {
                     GroupManager.postReload(proxyGroup.id)
 
@@ -168,8 +168,7 @@ abstract class GroupUpdater {
 
                     if (byUser && (subscription.link?.startsWith("http://", ignoreCase = true) == true || subscription.updateWhenConnectedOnly == true) && !connected) {
                         if (userInterface == null || !userInterface.confirm(app.getString(R.string.update_subscription_warning))) {
-                            cancel()
-                            return@coroutineScope true
+                            return@coroutineScope false
                         }
                     }
 

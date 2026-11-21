@@ -46,7 +46,7 @@ class WireGuardBean : AbstractBean() {
         if (version >= 2) {
             reserved = input.readString()
         }
-        if (version >= 3 && input.limit() - input.position() > 0) {
+        if (version >= 3) {
             allowedIps = input.readString()
             persistentKeepalive = input.readInt()
         }

@@ -325,7 +325,11 @@ class AssetsActivity : ThemedActivity() {
         val client = Libcore.newHttpClient().apply {
             modernTLS()
             keepAlive()
-            trySocks5(DataStore.mixedPort)
+            if (DataStore.serviceState.connected) {
+                forceSocks5(DataStore.mixedPort)
+            } else {
+                trySocks5(DataStore.mixedPort)
+            }
         }
 
         try {

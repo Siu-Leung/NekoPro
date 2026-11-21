@@ -44,7 +44,7 @@ class SnellBean : AbstractBean() {
             clientFingerprint = input.readString()
         }
         if (v >= 2) mode = input.readString()
-        if (v >= 3 && input.limit() - input.position() > 0) userkey = input.readString()
+        if (v >= 3) userkey = input.readString()
     }
 
     override fun clone(): SnellBean =

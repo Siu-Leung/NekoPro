@@ -182,7 +182,9 @@ object RawUpdater : GroupUpdater() {
         }
         proxies = proxiesMap.values.toList()
 
-        if (subscription.forceResolve == true) forceResolve(proxies, proxyGroup.id)
+        if (subscription.forceResolve == true && subscription.effectiveNodeDns() == null) {
+            forceResolve(proxies, proxyGroup.id)
+        }
 
         val exists = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
         val duplicate = ArrayList<String>()
@@ -312,7 +314,6 @@ object RawUpdater : GroupUpdater() {
             subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
             SagerDatabase.groupDao.updateGroup(proxyGroup)
         }
-        finishUpdate(proxyGroup)
 
         userInterface?.onUpdateSuccess(
             proxyGroup, changed, added, updated, deleted, duplicate, byUser
@@ -695,6 +696,7 @@ object RawUpdater : GroupUpdater() {
                                         }
                                     }
                                 }
+                                if (bean.serverAddress.isNullOrBlank()) return@runCatching
                                 if (bean.version != null && bean.version !in 4..6) return@runCatching
                                 proxies.add(bean)
                             }
@@ -737,6 +739,7 @@ object RawUpdater : GroupUpdater() {
                                         "pinned-certchain-sha256" -> bean.pinnedCertchainSha256 = rawVal.toString()
                                     }
                                 }
+                                if (bean.serverAddress.isNullOrBlank()) return@runCatching
                                 proxies.add(bean)
                             }
 
@@ -762,6 +765,7 @@ object RawUpdater : GroupUpdater() {
                                         "remote-dns-resolve" -> bean.remoteDnsResolve = rawVal.toString().equals("true", ignoreCase = true)
                                     }
                                 }
+                                if (bean.serverAddress.isNullOrBlank()) return@runCatching
                                 proxies.add(bean)
                             }
 
@@ -990,15 +994,19 @@ object RawUpdater : GroupUpdater() {
             }
         }
 
-        try {
-            val json = JSONTokener(text).nextValue()
-            return parseJSON(json, forSubscription = forSubscription)
-        } catch (e: IllegalStateException) {
-            if (forSubscription) throw e
-        } catch (ignored: Exception) {
-        }
-
         val trimmed = text.trim()
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            try {
+                val json = JSONTokener(trimmed).nextValue()
+                return parseJSON(json, forSubscription = forSubscription)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (forSubscription) {
+                    throw IllegalStateException("Malformed JSON subscription: ${e.message}", e)
+                }
+            }
+        }
         val isExplicitPlainText = trimmed.startsWith("snell://") ||
                 trimmed.startsWith("vmess://") ||
                 trimmed.startsWith("vless://") ||

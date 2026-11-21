@@ -37,6 +37,7 @@
         <item name="itemShapeAppearance">
             @style/ShapeAppearance.MaterialComponents.MediumComponent
         </item>
+        <item name="itemShapeFillColor">@color/color_ng_black_accent</item>
 
         <item name="alertDialogTheme">
             @style/ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet

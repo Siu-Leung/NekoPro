@@ -91,6 +91,7 @@ type httpClient struct {
 	mu                 sync.Mutex
 	tls                tls.Config
 	h1h2Used           bool
+	h1h2CAGen          uint64
 	tlsChangedAfterUse bool
 	h1h2Transport      http.Transport
 	h1h2Client         http.Client
@@ -281,7 +282,8 @@ func (r *httpRequest) prepareH1H2Client() (*http.Client, io.Closer) {
 	defer r.mu.Unlock()
 
 	customRoots := currentRootCAs()
-	if r.allowInsecure || r.tlsChangedAfterUse || customRoots != nil {
+	caGen := currentCustomCAGen()
+	if r.allowInsecure || r.tlsChangedAfterUse || (r.h1h2Used && r.h1h2CAGen != caGen) {
 		tr := r.h1h2Transport.Clone()
 		tr.TLSClientConfig = r.tls.Clone()
 		if tr.TLSClientConfig.RootCAs == nil {
@@ -294,7 +296,12 @@ func (r *httpRequest) prepareH1H2Client() (*http.Client, io.Closer) {
 		return &http.Client{Transport: tr}, h1TransportCloser{tr}
 	}
 	if !r.h1h2Used {
-		r.h1h2Transport.TLSClientConfig = r.tls.Clone()
+		cfg := r.tls.Clone()
+		if cfg.RootCAs == nil {
+			cfg.RootCAs = customRoots
+		}
+		r.h1h2Transport.TLSClientConfig = cfg
+		r.h1h2CAGen = caGen
 		r.h1h2Used = true
 	}
 	return &r.h1h2Client, nil

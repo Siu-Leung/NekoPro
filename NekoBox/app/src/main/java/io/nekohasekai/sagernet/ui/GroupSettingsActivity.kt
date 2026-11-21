@@ -164,6 +164,28 @@ class GroupSettingsActivity(
             subscriptionAutoUpdateDelay.isEnabled = (newValue as Boolean)
             true
         }
+
+        findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnPreferenceChangeListener { _, newValue ->
+            val raw = (newValue as? String)?.trim().orEmpty()
+            if (raw.isEmpty()) {
+                true
+            } else {
+                runCatching {
+                    moe.matsuri.nb4a.SingBoxDnsServerParser.parse(
+                        rawAddress = raw,
+                        tag = "dns-group-validate",
+                        defaultDetour = null,
+                        domainResolver = "dns-direct",
+                    )
+                }.onFailure { err ->
+                    android.widget.Toast.makeText(
+                        this@GroupSettingsActivity,
+                        err.message ?: getString(R.string.invalid_server),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }.isSuccess
+            }
+        }
     }
 
     class UnsavedChangesDialogFragment : AlertDialogFragment<Empty, Empty>() {

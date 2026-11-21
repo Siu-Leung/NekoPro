@@ -124,6 +124,7 @@ func NewMasque(option MasqueOption) (*Masque, error) {
 			Interface:    option.Interface,
 			RoutingMark:  option.RoutingMark,
 			Prefer:       option.IPVersion,
+			Resolver:     option.Resolver,
 		}),
 		runLock: semaphore.NewWeighted(1),
 	}

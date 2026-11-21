@@ -29,10 +29,24 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.0`
+`Neko-Pro-1.4.1`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.0)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.0-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.1)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.1-arm64-v8a.apk`
+
+### v1.4.1 改动日志 (2026-11-21)
+
+- **紧急热修（真机崩溃定位）**
+  - **修复连接/测速 `StackOverflowError` 崩溃**：升级 `Gson 2.11.0` 后，`SingBoxOptionSerializer` 向 `getDelegateAdapter` 传入未注册匿名 `TypeAdapterFactory` 会返回自身序列化器并触发无限递归；现改为标准注册的 `SingBoxOptionTypeAdapterFactory` 并补充 `SingBoxOption.asMap()` 纯 JVM 回归单测。
+  - **修复「关于」页快速切换 `IllegalStateException` 崩溃**：`AboutContent.getMaterialAboutList` 在后台 `AsyncTask` 执行时改用传入的 `activityContext.getString(...)`，避免页面切换脱离宿主后调用 `Fragment.getString(...)` 崩溃。
+  - **补齐主题属性 `itemShapeFillColor`**：消除 `MainActivity` 启动加载侧栏颜色列表时的 `ResourcesCompat` `UnsupportedOperationException` 警告。
+- **全量逻辑审计修复（v1.3.0 → v1.4.1 二次复核）**
+  - **修复 Kryo 分块流边界错位与备份恢复污染**：移除 `MieruBean`、`WireGuardBean`、`SnellBean` 与 `SubscriptionBean` 按版本字段上的 `input.limit() - input.position() > 0` 误判（`ByteBufferInput(InputStream)` 按 4096 字节分块读取，跨块边界会误跳过字段并污染后续 `AbstractBean`/`ProxyGroup` 流），`KryoConverters.deserialize` 改为直接构造 `ByteBufferInput(bytes)`，并补充 32 字节极小分块流回归单测。
+  - **补齐 MASQUE / VLESS-XHTTP (QUIC/ECH) 与 Mieru 出站域名解析隔离**：在 `mihomo` `BasicOption`、`Base.DialOptions()` 与 `ECHOptions` 接入出站级 `Resolver` 并由 `mihomo_adapter.NewOutboundResolver` 绑定 sing-box `domain_resolver`（阻断 QUIC `common.DialQuic` 与 ECH `HTTPS` 记录绕过订阅组节点 DNS 回落全局直连）；修复 `singBoxMieruResolver` `ip4`/`ip6` 过滤、实例级 `ResolveDialer` 绑定与空传输管理器严格报错。
+  - **堵死非测速实例 mihomo 远端解析回落直连**：`mihomo_adapter` 严格模式在非测速主实例缺失 `dns-remote` 时禁止回退至默认 `dns-direct` / `dns-local` 传输，彻底阻断自定义配置下的远端目标域名泄漏。
+  - **加固订阅组「节点域名 DNS」严格失败与防泄漏闭环**：`ConfigBuilder` 对非法组节点 DNS 直接报错中止（不再静默降级 `dns-direct`）并在 `GroupSettingsActivity` 输入时即时校验；跳过外部插件本地 SOCKS 占位出站绑定；将配置了专属节点 DNS 的组排除出 `bypassDNSBeans`（防止 TUN 劫持 DNS 将私有节点域名发往 `dns-direct`），同时将组节点 DNS 服务器自身域名加入 `domainListDNSDirectForce` 引导解析；`RawUpdater` 在配置节点 DNS 时自动跳过本地 `forceResolve`。
+  - **修复自定义根证书注入一致性与 HTTP/2 连接复用**：去除 `NewSingBoxInstance` 重复调用 `injectCustomRootCA`、补齐 `NewTestSingBoxInstance` 与 `UrlTest` 自定义根证书注入并尊重 `certificate.store = "none"`；`certs.go` / `http.go` 引入证书代际计数 `customCertGen`，修复加载 `ca.pem` 后每次请求重建 Transport 导致 `KeepAlive()` 连接池失效的问题。
+  - **修复订阅更新锁误删、重复通知与截断 JSON 误解析**：`GroupUpdater.executeUpdate` 在并发重入时于 `try` 之前直接返回（避免 `finally` 误清正在运行的更新锁与抛出 `CancellationException` 中断批量更新），移除 `RawUpdater.doUpdate` 尾部重复的 `finishUpdate`；截断 JSON 订阅在 `forSubscription` 下严格报错，不再静默回落文本节点抓取；Mieru 仅填 `port-range` 时自动提取起始端口作为有效默认 `serverPort`；「关于」页检查更新与规则库在线更新在已连接代理时切换为严格 `forceSocks5`。
 
 ### v1.4.0 改动日志 (2026-11-20)
 

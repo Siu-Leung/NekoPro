@@ -27,7 +27,6 @@ import moe.matsuri.nb4a.proxy.neko.NekoBean
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSBean
 import moe.matsuri.nb4a.proxy.snell.SnellBean
 import moe.matsuri.nb4a.utils.JavaUtil
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
 object KryoConverters {
@@ -49,8 +48,7 @@ object KryoConverters {
     @JvmStatic
     fun <T : Serializable> deserialize(bean: T, bytes: ByteArray?): T {
         if (bytes == null) return bean
-        val input = ByteArrayInputStream(bytes)
-        val buffer = ByteBufferInput(input)
+        val buffer = ByteBufferInput(bytes)
         try {
             bean.deserializeFromBuffer(buffer)
         } catch (e: KryoException) {

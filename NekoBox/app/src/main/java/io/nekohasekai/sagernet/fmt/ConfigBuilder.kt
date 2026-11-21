@@ -329,11 +329,16 @@ fun buildConfig(
                 // needGlobal: can only contain one?
                 var needGlobal = false
 
+                val entityGroup = SagerDatabase.groupDao.getById(proxyEntity.groupId)
+                val groupNodeDns = entityGroup?.subscription?.effectiveNodeDns()
+
                 // first profile set as global
                 if (index == profileList.lastIndex) {
                     needGlobal = true
                     tagOut = "g-" + proxyEntity.id
-                    bypassDNSBeans += proxyEntity.requireBean()
+                    if (groupNodeDns.isNullOrBlank()) {
+                        bypassDNSBeans += proxyEntity.requireBean()
+                    }
                 }
 
                 val existingGlobalTag = if (needGlobal) globalOutbounds[proxyEntity.id] else null
@@ -453,28 +458,28 @@ fun buildConfig(
                         if (forTest) "" else defaultServerDomainStrategy
 
                     // Per-group node DNS: resolves only this group's proxy entry server hostnames.
-                    val entityGroup = SagerDatabase.groupDao.getById(proxyEntity.groupId)
-                    val groupNodeDns = entityGroup?.subscription?.effectiveNodeDns()
-                    if (!groupNodeDns.isNullOrBlank()) {
+                    // Fail closed if configured node DNS is malformed so private node hostnames never
+                    // silently downgrade to default_domain_resolver ("dns-direct").
+                    if (!groupNodeDns.isNullOrBlank() && !proxyEntity.needExternal()) {
                         val nodeDnsTag = groupNodeDnsTags.getOrPut(proxyEntity.groupId) {
                             val tag = "dns-group-${proxyEntity.groupId}"
-                            runCatching {
+                            val serverOpt = try {
                                 SingBoxDnsServerParser.parse(
                                     rawAddress = groupNodeDns,
                                     tag = tag,
                                     defaultDetour = null,
                                     domainResolver = "dns-direct",
                                 )
-                            }.onSuccess { serverOpt ->
-                                groupNodeDnsServers.add(serverOpt)
-                            }.onFailure { err ->
-                                Logs.w("Invalid group node DNS for group ${proxyEntity.groupId}: ${err.message}")
+                            } catch (err: Exception) {
+                                throw IllegalArgumentException(
+                                    "Invalid node DNS for group '${entityGroup?.displayName() ?: proxyEntity.groupId}': ${err.message}",
+                                    err
+                                )
                             }
+                            groupNodeDnsServers.add(serverOpt)
                             tag
                         }
-                        if (groupNodeDnsServers.any { it.tag == nodeDnsTag }) {
-                            _hack_config_map["domain_resolver"] = nodeDnsTag
-                        }
+                        _hack_config_map["domain_resolver"] = nodeDnsTag
                     }
 
                     _hack_config_map["tag"] = tagOut
@@ -740,6 +745,12 @@ fun buildConfig(
                 if (!host.isIpAddress()) {
                     domainListDNSDirectForce.add("full:$host")
                 }
+            }
+        }
+
+        groupNodeDnsServers.forEach { serverOpt ->
+            serverOpt.server?.takeIf { it.isNotBlank() && !it.isIpAddress() }?.let { host ->
+                domainListDNSDirectForce.add("full:$host")
             }
         }
 

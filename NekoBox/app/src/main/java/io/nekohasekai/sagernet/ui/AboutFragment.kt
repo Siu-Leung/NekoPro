@@ -75,7 +75,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .text(R.string.app_version)
                                 .subText(SagerNet.appVersionNameForDisplay)
                                 .setOnClickAction {
-                                    openReleaseUrl(requireContext(), AppUpdatePolicy.RELEASES_PAGE_URL)
+                                    openReleaseUrl(context ?: activityContext, AppUpdatePolicy.RELEASES_PAGE_URL)
                                 }
                                 .build())
                         .addItem(
@@ -89,13 +89,13 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                         .addItem(
                             MaterialAboutActionItem.Builder()
                                 .icon(R.drawable.ic_baseline_layers_24)
-                                .text(getString(R.string.version_x, "sing-box"))
+                                .text(activityContext.getString(R.string.version_x, "sing-box"))
                                 .subText(Libcore.versionBox())
                                 .build())
                         .addItem(
                             MaterialAboutActionItem.Builder()
                                 .icon(R.drawable.ic_baseline_layers_24)
-                                .text(getString(R.string.version_x, "mihomo"))
+                                .text(activityContext.getString(R.string.version_x, "mihomo"))
                                 .subText(Libcore.mihomoVersion())
                                 .build())
                         .apply {
@@ -109,7 +109,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                         MaterialAboutActionItem.Builder()
                                             .icon(R.drawable.ic_baseline_nfc_24)
                                             .text(
-                                                getString(
+                                                activityContext.getString(
                                                     R.string.version_x,
                                                     pluginId
                                                 ) + " (${Plugins.displayExeProvider(pkg.packageName)})"
@@ -203,7 +203,11 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             runOnIoDispatcher {
                 val client = Libcore.newHttpClient().apply {
                     modernTLS()
-                    trySocks5(DataStore.mixedPort)
+                    if (DataStore.serviceState.connected) {
+                        forceSocks5(DataStore.mixedPort)
+                    } else {
+                        trySocks5(DataStore.mixedPort)
+                    }
                 }
                 try {
                     val response = client.newRequest().apply {

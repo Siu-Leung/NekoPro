@@ -15,7 +15,9 @@ import (
 	mDNS "github.com/miekg/dns"
 
 	"github.com/sagernet/sing-box/adapter"
+	boxDialer "github.com/sagernet/sing-box/common/dialer"
 	boxConstant "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -37,6 +39,7 @@ var (
 type dnsRouterHolder struct {
 	router           adapter.DNSRouter
 	transportManager adapter.DNSTransportManager
+	test             bool
 }
 
 type protectFuncHolder struct {
@@ -121,6 +124,7 @@ func InstallProtectHook(ctx context.Context) (release func()) {
 		entry.dns = &dnsRouterHolder{
 			router:           dnsRouter,
 			transportManager: service.FromContext[adapter.DNSTransportManager](ctx),
+			test:             entry.test,
 		}
 		installSingBoxResolverOnce()
 	}
@@ -250,26 +254,209 @@ func (a *singBoxDialerAdapter) ListenPacket(ctx context.Context, network, addres
 	return pc, nil
 }
 
+// NewOutboundResolver creates an instance-scoped mihomo resolver.Resolver for
+// QUIC dialers (common.DialQuic) and ECH HTTPS RR lookups so embedded outbounds
+// (MASQUE, VLESS-XHTTP) honor sing-box's per-outbound domain_resolver /
+// domain_strategy instead of bypassing them via global ProxyServerHostResolver.
+func NewOutboundResolver(ctx context.Context, dialOptions option.DialerOptions, outboundDialer N.Dialer) (resolver.Resolver, error) {
+	strategy := boxConstant.DomainStrategy(dialOptions.DomainStrategy)
+	if dialOptions.DomainResolver != nil && dialOptions.DomainResolver.Strategy != option.DomainStrategy(boxConstant.DomainStrategyAsIS) {
+		strategy = boxConstant.DomainStrategy(dialOptions.DomainResolver.Strategy)
+	}
+	if dialOptions.DomainResolver != nil && dialOptions.DomainResolver.Server != "" {
+		dnsRouter := service.FromContext[adapter.DNSRouter](ctx)
+		transports := service.FromContext[adapter.DNSTransportManager](ctx)
+		if dnsRouter == nil || transports == nil {
+			return nil, errors.New("missing DNS router or transport manager for domain_resolver: " + dialOptions.DomainResolver.Server)
+		}
+		if _, loaded := transports.Transport(dialOptions.DomainResolver.Server); !loaded {
+			return nil, errors.New("domain resolver not found: " + dialOptions.DomainResolver.Server)
+		}
+		return &outboundSingBoxResolver{
+			router:     dnsRouter,
+			transports: transports,
+			serverTag:  dialOptions.DomainResolver.Server,
+			queryOptions: adapter.DNSQueryOptions{
+				Strategy:       strategy,
+				LookupStrategy: strategy,
+			},
+		}, nil
+	}
+	if resolveDialer, ok := outboundDialer.(boxDialer.ResolveDialer); ok {
+		if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
+			return &outboundSingBoxResolver{
+				router:       dnsRouter,
+				transports:   service.FromContext[adapter.DNSTransportManager](ctx),
+				queryOptions: resolveDialer.QueryOptions(),
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+type outboundSingBoxResolver struct {
+	router       adapter.DNSRouter
+	transports   adapter.DNSTransportManager
+	serverTag    string
+	queryOptions adapter.DNSQueryOptions
+}
+
+var _ resolver.Resolver = (*outboundSingBoxResolver)(nil)
+
+func (r *outboundSingBoxResolver) resolveOptions(strategyOverride boxConstant.DomainStrategy) (adapter.DNSQueryOptions, error) {
+	if r.router == nil {
+		return adapter.DNSQueryOptions{}, resolver.ErrIPNotFound
+	}
+	opts := r.queryOptions
+	if r.serverTag != "" {
+		if r.transports == nil {
+			return adapter.DNSQueryOptions{}, resolver.ErrIPNotFound
+		}
+		tr, loaded := r.transports.Transport(r.serverTag)
+		if !loaded {
+			return adapter.DNSQueryOptions{}, resolver.ErrIPNotFound
+		}
+		opts.Transport = tr
+	}
+	if strategyOverride != boxConstant.DomainStrategyAsIS {
+		opts.Strategy = strategyOverride
+		opts.LookupStrategy = strategyOverride
+	}
+	return opts, nil
+}
+
+func (r *outboundSingBoxResolver) lookup(ctx context.Context, host string, strategy boxConstant.DomainStrategy) ([]netip.Addr, error) {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{ip.Unmap()}, nil
+	}
+	opts, err := r.resolveOptions(strategy)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := r.router.Lookup(ctx, host, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, resolver.ErrIPNotFound
+	}
+	return addrs, nil
+}
+
+func (r *outboundSingBoxResolver) LookupIP(ctx context.Context, host string) ([]netip.Addr, error) {
+	return r.lookup(ctx, host, boxConstant.DomainStrategyAsIS)
+}
+
+func (r *outboundSingBoxResolver) LookupIPv4(ctx context.Context, host string) ([]netip.Addr, error) {
+	addrs, err := r.lookup(ctx, host, boxConstant.DomainStrategyIPv4Only)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]netip.Addr, 0, len(addrs))
+	for _, ip := range addrs {
+		if ip.Unmap().Is4() {
+			out = append(out, ip.Unmap())
+		}
+	}
+	if len(out) == 0 {
+		return nil, resolver.ErrIPNotFound
+	}
+	return out, nil
+}
+
+func (r *outboundSingBoxResolver) LookupIPv6(ctx context.Context, host string) ([]netip.Addr, error) {
+	addrs, err := r.lookup(ctx, host, boxConstant.DomainStrategyIPv6Only)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]netip.Addr, 0, len(addrs))
+	for _, ip := range addrs {
+		if ip.Is6() && !ip.Is4In6() {
+			out = append(out, ip)
+		}
+	}
+	if len(out) == 0 {
+		return nil, resolver.ErrIPNotFound
+	}
+	return out, nil
+}
+
+func (r *outboundSingBoxResolver) ResolveECH(ctx context.Context, host string) ([]byte, error) {
+	msg := &mDNS.Msg{}
+	msg.SetQuestion(mDNS.Fqdn(host), mDNS.TypeHTTPS)
+	resp, err := r.ExchangeContext(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	for _, rr := range resp.Answer {
+		if httpsRR, ok := rr.(*mDNS.HTTPS); ok {
+			for _, val := range httpsRR.Value {
+				if echCfg, ok := val.(*mDNS.SVCBECHConfig); ok {
+					return echCfg.ECH, nil
+				}
+			}
+		}
+	}
+	return nil, errors.New("no ECH config found in DNS records")
+}
+
+func (r *outboundSingBoxResolver) ExchangeContext(ctx context.Context, m *mDNS.Msg) (*mDNS.Msg, error) {
+	opts, err := r.resolveOptions(boxConstant.DomainStrategyAsIS)
+	if err != nil {
+		return nil, err
+	}
+	return r.router.Exchange(ctx, m, opts)
+}
+
+func (r *outboundSingBoxResolver) Invalid() bool {
+	return true
+}
+
+func (r *outboundSingBoxResolver) ClearCache() {
+	if r.router != nil {
+		r.router.ClearCache()
+	}
+}
+
+func (r *outboundSingBoxResolver) ResetConnection() {
+	if r.router != nil {
+		r.router.ResetNetwork()
+	}
+}
+
 type singBoxResolver struct {
 	fallback resolver.Resolver
 	// transports lists DNS transport tags in order of preference; the
-	// transport manager default is used if none of them exists.
+	// transport manager default is used if none of them exists (unless blocked
+	// by strict non-test leak protection).
 	transports []string
-	// strict disables the system resolver fallback when the sing-box DNS
-	// router is available but fails, so proxied domains never leak to it.
+	// strict disables the system resolver fallback (and any non-test fallback
+	// to dns-direct/dns-local) so proxied domains never leak to direct DNS.
 	strict bool
 }
 
-func (r *singBoxResolver) defaultTransport(h *dnsRouterHolder) adapter.DNSTransport {
+var _ resolver.Resolver = (*singBoxResolver)(nil)
+
+func (r *singBoxResolver) defaultTransport(h *dnsRouterHolder) (adapter.DNSTransport, bool) {
 	if h == nil || h.transportManager == nil {
-		return nil
+		return nil, !r.strict
 	}
 	for _, tag := range r.transports {
 		if tr, ok := h.transportManager.Transport(tag); ok {
-			return tr
+			return tr, true
 		}
 	}
-	return h.transportManager.Default()
+	def := h.transportManager.Default()
+	if r.strict && !h.test {
+		if def == nil {
+			return nil, false
+		}
+		switch def.Tag() {
+		case "dns-direct", "dns-local":
+			return nil, false
+		}
+	}
+	return def, def != nil || !r.strict
 }
 
 func (r *singBoxResolver) lookup(ctx context.Context, host string, strategy boxConstant.DomainStrategy) ([]netip.Addr, error) {
@@ -278,8 +465,12 @@ func (r *singBoxResolver) lookup(ctx context.Context, host string, strategy boxC
 	}
 	h := activeDNSRouter.Load()
 	if h != nil && h.router != nil {
+		tr, ok := r.defaultTransport(h)
+		if !ok {
+			return nil, resolver.ErrIPNotFound
+		}
 		addrs, err := h.router.Lookup(ctx, host, adapter.DNSQueryOptions{
-			Transport:      r.defaultTransport(h),
+			Transport:      tr,
 			Strategy:       strategy,
 			LookupStrategy: strategy,
 		})
@@ -368,8 +559,12 @@ func (r *singBoxResolver) ResolveECH(ctx context.Context, host string) ([]byte, 
 func (r *singBoxResolver) ExchangeContext(ctx context.Context, m *mDNS.Msg) (*mDNS.Msg, error) {
 	h := activeDNSRouter.Load()
 	if h != nil && h.router != nil {
+		tr, ok := r.defaultTransport(h)
+		if !ok {
+			return nil, resolver.ErrIPNotFound
+		}
 		return h.router.Exchange(ctx, m, adapter.DNSQueryOptions{
-			Transport: r.defaultTransport(h),
+			Transport: tr,
 		})
 	}
 	if r.strict {

@@ -41,6 +41,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
+	outboundResolver, err := mihomo_adapter.NewOutboundResolver(ctx, options.DialerOptions, outboundDialer)
+	if err != nil {
+		return nil, err
+	}
 
 	udpEnabled := true
 	if options.UDP != nil {
@@ -68,6 +72,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	masqueOpt := outbound.MasqueOption{
 		BasicOption: outbound.BasicOption{
 			DialerForAPI: mihomo_adapter.NewDialer(outboundDialer),
+			Resolver:     outboundResolver,
 		},
 		Name:                 tag,
 		Server:               options.Server,
