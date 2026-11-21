@@ -83,6 +83,8 @@ object Key {
     const val SERVER_ADDRESS = "serverAddress"
     const val SERVER_PORT = "serverPort"
     const val SERVER_PORT_RANGE = "serverPortRange"
+    const val SERVER_MULTIPLEXING = "serverMultiplexing"
+    const val SERVER_HANDSHAKE_MODE = "serverHandshakeMode"
     const val SERVER_USERNAME = "serverUsername"
     const val SERVER_PASSWORD = "serverPassword"
     const val SERVER_METHOD = "serverMethod"

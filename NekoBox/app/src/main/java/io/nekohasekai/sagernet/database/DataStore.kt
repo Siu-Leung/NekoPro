@@ -48,6 +48,11 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     val runningTest: Boolean
         get() = activeTestToken.get() != 0
 
+    /**
+     * Attempts to claim the exclusive test execution token when no test is active.
+     *
+     * @return A non-zero generation token if acquired, or `0` if another test is running.
+     */
     fun acquireTestToken(): Int {
         var next = runningTestGeneration.incrementAndGet()
         if (next == 0) next = runningTestGeneration.incrementAndGet()
@@ -59,8 +64,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
      *
      * A stalled test (plugin start, blocked DNS, a hung node) can hold the token
      * indefinitely and make every later test a silent no-op. The caller is responsible
-     * for cancelling the previous run; the token comparison inside each run then makes
-     * its late results unable to overwrite the new run.
+     * for cancelling the previous run; calling [isTestTokenActive] inside each run then
+     * prevents stale results from overwriting the new run.
+     *
+     * @return Newly active non-zero generation token.
      */
     fun forceTestToken(): Int {
         var next = runningTestGeneration.incrementAndGet()
@@ -69,6 +76,15 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         return next
     }
 
+    /**
+     * Returns `true` if [token] is non-zero and still matches the currently active test run.
+     */
+    fun isTestTokenActive(token: Int): Boolean = token != 0 && activeTestToken.get() == token
+
+    /**
+     * Releases [token] only if it is still the active test token, ensuring a cancelled
+     * older run can never clear the token held by a newer forced run.
+     */
     fun releaseTestToken(token: Int) {
         if (token != 0) {
             activeTestToken.compareAndSet(token, 0)
@@ -246,6 +262,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serverCertificates by profileCacheStore.string(Key.SERVER_CERTIFICATES)
     var serverMTU by profileCacheStore.stringToInt(Key.SERVER_MTU)
     var serverPortRange by profileCacheStore.string(Key.SERVER_PORT_RANGE)
+    var serverMultiplexing by profileCacheStore.string(Key.SERVER_MULTIPLEXING)
+    var serverHandshakeMode by profileCacheStore.string(Key.SERVER_HANDSHAKE_MODE)
     var serverHeaders by profileCacheStore.string(Key.SERVER_HEADERS)
     var serverAllowInsecure by profileCacheStore.boolean(Key.SERVER_ALLOW_INSECURE)
 

@@ -13,9 +13,14 @@ import io.nekohasekai.sagernet.fmt.mieru.parseMieru
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxEndpointWireGuardBean
+import moe.matsuri.nb4a.proxy.anytls.AnyTLSBean
+import moe.matsuri.nb4a.proxy.anytls.buildSingBoxOutboundAnyTLSBean
+import moe.matsuri.nb4a.proxy.anytls.parseAnytls
+import moe.matsuri.nb4a.proxy.anytls.toUri as anyTlsToUri
 import moe.matsuri.nb4a.proxy.snell.SnellBean
 import moe.matsuri.nb4a.proxy.snell.buildSingBoxOutboundSnellBean
 import moe.matsuri.nb4a.proxy.snell.parseSnell
+import moe.matsuri.nb4a.proxy.snell.toUri as snellToUri
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -323,5 +328,120 @@ class FormatAndMigrationFixesTest {
         assertEquals(1380L, endpoints[0]["mtu"])
         val outbounds = map["outbounds"] as List<Map<String, Any?>>
         assertEquals("direct", outbounds[0]["tag"])
+    }
+
+    @Test
+    fun mieruSupportsUpstreamShareLinkColonRangeAndCaseNormalization() {
+        val parsed = parseMieru("mieru://alice:pw@mieru.example.com?port=20000:20100&protocol=udp&profile=my-mieru&multiplexing=multiplexing_high&handshake-mode=handshake_no_wait")
+        assertEquals("my-mieru", parsed.name)
+        assertEquals("20000-20100", parsed.portRange)
+        assertEquals(20000, parsed.serverPort)
+        assertEquals("UDP", parsed.protocol)
+        assertEquals("MULTIPLEXING_HIGH", parsed.multiplexing)
+        assertEquals("HANDSHAKE_NO_WAIT", parsed.handshakeMode)
+
+        val outbound = buildSingBoxOutboundMieruBean(parsed)
+        assertEquals("20000-20100", outbound.port_range)
+        assertEquals("MULTIPLEXING_HIGH", outbound.multiplexing)
+        assertEquals("HANDSHAKE_NO_WAIT", outbound.handshake_mode)
+    }
+
+    @Test
+    fun wireGuardValidatesCidrAndKeepaliveRange() {
+        val invalidCidr = WireGuardBean().apply {
+            initializeDefaultValues()
+            localAddress = "not-a-cidr"
+            privateKey = "priv"
+            serverAddress = "wg.example.com"
+            serverPort = 51820
+            peerPublicKey = "pub"
+        }
+        assertTrue(runCatching { buildSingBoxEndpointWireGuardBean(invalidCidr) }.isFailure)
+
+        val clampedKeepalive = WireGuardBean().apply {
+            initializeDefaultValues()
+            localAddress = "10.0.0.2/32"
+            privateKey = "priv"
+            serverAddress = "wg.example.com"
+            serverPort = 51820
+            peerPublicKey = "pub"
+            persistentKeepalive = 70000
+        }
+        val ep = buildSingBoxEndpointWireGuardBean(clampedKeepalive)
+        assertEquals(65535, ep.peers[0].persistent_keepalive_interval)
+    }
+
+    @Test
+    fun anyTlsHandlesAlpnColonPasswordConflictAndNullAllowInsecure() {
+        val parsed = parseAnytls("anytls://user:pass:word@any.example.com:443?sni=s.example&alpn=h2,http/1.1#a1")
+        assertEquals("user:pass:word", parsed.password)
+        assertEquals("h2,http/1.1", parsed.alpn)
+        val exported = parsed.anyTlsToUri()
+        assertTrue(exported.contains("alpn="))
+
+        // Null allowInsecure must serialize safely without NPE.
+        val nullInsecure = AnyTLSBean().apply {
+            initializeDefaultValues()
+            allowInsecure = null
+        }
+        val bytes = KryoConverters.serialize(nullInsecure)
+        assertTrue(bytes.isNotEmpty())
+
+        // Conflicting PEM certificates + certificateSha256 must fail fast.
+        val conflicting = AnyTLSBean().apply {
+            initializeDefaultValues()
+            certificates = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+            certificateSha256 = "A".repeat(43) + "="
+        }
+        assertTrue(runCatching {
+            buildSingBoxOutboundAnyTLSBean(conflicting, false)
+        }.isFailure)
+    }
+
+    @Test
+    fun snellRejectsLegacyVersionsSupportsUserKeyAliasAndOmitsV6Obfs() {
+        assertTrue(runCatching { parseSnell("snell://psk@snell.example.com:8443?version=3") }.isFailure)
+        val legacyBean = SnellBean().apply {
+            initializeDefaultValues()
+            serverAddress = "snell.example.com"
+            serverPort = 8443
+            psk = "k"
+            version = 3
+        }
+        assertTrue(runCatching { buildSingBoxOutboundSnellBean(legacyBean) }.isFailure)
+
+        val aliasParsed = parseSnell("SNELL://psk@snell.example.com:8443?version=6&user-key=uk-alias&obfs=tls&obfs-host=h.example#s6")
+        assertEquals("uk-alias", aliasParsed.userkey)
+        assertEquals(6, aliasParsed.version)
+        val uriV6 = aliasParsed.snellToUri()
+        assertFalse(uriV6.contains("obfs="))
+        assertFalse(uriV6.contains("obfs-host="))
+    }
+
+    @Test
+    fun decodeFilenameStopsAtSemicolonAndHandlesMalformedPercentEncoding() {
+        assertEquals(
+            "plan.yaml",
+            moe.matsuri.nb4a.utils.Util.decodeFilename("attachment; filename*=UTF-8''plan.yaml; size=42"),
+        )
+        assertEquals(
+            "",
+            moe.matsuri.nb4a.utils.Util.decodeFilename("attachment; filename*=UTF-8''bad%ZZname.txt; foo=bar"),
+        )
+    }
+
+    @Test
+    fun strictProxyEntityDeserializationRejectsUnknownTypeAndUnsupportedVersion() {
+        val unknownTypeEntity = io.nekohasekai.sagernet.database.ProxyEntity(type = 9999)
+        assertTrue(runCatching { unknownTypeEntity.putByteArray(byteArrayOf(1, 2, 3), isStrict = true) }.isFailure)
+
+        val futureVersionBytes = ByteBufferOutput(64).use { out ->
+            out.writeInt(99)
+            out.toBytes()
+        }
+        assertTrue(runCatching {
+            io.nekohasekai.sagernet.database.ProxyEntity()
+                .deserializeFromBufferStrict(ByteBufferInput(futureVersionBytes))
+        }.isFailure)
     }
 }

@@ -46,6 +46,22 @@
             app:key="serverMTU"
             app:title="@string/mtu"
             app:useSimpleSummaryProvider="true" />
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue=""
+            app:entries="@array/mieru_multiplexing_entry"
+            app:entryValues="@array/mieru_multiplexing_value"
+            app:icon="@drawable/ic_baseline_compare_arrows_24"
+            app:key="serverMultiplexing"
+            app:title="Multiplexing"
+            app:useSimpleSummaryProvider="true" />
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue=""
+            app:entries="@array/mieru_handshake_mode_entry"
+            app:entryValues="@array/mieru_handshake_mode_value"
+            app:icon="@drawable/ic_baseline_compare_arrows_24"
+            app:key="serverHandshakeMode"
+            app:title="Handshake Mode"
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
 </PreferenceScreen>

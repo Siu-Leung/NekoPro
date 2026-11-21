@@ -107,6 +107,38 @@ class IpInfoRegressionTest {
         ))
     }
 
+    @Test
+    fun rejectsFakeIpPrivateAndBogonsForPublicRoutingAndEntryUse() {
+        for (nonPublic in listOf(
+            "198.18.0.1", "198.19.255.254", "0.0.0.0", "127.0.0.1",
+            "10.0.0.1", "172.16.0.1", "192.168.1.1", "100.64.0.1",
+            "192.0.2.1", "224.0.0.1", "::1", "fc00::1", "fd12:3456::1",
+            "fe80::1", "2001:db8::1", "::ffff:127.0.0.1",
+        )) {
+            assertFalse("Expected non-public: $nonPublic", IpInfoStore.isPublicRoutableIp(nonPublic))
+        }
+        assertTrue(IpInfoStore.isPublicRoutableIp("1.1.1.1"))
+        assertTrue(IpInfoStore.isPublicRoutableIp("2606:4700:4700::1111"))
+
+        for (unusable in listOf("198.18.0.1", "198.19.0.5", "0.0.0.0", "127.0.0.1", "::1", "fd00::1", "fe80::1")) {
+            assertFalse("Expected unusable entry IP: $unusable", IpInfoStore.isUsableEntryIp(unusable))
+        }
+        assertTrue(IpInfoStore.isUsableEntryIp("1.1.1.1"))
+        assertTrue(IpInfoStore.isUsableEntryIp("192.0.2.9"))
+    }
+
+    @Test
+    fun scrubsCjkAdjacentHostnamesAndHexPrefixedIpv6() {
+        assertEquals(
+            "香港••• 节点",
+            AddressRedactor.scrub("香港node1.example.com 节点", "node1.example.com"),
+        )
+        assertEquals(
+            "abcde:•••",
+            AddressRedactor.scrub("abcde:2001:db8::1"),
+        )
+    }
+
     private fun answer(query: ByteArray, type: Int, address: ByteArray): ByteArray =
         query.copyOf().apply {
             this[2] = 0x81.toByte()

@@ -1,11 +1,13 @@
 package io.nekohasekai.sagernet.ui.profile
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceFragmentCompat
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
+import io.nekohasekai.sagernet.fmt.wireguard.normalizeWireGuardAddresses
 import moe.matsuri.nb4a.proxy.PreferenceBinding
 import moe.matsuri.nb4a.proxy.PreferenceBindingManager
 import moe.matsuri.nb4a.proxy.Type
@@ -33,6 +35,7 @@ class WireGuardSettingsActivity : ProfileSettingsActivity<WireGuardBean>() {
 
     override fun WireGuardBean.serialize() {
         pbm.fromCacheAll(this)
+        persistentKeepalive = (persistentKeepalive ?: 0).coerceIn(0, 65535)
     }
 
     override fun PreferenceFragmentCompat.createPreferences(
@@ -46,7 +49,36 @@ class WireGuardSettingsActivity : ProfileSettingsActivity<WireGuardBean>() {
             .setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         (privateKey.preference as EditTextPreference).summaryProvider = PasswordSummaryProvider
         (mtu.preference as EditTextPreference).setOnBindEditTextListener(EditTextPreferenceModifiers.Number)
-        (persistentKeepalive.preference as EditTextPreference).setOnBindEditTextListener(EditTextPreferenceModifiers.Number)
+        (persistentKeepalive.preference as EditTextPreference).apply {
+            setOnBindEditTextListener(EditTextPreferenceModifiers.Number)
+            setOnPreferenceChangeListener { _, newValue ->
+                val raw = (newValue as? String)?.trim().orEmpty()
+                if (raw.isEmpty()) return@setOnPreferenceChangeListener true
+                val parsed = raw.toIntOrNull()
+                if (parsed == null || parsed !in 0..65535) {
+                    Toast.makeText(
+                        this@WireGuardSettingsActivity,
+                        "PersistentKeepalive must be between 0 and 65535",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    false
+                } else {
+                    true
+                }
+            }
+        }
+        val cidrValidator = androidx.preference.Preference.OnPreferenceChangeListener { _, newValue ->
+            val raw = (newValue as? String).orEmpty()
+            runCatching { normalizeWireGuardAddresses(raw) }.onFailure { err ->
+                Toast.makeText(
+                    this@WireGuardSettingsActivity,
+                    err.message ?: "Invalid CIDR",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }.isSuccess
+        }
+        localAddress.preference.onPreferenceChangeListener = cidrValidator
+        allowedIps.preference.onPreferenceChangeListener = cidrValidator
     }
 
 }

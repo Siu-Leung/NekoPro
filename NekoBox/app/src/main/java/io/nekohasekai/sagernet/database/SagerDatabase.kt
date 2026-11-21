@@ -7,7 +7,6 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import dev.matrix.roomigrant.GenerateRoomMigrations
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.fmt.KryoConverters
@@ -33,7 +32,6 @@ import kotlinx.coroutines.launch
     ]
 )
 @TypeConverters(value = [KryoConverters::class, GsonConverters::class])
-@GenerateRoomMigrations
 abstract class SagerDatabase : RoomDatabase() {
 
     companion object {

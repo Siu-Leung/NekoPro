@@ -50,6 +50,13 @@ class SpeedTestQueueRunner<T>(
     @Volatile
     private var currentSession: SpeedTestNodeSession? = null
 
+    @Volatile
+    private var isCancelled = false
+
+    /**
+     * Sequentially runs speed test sessions for [profiles] and emits live snapshots.
+     * Stops immediately when [cancel] is invoked or the coroutine is cancelled.
+     */
     suspend fun run(
         profiles: List<T>,
         onSample: (index: Int, total: Int, sample: SpeedTestSnapshot) -> Unit,
@@ -57,8 +64,15 @@ class SpeedTestQueueRunner<T>(
         val results = ArrayList<SpeedTestSnapshot>(profiles.size)
         profiles.forEachIndexed { index, profile ->
             coroutineContext.ensureActive()
+            if (isCancelled) throw CancellationException("SpeedTestQueueRunner cancelled")
             val session = sessionFactory(profile)
             currentSession = session
+            if (isCancelled) {
+                session.cancel()
+                runCatching { session.close() }.onFailure { Logs.w(it) }
+                currentSession = null
+                throw CancellationException("SpeedTestQueueRunner cancelled")
+            }
             try {
                 results += session.run { onSample(index, profiles.size, it) }
             } catch (e: CancellationException) {
@@ -76,7 +90,9 @@ class SpeedTestQueueRunner<T>(
         return results
     }
 
+    /** Marks the queue cancelled and cancels whichever node session is currently active. */
     fun cancel() {
+        isCancelled = true
         currentSession?.cancel()
     }
 
@@ -93,8 +109,13 @@ class SpeedTestQueueRunner<T>(
 }
 
 class AndroidSpeedTestSession(profile: ProxyEntity) : BoxInstance(profile), SpeedTestNodeSession {
+    private val sessionLock = Any()
+
     @Volatile
     private var nativeSession: SpeedTestSession? = null
+
+    @Volatile
+    private var isCancelled = false
 
     override fun buildConfig() {
         config = buildConfig(profile, true)
@@ -103,13 +124,16 @@ class AndroidSpeedTestSession(profile: ProxyEntity) : BoxInstance(profile), Spee
     override suspend fun loadConfig() = Unit
 
     override suspend fun run(onSample: (SpeedTestSnapshot) -> Unit): SpeedTestSnapshot {
+        if (isCancelled) throw CancellationException("SpeedTest cancelled before init")
         processes = GuardedProcessPool { error ->
             Logs.w("SpeedTest plugin failed for ${profile.displayName()}: ${error.readableMessage}")
-            nativeSession?.cancel()
+            cancel()
         }
         init()
+        if (isCancelled) throw CancellationException("SpeedTest cancelled before plugin launch")
         launchExternal()
         if (processes.processCount > 0) delay(500)
+        if (isCancelled) throw CancellationException("SpeedTest cancelled before native session")
         if (BuildConfig.DEBUG) Logs.d("SpeedTestSession starting for ${profile.displayName()}")
 
         val session = Libcore.newSpeedTestSession(
@@ -122,11 +146,24 @@ class AndroidSpeedTestSession(profile: ProxyEntity) : BoxInstance(profile), Spee
             DataStore.speedTestFallbackServerListURL,
             DataStore.simpleDownloadURL,
         )
-        nativeSession = session
+        // Atomically bind nativeSession only if cancel() has not already fired.
+        val shouldAbort = synchronized(sessionLock) {
+            if (isCancelled) {
+                true
+            } else {
+                nativeSession = session
+                false
+            }
+        }
+        if (shouldAbort) {
+            runCatching { session.close() }.onFailure { Logs.w(it) }
+            throw CancellationException("SpeedTest cancelled during native session creation")
+        }
         try {
             session.start()
             while (true) {
                 coroutineContext.ensureActive()
+                if (isCancelled) throw CancellationException("SpeedTest cancelled during sampling")
                 val snapshot = session.result.toSnapshot()
                 onSample(snapshot)
                 if (snapshot.done) return snapshot
@@ -139,12 +176,21 @@ class AndroidSpeedTestSession(profile: ProxyEntity) : BoxInstance(profile), Spee
     }
 
     override fun cancel() {
-        nativeSession?.cancel()
+        val activeSession = synchronized(sessionLock) {
+            isCancelled = true
+            nativeSession
+        }
+        activeSession?.cancel()
     }
 
     override fun close() {
-        runCatching { nativeSession?.close() }.onFailure { Logs.w(it) }
-        nativeSession = null
+        val sessionToClose = synchronized(sessionLock) {
+            isCancelled = true
+            val existing = nativeSession
+            nativeSession = null
+            existing
+        }
+        runCatching { sessionToClose?.close() }.onFailure { Logs.w(it) }
         super.close()
     }
 

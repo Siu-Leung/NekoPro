@@ -126,4 +126,24 @@ class ClashDnsCandidatesTest {
         assertTrue(profile.auto.isEmpty())
         assertTrue(profile.rows.isEmpty())
     }
+
+    @Test
+    fun acceptsH3WithPathStripsBomAndRejectsYamlAliasBomb() {
+        val h3Result = profile("proxy-server-nameserver: ['h3://dns.example/dns-query']")
+        assertEquals(listOf("h3://dns.example/dns-query"), h3Result.auto)
+        assertEquals(Status.SELECTABLE, h3Result.rows.single().status)
+
+        val bomProfile = "\uFEFFproxies: [{name: a, type: socks5, server: entry.example, port: 1080}]\n" +
+            "dns:\n  proxy-server-nameserver: ['https://dns.example/dns-query']\n"
+        assertEquals(listOf("https://dns.example/dns-query"), ClashDnsCandidates.parse(bomProfile).auto)
+
+        // Billion-laughs style nested alias expansion must safely fail as malformed without hanging.
+        val aliasBomb = buildString {
+            appendLine("a: &a [x, x, x, x, x, x, x, x, x, x]")
+            appendLine("b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]")
+            appendLine("c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]")
+            appendLine("dns: { proxy-server-nameserver: [*c] }")
+        }
+        assertTrue(ClashDnsCandidates.parse(aliasBomb).malformed)
+    }
 }

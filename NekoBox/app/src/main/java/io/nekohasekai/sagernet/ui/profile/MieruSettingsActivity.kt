@@ -20,6 +20,7 @@
 package io.nekohasekai.sagernet.ui.profile
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceFragmentCompat
 import io.nekohasekai.sagernet.Key
@@ -27,6 +28,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
+import io.nekohasekai.sagernet.fmt.mieru.normalizeMieruPortRange
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import moe.matsuri.nb4a.ui.SimpleMenuPreference
 
@@ -43,6 +45,8 @@ class MieruSettingsActivity : ProfileSettingsActivity<MieruBean>() {
         DataStore.serverPassword = password!!
         DataStore.serverMTU = mtu!!
         DataStore.serverPortRange = portRange ?: ""
+        DataStore.serverMultiplexing = multiplexing?.trim()?.uppercase() ?: ""
+        DataStore.serverHandshakeMode = handshakeMode?.trim()?.uppercase() ?: ""
     }
 
     override fun MieruBean.serialize() {
@@ -53,7 +57,10 @@ class MieruSettingsActivity : ProfileSettingsActivity<MieruBean>() {
         username = DataStore.serverUsername
         password = DataStore.serverPassword
         mtu = DataStore.serverMTU
-        portRange = DataStore.serverPortRange.trim()
+        portRange = runCatching { normalizeMieruPortRange(DataStore.serverPortRange) }
+            .getOrDefault(DataStore.serverPortRange.trim().replace(':', '-'))
+        multiplexing = DataStore.serverMultiplexing.trim().uppercase()
+        handshakeMode = DataStore.serverHandshakeMode.trim().uppercase()
     }
 
     override fun PreferenceFragmentCompat.createPreferences(
@@ -63,6 +70,18 @@ class MieruSettingsActivity : ProfileSettingsActivity<MieruBean>() {
         addPreferencesFromResource(R.xml.mieru_preferences)
         findPreference<EditTextPreference>(Key.SERVER_PORT)!!.apply {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
+        }
+        findPreference<EditTextPreference>(Key.SERVER_PORT_RANGE)?.apply {
+            setOnPreferenceChangeListener { _, newValue ->
+                val raw = (newValue as? String).orEmpty()
+                runCatching { normalizeMieruPortRange(raw) }.onFailure { error ->
+                    Toast.makeText(
+                        this@MieruSettingsActivity,
+                        error.message ?: "Invalid port range (e.g. 20000-20100)",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }.isSuccess
+            }
         }
         findPreference<EditTextPreference>(Key.SERVER_PASSWORD)!!.apply {
             summaryProvider = PasswordSummaryProvider

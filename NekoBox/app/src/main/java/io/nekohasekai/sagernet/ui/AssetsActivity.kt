@@ -182,16 +182,25 @@ class AssetsActivity : ThemedActivity() {
             reloadAssets()
         }
 
+        /**
+         * Scans asset files and replaces the RecyclerView dataset strictly on the Main thread
+         * so background import/update completions cannot trigger concurrent dataset mutations.
+         */
         fun reloadAssets() {
             val filesDir = getExternalFilesDir(null) ?: filesDir
-            val files = filesDir.listFiles()
+            val customFiles = filesDir.listFiles()
                 ?.filter { it.isFile && it.name.endsWith(".db") && it.name !in assetNames }
-            assets.clear()
-            assets.add(File(filesDir, "geoip.db"))
-            assets.add(File(filesDir, "geosite.db"))
-            if (files != null) assets.addAll(files)
+                .orEmpty()
+            val refreshedAssets = ArrayList<File>(customFiles.size + 2).apply {
+                add(File(filesDir, "geoip.db"))
+                add(File(filesDir, "geosite.db"))
+                addAll(customFiles)
+            }
 
             layout.refreshLayout.post {
+                if (isFinishing || isDestroyed) return@post
+                assets.clear()
+                assets.addAll(refreshedAssets)
                 notifyDataSetChanged()
             }
         }
@@ -230,6 +239,7 @@ class AssetsActivity : ThemedActivity() {
     }
 
     val updating = AtomicInteger()
+    private val downloadingAssets = java.util.Collections.synchronizedSet(HashSet<String>())
 
     inner class AssetHolder(val binding: LayoutAssetItemBinding) :
         RecyclerView.ViewHolder(binding.root) {
@@ -258,26 +268,36 @@ class AssetsActivity : ThemedActivity() {
 
             binding.assetStatus.text = getString(R.string.route_asset_status, localVersion)
 
-            binding.rulesUpdate.isInvisible = file.name !in assetNames
+            val isSupportedAsset = file.name in assetNames
+            val isDownloading = file.name in downloadingAssets
+            binding.rulesUpdate.isInvisible = !isSupportedAsset || isDownloading
+            binding.subscriptionUpdateProgress.isInvisible = !isDownloading
             binding.rulesUpdate.setOnClickListener {
+                // Atomically guard against concurrent duplicate downloads for the same asset file.
+                if (!downloadingAssets.add(file.name)) return@setOnClickListener
                 updating.incrementAndGet()
                 layout.refreshLayout.isEnabled = false
                 binding.subscriptionUpdateProgress.isInvisible = false
                 binding.rulesUpdate.isInvisible = true
                 runOnDefaultDispatcher {
-                    runCatching {
+                    try {
                         updateAsset(file, versionFile, localVersion)
-                    }.onFailure {
+                    } catch (e: Exception) {
                         onMainDispatcher {
-                            alert(it.readableMessage).tryToShow()
+                            if (!isFinishing && !isDestroyed) {
+                                alert(e.readableMessage).tryToShow()
+                            }
                         }
-                    }
-
-                    onMainDispatcher {
-                        binding.rulesUpdate.isInvisible = false
-                        binding.subscriptionUpdateProgress.isInvisible = true
-                        if (updating.decrementAndGet() == 0) {
-                            layout.refreshLayout.isEnabled = true
+                    } finally {
+                        downloadingAssets.remove(file.name)
+                        val remaining = updating.decrementAndGet()
+                        onMainDispatcher {
+                            if (isFinishing || isDestroyed) return@onMainDispatcher
+                            if (remaining <= 0) {
+                                layout.refreshLayout.isEnabled = true
+                            }
+                            // Rebind via adapter instead of touching a potentially recycled ViewHolder.
+                            adapter.notifyDataSetChanged()
                         }
                     }
                 }
@@ -325,10 +345,8 @@ class AssetsActivity : ThemedActivity() {
         val client = Libcore.newHttpClient().apply {
             modernTLS()
             keepAlive()
-            if (DataStore.serviceState.connected) {
+            if (DataStore.serviceState.started) {
                 forceSocks5(DataStore.mixedPort)
-            } else {
-                trySocks5(DataStore.mixedPort)
             }
         }
 
@@ -354,6 +372,9 @@ class AssetsActivity : ThemedActivity() {
             val browserDownloadUrl = assetToDownload.getStr("browser_download_url")
                 ?.takeIf { it.isNotBlank() }
                 ?: error("Missing download URL for $fileName")
+            require(AppUpdatePolicy.isAllowedAssetDownloadUrl(browserDownloadUrl)) {
+                "Untrusted asset download URL rejected"
+            }
 
             response = client.newRequest().apply {
                 setURL(browserDownloadUrl)

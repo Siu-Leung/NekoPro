@@ -5,11 +5,16 @@
     android:id="@+id/content"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="4dp"
+    android:layout_marginStart="6dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="6dp"
+    android:layout_marginBottom="4dp"
     android:clickable="true"
     android:focusable="true"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="1dp">
+    app:cardCornerRadius="14dp"
+    app:cardElevation="1dp"
+    app:strokeColor="@color/card_stroke"
+    app:strokeWidth="1dp">
 
     <LinearLayout
         android:id="@+id/content_lin"
@@ -20,16 +25,19 @@
 
         <View
             android:id="@+id/selected_view"
-            android:layout_width="4dp"
+            android:layout_width="3.5dp"
             android:layout_height="match_parent"
-            android:background="?selectedColorPrimary"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_selected_indicator"
             android:visibility="invisible"
             tools:visibility="visible" />
 
         <LinearLayout
-
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:nextFocusRight="@+id/edit"
             android:orientation="vertical">
 
@@ -37,7 +45,10 @@
                 android:id="@+id/container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingTop="4dp"
+                android:paddingEnd="4dp">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -45,21 +56,20 @@
                     android:layout_gravity="center_vertical"
                     android:layout_weight="1"
                     android:gravity="center_vertical"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="4dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="6dp">
+                    android:paddingStart="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingEnd="4dp"
+                    android:paddingBottom="4dp">
 
                     <TextView
                         android:id="@+id/profile_name"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:maxLines="1"
                         android:ellipsize="end"
-                        android:textSize="14sp"
-                        android:textAppearance="?android:attr/textAppearanceSmall"
+                        android:fontFamily="sans-serif-medium"
+                        android:maxLines="1"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textStyle="bold"
+                        android:textSize="15sp"
                         tools:text="@string/profile_name" />
                 </LinearLayout>
 
@@ -72,7 +82,8 @@
                     android:contentDescription="@string/edit"
                     android:focusable="true"
                     android:padding="8dp"
-                    app:srcCompat="@drawable/ic_image_edit" />
+                    app:srcCompat="@drawable/ic_image_edit"
+                    app:tint="@color/card_icon_tint" />
 
                 <LinearLayout
                     android:id="@+id/share"
@@ -88,13 +99,15 @@
                         android:id="@+id/share_layer"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
+                        android:gravity="center"
                         android:padding="8dp">
 
                         <androidx.appcompat.widget.AppCompatImageView
                             android:id="@+id/shareIcon"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            app:srcCompat="@drawable/ic_social_share" />
+                            app:srcCompat="@drawable/ic_social_share"
+                            app:tint="@color/card_icon_tint" />
                     </LinearLayout>
 
                 </LinearLayout>
@@ -109,40 +122,41 @@
                     android:focusable="true"
                     android:padding="8dp"
                     android:visibility="gone"
-                    app:srcCompat="@drawable/ic_action_delete" />
+                    app:srcCompat="@drawable/ic_action_delete"
+                    app:tint="@color/card_icon_tint" />
 
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="12dp"
                 android:paddingBottom="4dp"
                 android:visibility="gone"
                 tools:visibility="visible">
 
                 <TextView
                     android:id="@+id/profile_address"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/server_address"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?android:attr/textColorSecondary" />
-
-                <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1" />
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/server_address"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
 
                 <TextView
                     android:id="@+id/traffic_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
                     android:text="@string/traffic"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?android:attr/textColorSecondary" />
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11.5sp" />
 
             </LinearLayout>
 
@@ -150,61 +164,72 @@
                 android:id="@+id/profile_ip_info"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp"
-                android:paddingBottom="4dp"
-                android:textAppearance="?android:attr/textAppearanceSmall"
+                android:lineSpacingExtra="2dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="6dp"
                 android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12sp"
                 android:visibility="gone" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp"
-                android:paddingBottom="12dp">
+                android:paddingStart="10dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="10dp">
 
                 <TextView
                     android:id="@+id/profile_type"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary" />
+                    android:background="@drawable/bg_protocol_badge"
+                    android:fontFamily="sans-serif-medium"
+                    android:paddingStart="7dp"
+                    android:paddingTop="2.5dp"
+                    android:paddingEnd="7dp"
+                    android:paddingBottom="2.5dp"
+                    android:textColor="?attr/accentOrTextSecondary"
+                    android:textSize="11sp" />
 
                 <!-- 测速与查询都是显式按钮：长按容易被误触且与查询抢焦点。 -->
                 <TextView
                     android:id="@+id/profile_speed_test"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:background="?attr/selectableItemBackground"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_card_action_pill"
                     android:clickable="true"
                     android:focusable="true"
-                    android:minHeight="32dp"
+                    android:fontFamily="sans-serif-medium"
                     android:gravity="center_vertical"
-                    android:paddingStart="6dp"
-                    android:paddingEnd="6dp"
+                    android:minHeight="28dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
                     android:text="@string/card_speed_test"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary"
+                    android:textColor="?attr/primaryOrTextPrimary"
+                    android:textSize="11.5sp"
                     android:visibility="gone" />
 
                 <TextView
                     android:id="@+id/profile_ip_probe"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:background="?attr/selectableItemBackground"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_card_action_pill"
                     android:clickable="true"
                     android:focusable="true"
-                    android:minHeight="32dp"
+                    android:fontFamily="sans-serif-medium"
                     android:gravity="center_vertical"
-                    android:paddingStart="6dp"
-                    android:paddingEnd="6dp"
+                    android:minHeight="28dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
                     android:text="@string/card_ip_probe_short"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary"
+                    android:textColor="?attr/primaryOrTextPrimary"
+                    android:textSize="11.5sp"
                     android:visibility="gone" />
 
                 <LinearLayout
@@ -216,9 +241,12 @@
                     android:id="@+id/profile_status"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary" />
+                    android:layout_marginStart="6dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="end"
+                    android:lineSpacingExtra="2dp"
+                    android:textColor="?attr/accentOrTextSecondary"
+                    android:textSize="12sp" />
 
             </LinearLayout>
 

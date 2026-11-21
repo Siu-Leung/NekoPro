@@ -141,10 +141,23 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
                 finish()
                 return
             }
-            if (proxyEntity!!.id == DataStore.selectedProxy) {
+            val entity = proxyEntity!!
+            if (entity.id == DataStore.selectedProxy) {
                 SagerNet.stopService()
             }
-            ProfileManager.updateProfile(proxyEntity!!.apply { (requireBean() as T).serialize() })
+            val previousServerAddress = entity.requireBean().serverAddress?.trim()
+            entity.apply {
+                (requireBean() as T).serialize()
+                if (requireBean().serverAddress?.trim() != previousServerAddress) {
+                    // Clear stale card IP metadata whenever the node's target server changes.
+                    entryIp = ""
+                    entryProvider = ""
+                    exitIp = ""
+                    exitProvider = ""
+                    ipInfoUpdatedAt = 0L
+                }
+            }
+            ProfileManager.updateProfile(entity)
         }
         finish()
 

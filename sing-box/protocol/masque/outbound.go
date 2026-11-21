@@ -91,6 +91,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		CWND:                 options.CWND,
 		RemoteDnsResolve:     options.RemoteDNSResolve,
 		Dns:                  dnsServers,
+		// Bind proxied target domain resolution to this sing-box instance's own
+		// DNSRouter so temporary test boxes stay isolated from process-global state.
+		TargetResolver: mihomo_adapter.NewTargetResolver(ctx),
 	}
 
 	release := mihomo_adapter.InstallProtectHook(ctx)

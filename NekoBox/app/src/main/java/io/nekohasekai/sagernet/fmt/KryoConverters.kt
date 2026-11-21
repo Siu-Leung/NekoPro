@@ -45,6 +45,16 @@ object KryoConverters {
         return out.toByteArray()
     }
 
+    /**
+     * Leniently deserializes a [Serializable] bean for Room type converters.
+     *
+     * Logs and recovers from [KryoException] so legacy local database rows remain readable.
+     * Do NOT use for untrusted backup import validation; call [deserializeStrict] instead.
+     *
+     * @param bean Target bean instance to populate.
+     * @param bytes Serialized Kryo bytes, or `null` to keep default fields.
+     * @return Populated bean with defaults initialized.
+     */
     @JvmStatic
     fun <T : Serializable> deserialize(bean: T, bytes: ByteArray?): T {
         if (bytes == null) return bean
@@ -54,6 +64,25 @@ object KryoConverters {
         } catch (e: KryoException) {
             Logs.w(e)
         }
+        bean.initializeDefaultValues()
+        return bean
+    }
+
+    /**
+     * Strictly deserializes a [Serializable] bean, propagating any [KryoException] or
+     * validation error instead of returning a half-populated shell bean.
+     *
+     * @param bean Target bean instance to populate.
+     * @param bytes Non-empty serialized Kryo bytes.
+     * @return Populated bean with defaults initialized.
+     * @throws IllegalArgumentException When [bytes] is null or empty.
+     * @throws KryoException When the Kryo stream is truncated or corrupted.
+     */
+    @JvmStatic
+    fun <T : Serializable> deserializeStrict(bean: T, bytes: ByteArray?): T {
+        require(bytes != null && bytes.isNotEmpty()) { "Serialized Kryo payload is empty" }
+        val buffer = ByteBufferInput(bytes)
+        bean.deserializeFromBuffer(buffer)
         bean.initializeDefaultValues()
         return bean
     }

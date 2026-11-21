@@ -86,6 +86,7 @@
         <item name="itemShapeAppearance">
             @style/ShapeAppearance.MaterialComponents.MediumComponent
         </item>
+        <item name="itemShapeFillColor">@color/color_ng_black_accent</item>
 
         <item name="alertDialogTheme">
             @style/ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet
@@ -104,7 +105,13 @@
         <item name="android:textStyle">bold</item>
     </style>
 
+    <style name="ShapeAppearance.SagerNet.Dialog" parent="ShapeAppearance.MaterialComponents.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">16dp</item>
+    </style>
+
     <style name="ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet">
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.SagerNet.Dialog</item>
         <item name="buttonBarPositiveButtonStyle">
             @style/Widget.MaterialComponents.Button.TextButton.Dialog.Primary
         </item>

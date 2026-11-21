@@ -40,7 +40,7 @@ class AnyTLSBean : AbstractBean() {
         output.writeInt(2); super.serialize(output)
         output.writeString(password); output.writeString(sni); output.writeString(alpn)
         output.writeString(certificates); output.writeString(utlsFingerprint)
-        output.writeBoolean(allowInsecure!!); output.writeString(echConfig)
+        output.writeBoolean(allowInsecure ?: false); output.writeString(echConfig)
         output.writeString(idleSessionCheckInterval); output.writeString(idleSessionTimeout)
         output.writeInt(minIdleSession ?: 0); output.writeString(clientMetadata)
         output.writeString(certificateSha256)

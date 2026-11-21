@@ -203,10 +203,10 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             runOnIoDispatcher {
                 val client = Libcore.newHttpClient().apply {
                     modernTLS()
-                    if (DataStore.serviceState.connected) {
+                    // Only route through mixedPort while NekoPro's own service owns the port.
+                    // Avoids port-hijack via trySocks5 when Stopped and prevents direct leaks while Connecting.
+                    if (DataStore.serviceState.started) {
                         forceSocks5(DataStore.mixedPort)
-                    } else {
-                        trySocks5(DataStore.mixedPort)
                     }
                 }
                 try {

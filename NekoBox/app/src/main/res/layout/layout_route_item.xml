@@ -5,8 +5,14 @@
     android:id="@+id/content"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="4dp"
-    app:cardElevation="2dp">
+    android:layout_marginStart="6dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="6dp"
+    android:layout_marginBottom="4dp"
+    app:cardCornerRadius="14dp"
+    app:cardElevation="1dp"
+    app:strokeColor="@color/card_stroke"
+    app:strokeWidth="1dp">
 
     <LinearLayout
         android:id="@+id/content_lin"
@@ -15,12 +21,14 @@
         android:focusable="true"
         android:orientation="vertical">
 
-
         <LinearLayout
             android:id="@+id/container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingTop="4dp"
+            android:paddingEnd="4dp">
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -28,49 +36,53 @@
                 android:layout_gravity="center_vertical"
                 android:layout_weight="1"
                 android:gravity="center_vertical"
-                android:paddingStart="12dp"
+                android:paddingStart="16dp"
                 android:paddingTop="8dp"
-                android:paddingBottom="8dp">
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp">
 
                 <TextView
                     android:id="@+id/profile_name"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textStyle="bold"
+                    android:textSize="15sp"
                     tools:text="@string/profile_name" />
             </LinearLayout>
 
-
             <androidx.appcompat.widget.AppCompatImageView
                 android:id="@+id/subscription"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="center_vertical"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/subscriptions"
                 android:focusable="true"
-                android:padding="12dp"
+                android:padding="10dp"
                 android:visibility="gone"
-                app:srcCompat="@drawable/ic_file_cloud_queue" />
+                app:srcCompat="@drawable/ic_file_cloud_queue"
+                app:tint="@color/card_icon_tint" />
 
             <androidx.appcompat.widget.AppCompatImageView
                 android:id="@+id/edit"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="center_vertical"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/edit"
                 android:focusable="true"
-                android:padding="12dp"
-                app:srcCompat="@drawable/ic_image_edit" />
+                android:padding="10dp"
+                app:srcCompat="@drawable/ic_image_edit"
+                app:tint="@color/card_icon_tint" />
 
             <LinearLayout
                 android:id="@+id/share"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="center_vertical"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/share"
                 android:focusable="true"
@@ -81,15 +93,16 @@
                     android:id="@+id/share_layer"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:padding="12dp">
+                    android:gravity="center"
+                    android:padding="10dp">
 
                     <androidx.appcompat.widget.AppCompatImageView
                         android:id="@+id/shareIcon"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        app:srcCompat="@drawable/ic_social_share" />
+                        app:srcCompat="@drawable/ic_social_share"
+                        app:tint="@color/card_icon_tint" />
                 </LinearLayout>
-
 
             </LinearLayout>
         </LinearLayout>
@@ -97,37 +110,45 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="bottom"
+            android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="12dp"
-            android:paddingEnd="8dp">
+            android:paddingStart="16dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="12dp">
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:paddingEnd="8dp">
 
                 <TextView
                     android:id="@+id/profile_type"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary" />
+                    android:lineSpacingExtra="2dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12.5sp" />
 
                 <TextView
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="12dp"
                     android:id="@+id/route_outbound"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary" />
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_protocol_badge"
+                    android:fontFamily="sans-serif-medium"
+                    android:paddingStart="8dp"
+                    android:paddingTop="2.5dp"
+                    android:paddingEnd="8dp"
+                    android:paddingBottom="2.5dp"
+                    android:textColor="?attr/accentOrTextSecondary"
+                    android:textSize="11.5sp" />
 
             </LinearLayout>
 
             <androidx.appcompat.widget.SwitchCompat
-                android:layout_marginBottom="2dp"
                 android:id="@+id/enable"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />

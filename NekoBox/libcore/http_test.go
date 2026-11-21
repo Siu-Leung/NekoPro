@@ -282,3 +282,125 @@ func TestHTTPForceSocks5NeverFallsBackToDirect(t *testing.T) {
 		t.Fatalf("ForceSocks5 leaked %d direct request(s)", directHits.Load())
 	}
 }
+
+func TestValidateRedirectPolicyBlocksDowngradeAndSSRF(t *testing.T) {
+	mustReq := func(raw string) *http.Request {
+		req, err := http.NewRequest(http.MethodGet, raw, nil)
+		if err != nil {
+			t.Fatalf("NewRequest(%q): %v", raw, err)
+		}
+		return req
+	}
+
+	// HTTPS -> HTTPS on public host must be permitted.
+	if err := validateRedirectPolicy(
+		mustReq("https://cdn.example.com/sub"),
+		[]*http.Request{mustReq("https://sub.example.com/sub")},
+	); err != nil {
+		t.Fatalf("valid https redirect unexpectedly blocked: %v", err)
+	}
+
+	// HTTPS -> HTTP downgrade must be blocked.
+	if err := validateRedirectPolicy(
+		mustReq("http://sub.example.com/sub"),
+		[]*http.Request{mustReq("https://sub.example.com/sub")},
+	); !errors.Is(err, errUnsafeRedirect) {
+		t.Fatalf("expected errUnsafeRedirect for https->http downgrade, got %v", err)
+	}
+
+	// Cross-host redirects to loopback, private, CGNAT, FakeIP, or localhost must be blocked.
+	forbiddenTargets := []string{
+		"http://127.0.0.1:9090/configs",
+		"https://localhost:9090/ui/",
+		"https://10.0.0.1/secret",
+		"https://192.168.1.1/admin",
+		"https://198.18.0.1/fakeip",
+		"https://100.64.0.1/cgnat",
+		"https://[fc00::1]/ula",
+		"ftp://example.com/file",
+	}
+	for _, target := range forbiddenTargets {
+		if err := validateRedirectPolicy(
+			mustReq(target),
+			[]*http.Request{mustReq("https://public.example.com/start")},
+		); !errors.Is(err, errUnsafeRedirect) {
+			t.Fatalf("target %q: expected errUnsafeRedirect, got %v", target, err)
+		}
+	}
+
+	// Same-authority local redirect (e.g. self-hosted LAN server or httptest) is permitted
+	// while cross-port redirect on loopback (e.g. to Clash API 9090) is still blocked.
+	if err := validateRedirectPolicy(
+		mustReq("http://192.168.1.10:8080/next"),
+		[]*http.Request{mustReq("http://192.168.1.10:8080/start")},
+	); err != nil {
+		t.Fatalf("same-authority local redirect unexpectedly blocked: %v", err)
+	}
+	if err := validateRedirectPolicy(
+		mustReq("http://127.0.0.1:9090/configs"),
+		[]*http.Request{mustReq("http://127.0.0.1:8080/start")},
+	); !errors.Is(err, errUnsafeRedirect) {
+		t.Fatalf("cross-port loopback redirect must be blocked, got %v", err)
+	}
+}
+
+type errorBodyCountingReader struct {
+	remaining int
+	readBytes int
+}
+
+func (r *errorBodyCountingReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, io.EOF
+	}
+	n := len(p)
+	if n > r.remaining {
+		n = r.remaining
+	}
+	for i := 0; i < n; i++ {
+		p[i] = 'E'
+	}
+	r.remaining -= n
+	r.readBytes += n
+	return n, nil
+}
+
+func TestHTTPErrorStringCapsBytesRead(t *testing.T) {
+	reader := &errorBodyCountingReader{remaining: 1 << 20} // 1 MiB error payload
+	resp := &httpResponse{
+		Response: &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Status:     "500 Internal Server Error",
+			Body:       io.NopCloser(reader),
+		},
+	}
+	msg := resp.errorString()
+	if !strings.HasPrefix(msg, "HTTP 500 Internal Server Error: EEEE") {
+		t.Fatalf("unexpected error message: %q", msg)
+	}
+	if int64(reader.readBytes) > maxErrorBodyBytes {
+		t.Fatalf("errorString read %d bytes, exceeding maxErrorBodyBytes (%d)", reader.readBytes, maxErrorBodyBytes)
+	}
+}
+
+func TestHTTPResponseBodyReadTimeoutTriggersError(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+
+	resp := &httpResponse{
+		Response: &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       pr,
+		},
+		bodyReadTimeout: 40 * time.Millisecond,
+	}
+	started := time.Now()
+	_, err := resp.GetContentWithLimit(1024)
+	if !errors.Is(err, errBodyReadTimeout) {
+		t.Fatalf("expected errBodyReadTimeout, got %v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("body read timeout took too long: %v", time.Since(started))
+	}
+}

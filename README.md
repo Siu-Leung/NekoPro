@@ -14,7 +14,7 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 - sing-box `1.14.4` 加固版主内核（原生 Snell v4–v6 / 原生 AnyTLS / 新版 Typed DNS Schema / 乐观 DNS 缓存 / `quic-go v0.61`）
 - Mihomo `1.19.34` 协议桥接（升级 `uTLS v1.9.0-alpha.1` Chrome 155+ 指纹，合入上游 XHTTP 复用连接池过期修复）
-- **MASQUE (CONNECT-IP / CONNECT-UDP / Cloudflare WARP)** 协议集成
+- **MASQUE (CONNECT-IP over HTTP/3 / Cloudflare WARP)** 协议集成
 - **VLESS-XHTTP + REALITY** 完整支持（兼容 `splithttp`、`mode`、`extra` XMUX、自定义证书与 ECH）
 - **Mieru 协议内置原生出站**（无需外部 `mieru-plugin`）
 - **Snell 原生集成**（采用 `sing-box 1.14.4` 上游原生 `protocol/snell` 与 `sing-snell`，支持 v4/v5 兼容客户端与 v6）
@@ -29,10 +29,19 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.5`
+`Neko-Pro-1.4.5`（测试分支预发布：`Neko-Pro-1.4.6-rc1`）
 
 - [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.5)
 - 核心 APK：`NekoBox-Neko-Pro-1.4.5-arm64-v8a.apk`
+
+### v1.4.6-rc1 测试版改动日志 (2026-11-21)
+
+- **全量 31 项深度代码审计修复（P0–P3）**
+  - **P0 安全与兼容性**：彻底加固本地 Clash 仪表板 WebView（同源子资源拦截、阻断恶意 `hostname`/`port` 参数注入、严格按本地 `baseURL` 同步 `secret`、防隐藏 iframe 静默外跳）；重构 `speedTest`/`pingTest`/`urlTest` 统一并发令牌状态机与 `NonCancellable` 清理；将 `UniversalFmt` 与 `AnyTLSCertificatePin` 从 API 26 专有 `java.util.Base64` 迁回 API 21 兼容的 Guava `BaseEncoding`，并在 `lint.xml` 将 `NewApi` 设为 `fatal` 与补齐 PR Android 编译单测门禁。
+  - **内核、DNS 与网络防泄漏**：为 MASQUE 增加实例级 `TargetResolver` 修复测试盒解析故障；`probeNodeExit` 补传 `LocalResolverImpl`；`IpInfoStore` 严格屏蔽 FakeIP `198.18.0.0/15`/私网/CGNAT/ULA 并使组 DoH 绑定底层物理网络与自定义 `ca.pem`；`libcore/http.go` 增加重定向防降级/SSRF 策略与 8 MiB/超时硬上限；`GroupNodeDnsPlan` 导出 JSON 自动将私有 `fallback` 降级为上游标准端点并在含私有 DNS 时弹窗确认；`GroupSettingsActivity` 输入框启用 `FLAG_SECURE`。
+  - **订阅、协议与存储可靠度**：收紧 SnakeYAML 防别名炸弹与深层嵌套；拒绝 HTML 维护页误作订阅清空整组；Clash YAML 跳过已知不支持协议并补齐 `wireguard` 支持；修齐 Mieru 上游分享链接（`?port=`/`?profile=`/`a:b` 冒号范围与枚举大小写）、WireGuard 多行 `AllowedIPs`/CIDR/Keepalive、AnyTLS `alpn`/含冒号密码/PEM 冲突检测、Snell 拒绝不支持的 v1–v3；备份导入改用严格 Kryo 校验（不再吞掉 `KryoException`）；`WorkManager 2.10` 多进程组件绑定 `:bg` 且保留 `InitializationProvider`；修复 `TestInstance`/`GuardedProcessPool`/`SpeedTestRunner` 并发取消资源泄漏与 `AssetsActivity`/`ConfigurationFragment` 主线程列表更新竞态。
+- **简洁大方 UI 精修**
+  - 统一节点、分组、路由、规则库与备份卡片为 `14dp` 圆角 + 细微描边与自适应日夜色阶；选中指示条升级为悬浮圆角胶囊；协议类型与路由出站加入柔和色调徽标；「测速 / 查IP」改为轻描边圆角操作按钮，次级操作图标降噪；优化底部状态栏排版与列表底部留白，全面兼容现有 21 套主题与深浅色模式。
 
 ### v1.4.5 改动日志 (2026-11-21)
 

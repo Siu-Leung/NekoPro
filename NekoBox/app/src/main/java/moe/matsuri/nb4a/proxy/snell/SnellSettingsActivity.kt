@@ -28,14 +28,16 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
 
     override fun SnellBean.init() {
         version = (version ?: 4).coerceIn(4, 6)
-        if (mode.isNullOrBlank()) mode = "default"
+        mode = mode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "default"
+        obfsMode = obfsMode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "none"
         pbm.writeToCacheAll(this)
     }
 
     override fun SnellBean.serialize() {
         pbm.fromCacheAll(this)
         version = (version ?: 4).coerceIn(4, 6)
-        if (mode.isNullOrBlank()) mode = "default"
+        mode = mode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "default"
+        obfsMode = obfsMode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "none"
     }
 
     override fun PreferenceFragmentCompat.createPreferences(
@@ -54,9 +56,15 @@ class SnellSettingsActivity : ProfileSettingsActivity<SnellBean>() {
         findPreference<EditTextPreference>("userkey")?.apply {
             summaryProvider = PasswordSummaryProvider
         }
-        mode.preference.isVisible = version.readStringToIntFromCache() == 6
+        fun applyVersionVisibility(selectedVersion: Int?) {
+            val isV6 = selectedVersion == 6
+            mode.preference.isVisible = isV6
+            obfsMode.preference.isVisible = !isV6
+            obfsHost.preference.isVisible = !isV6
+        }
+        applyVersionVisibility(version.readStringToIntFromCache())
         version.preference.setOnPreferenceChangeListener { _, newValue ->
-            mode.preference.isVisible = newValue?.toString()?.toIntOrNull() == 6
+            applyVersionVisibility(newValue?.toString()?.toIntOrNull())
             true
         }
     }

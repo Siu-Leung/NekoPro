@@ -51,6 +51,8 @@
             android:nextFocusUp="@+id/fab"
             app:backgroundTint="?colorMaterial300"
             app:contentInsetStart="0dp"
+            app:fabCradleMargin="6dp"
+            app:fabCradleRoundedCornerRadius="14dp"
             app:hideOnScroll="true"
             app:layout_scrollFlags="enterAlways|scroll">
 
@@ -59,39 +61,42 @@
                 android:layout_height="wrap_content"
                 android:background="?android:attr/selectableItemBackground"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:paddingStart="18dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="12dp">
 
                 <TextView
                     android:id="@+id/tx"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_gravity="fill_horizontal"
+                    android:alpha="0.9"
                     android:ellipsize="marquee"
                     android:singleLine="true"
                     android:textColor="?whiteOrTextPrimary"
-                    android:textSize="14sp" />
+                    android:textSize="12.5sp" />
 
                 <TextView
                     android:id="@+id/rx"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_columnWeight="1"
-                    android:layout_gravity="fill_horizontal"
+                    android:layout_marginTop="1dp"
+                    android:alpha="0.9"
                     android:ellipsize="marquee"
                     android:singleLine="true"
                     android:textColor="?whiteOrTextPrimary"
-                    android:textSize="14sp" />
+                    android:textSize="12.5sp" />
 
                 <TextView
                     android:id="@+id/status"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="fill_horizontal"
+                    android:layout_marginTop="3dp"
                     android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
                     android:maxLines="1"
                     android:textColor="?whiteOrTextPrimary"
-                    android:textSize="16sp"
+                    android:textSize="15sp"
                     tools:text="@string/connection_test_available" />
 
             </LinearLayout>

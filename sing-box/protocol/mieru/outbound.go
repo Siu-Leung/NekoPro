@@ -36,6 +36,23 @@ type Outbound struct {
 	release func()
 }
 
+// normalizeMieruPortRange normalizes whitespace and converts colon-delimited
+// port ranges (e.g. "20000:20100" or "20000 : 20100") to the hyphen-delimited
+// format ("20000-20100") required by mihomo's Mieru validator.
+func normalizeMieruPortRange(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if start, end, found := strings.Cut(trimmed, ":"); found && !strings.Contains(trimmed, "-") {
+		return strings.TrimSpace(start) + "-" + strings.TrimSpace(end)
+	}
+	if start, end, found := strings.Cut(trimmed, "-"); found {
+		return strings.TrimSpace(start) + "-" + strings.TrimSpace(end)
+	}
+	return trimmed
+}
+
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MieruOutboundOptions) (adapter.Outbound, error) {
 	options.Server = strings.Trim(strings.TrimSpace(options.Server), "[]")
 	outboundDialer, err := dialer.New(ctx, options.DialerOptions, options.ServerIsDomain())
@@ -53,7 +70,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	port := int(options.ServerPort)
-	portRange := strings.TrimSpace(options.PortRange)
+	portRange := normalizeMieruPortRange(options.PortRange)
 	if portRange != "" {
 		port = 0
 	}
@@ -71,8 +88,8 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		MTU:            options.MTU,
 		UserName:       options.UserName,
 		Password:       options.Password,
-		Multiplexing:   strings.TrimSpace(options.Multiplexing),
-		HandshakeMode:  strings.TrimSpace(options.HandshakeMode),
+		Multiplexing:   strings.ToUpper(strings.TrimSpace(options.Multiplexing)),
+		HandshakeMode:  strings.ToUpper(strings.TrimSpace(options.HandshakeMode)),
 		TrafficPattern: strings.TrimSpace(options.TrafficPattern),
 	}
 

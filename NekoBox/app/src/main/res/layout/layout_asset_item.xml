@@ -4,12 +4,16 @@
     android:id="@+id/content"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginLeft="8dp"
-    android:layout_marginTop="8dp"
-    android:layout_marginRight="8dp"
+    android:layout_marginStart="6dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="6dp"
+    android:layout_marginBottom="4dp"
     android:clickable="true"
     android:focusable="true"
-    app:cardElevation="2dp">
+    app:cardCornerRadius="14dp"
+    app:cardElevation="1dp"
+    app:strokeColor="@color/card_stroke"
+    app:strokeWidth="1dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -28,26 +32,26 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:baselineAligned="false">
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:gravity="center_vertical"
-                android:paddingStart="15dp"
-                android:paddingTop="15dp"
-                android:paddingEnd="8dp"
-                android:paddingBottom="12dp">
+                android:paddingStart="16dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="6dp">
 
                 <TextView
                     android:id="@+id/asset_name"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceMedium"
+                    android:fontFamily="sans-serif-medium"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textStyle="bold" />
+                    android:textSize="15.5sp" />
             </LinearLayout>
 
         </LinearLayout>
@@ -55,25 +59,23 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginLeft="4dp"
-            android:layout_marginRight="4dp"
-            android:layout_marginBottom="4dp"
-            android:gravity="center_vertical">
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="10dp">
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_marginBottom="8dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:gravity="bottom"
-                android:paddingStart="12.5dp">
+                android:gravity="center_vertical">
 
                 <TextView
                     android:id="@+id/asset_status"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?attr/accentOrTextSecondary" />
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12.5sp" />
 
             </LinearLayout>
 
@@ -82,9 +84,10 @@
                 style="?attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
+                android:minHeight="36dp"
                 android:text="@string/group_update"
-                android:textColor="?accentOrTextSecondary" />
+                android:textColor="?attr/primaryOrTextPrimary"
+                app:cornerRadius="16dp" />
         </LinearLayout>
 
     </LinearLayout>

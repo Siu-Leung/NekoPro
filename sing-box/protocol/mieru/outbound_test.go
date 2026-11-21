@@ -82,3 +82,18 @@ func TestSingBoxMieruResolverFiltersNetworkAndFailsClosedOnNilTransports(t *test
 		t.Fatalf("unexpected strategy=%v", router.lastStrategy)
 	}
 }
+
+func TestNormalizeMieruPortRange(t *testing.T) {
+	cases := map[string]string{
+		"":               "",
+		"20000-20100":    "20000-20100",
+		"20000:20100":    "20000-20100",
+		" 20000 : 20100": "20000-20100",
+		" 443 ":          "443",
+	}
+	for input, want := range cases {
+		if got := normalizeMieruPortRange(input); got != want {
+			t.Fatalf("normalizeMieruPortRange(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

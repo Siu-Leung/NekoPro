@@ -82,7 +82,9 @@ func UpdateRootCACerts(pem []byte) bool {
 	customCertPEM = string(pem)
 	customCertGen.Add(1)
 	mihomoCA.ResetCertificate()
-	_ = mihomoCA.AddCertificate(customCertPEM)
+	if err := mihomoCA.AddCertificate(customCertPEM); err != nil {
+		log.Println("failed to load internal ca.pem into mihomo CA pool:", err)
+	}
 	log.Println("internal ca.pem was loaded")
 	return true
 }

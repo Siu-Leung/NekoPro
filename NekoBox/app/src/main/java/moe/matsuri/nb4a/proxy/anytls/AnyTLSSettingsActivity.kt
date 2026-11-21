@@ -58,14 +58,38 @@ class AnyTLSSettingsActivity : ProfileSettingsActivity<AnyTLSBean>() {
         findPreference<EditTextPreference>("minIdleSession")?.apply {
             setOnBindEditTextListener(EditTextPreferenceModifiers.Number)
         }
-        findPreference<EditTextPreference>(certificateSha256.cacheName)!!.apply {
+        val certPref = findPreference<EditTextPreference>(certificates.cacheName)
+        val pinPref = findPreference<EditTextPreference>(certificateSha256.cacheName)!!
+        certPref?.setOnPreferenceChangeListener { _, value ->
+            val newPem = (value as? String).orEmpty().trim()
+            if (newPem.isNotEmpty() && !pinPref.text.isNullOrBlank()) {
+                Toast.makeText(
+                    context,
+                    "Clear SHA-256 certificate pin before setting custom PEM certificates",
+                    Toast.LENGTH_LONG,
+                ).show()
+                false
+            } else {
+                true
+            }
+        }
+        pinPref.apply {
             setOnBindEditTextListener { editText ->
                 editText.inputType = InputType.TYPE_CLASS_TEXT or
                     InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             setOnPreferenceChangeListener { _, value ->
+                val raw = (value as? String).orEmpty()
+                if (raw.isNotBlank() && !certPref?.text.isNullOrBlank()) {
+                    Toast.makeText(
+                        context,
+                        "Clear custom PEM certificates before setting SHA-256 certificate pin",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return@setOnPreferenceChangeListener false
+                }
                 try {
-                    parseAnyTLSCertificatePins(value as String)
+                    parseAnyTLSCertificatePins(raw)
                     true
                 } catch (_: IllegalArgumentException) {
                     Toast.makeText(context, R.string.anytls_certificate_sha256_invalid, Toast.LENGTH_LONG).show()

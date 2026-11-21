@@ -66,6 +66,7 @@ dependencies {
     implementation("com.blacksquircle.ui:language-json:2.6.0")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okio:okio:3.6.0")
     implementation("org.yaml:snakeyaml:2.2")
     implementation("com.github.daniel-stoneuk:material-about-library:3.2.0-rc01")
     implementation("com.jakewharton:process-phoenix:2.1.2")
@@ -81,14 +82,12 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
-    implementation("com.github.MatrixDev.Roomigrant:RoomigrantLib:0.3.4")
-    ksp("com.github.MatrixDev.Roomigrant:RoomigrantCompiler:0.3.4")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("androidx.room:room-testing:2.6.1")
 
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }
 
 // ── geoip/geosite assets 自动补齐 ──

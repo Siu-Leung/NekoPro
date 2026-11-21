@@ -28,9 +28,15 @@ internal fun buildSingBoxOutboundAnyTLSBean(
             enabled = true
             server_name = bean.sni.blankAsNull()
             if (bean.allowInsecure == true || globalAllowInsecure) insecure = true
-            certificate_sha256 = parseAnyTLSCertificatePins(bean.certificateSha256).takeIf { it.isNotEmpty() }
+            val parsedPins = parseAnyTLSCertificatePins(bean.certificateSha256)
+            val customPem = bean.certificates.blankAsNull()
+            // Fail fast before core start: sing-box rejects combining PEM CA certs with leaf SHA-256 pins.
+            require(parsedPins.isEmpty() || customPem == null) {
+                "AnyTLS cannot combine custom PEM certificates with certificate SHA-256 pins"
+            }
+            certificate_sha256 = parsedPins.takeIf { it.isNotEmpty() }
             alpn = bean.alpn.blankAsNull()?.listByLineOrComma()
-            bean.certificates.blankAsNull()?.let {
+            customPem?.let {
                 certificate = it
             }
             bean.utlsFingerprint.blankAsNull()?.let {
@@ -81,27 +87,40 @@ fun AnyTLSBean.toUri(): String {
     if (!sni.isNullOrBlank()) {
         builder.addQueryParameter("sni", sni!!)
     }
+    val alpnList = alpn.blankAsNull()?.listByLineOrComma().orEmpty()
+    if (alpnList.isNotEmpty()) {
+        builder.addQueryParameter("alpn", alpnList.joinToString(","))
+    }
     if (!utlsFingerprint.isNullOrBlank()) {
         builder.addQueryParameter("fp", utlsFingerprint!!)
     }
     return builder.toLink("anytls")
 }
 
+private val ANYTLS_SCHEME_REGEX = Regex("^anytls://", RegexOption.IGNORE_CASE)
+
 fun parseAnytls(url: String): AnyTLSBean {
     // https://github.com/anytls/anytls-go/blob/main/docs/uri_scheme.md
-    val link = url.replace("anytls://", "https://").toHttpUrlOrNull() ?: error(
+    val trimmed = url.trim()
+    val replaced = ANYTLS_SCHEME_REGEX.replaceFirst(trimmed, "https://")
+    val link = replaced.toHttpUrlOrNull() ?: error(
         "invalid anytls link ${url.redactLink()}"
     )
+    // Preserve passwords containing ':' (OkHttp splits userinfo on the first ':').
+    val rawAuthority = replaced.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#')
+    val hasUserInfoColon = rawAuthority.contains('@') && rawAuthority.substringBeforeLast('@').contains(':')
     return AnyTLSBean().apply {
         serverAddress = link.host
         serverPort = link.port
         name = link.fragment
-        password = link.username
+        password = if (hasUserInfoColon || link.encodedPassword.isNotEmpty()) {
+            "${link.username}:${link.password}"
+        } else {
+            link.username
+        }
         sni = link.queryParameter("sni") ?: ""
         alpn = link.queryParameter("alpn") ?: ""
-        link.queryParameter("insecure")?.also {
-            allowInsecure = it == "1" || it == "true"
-        }
+        allowInsecure = link.queryParameter("insecure")?.let { it == "1" || it.equals("true", ignoreCase = true) } ?: false
         link.queryParameter("fp")?.let {
             utlsFingerprint = it
         }

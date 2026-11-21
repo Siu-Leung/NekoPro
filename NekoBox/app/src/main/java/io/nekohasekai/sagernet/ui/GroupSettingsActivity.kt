@@ -196,19 +196,29 @@ class GroupSettingsActivity(
         // 多端点输入框需要多行：AndroidX 的 EditTextPreference 对话框默认单行，
         // 多行内容会被压成一行显示，看起来像"只有一个端点"。
         findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnBindEditTextListener { editText ->
-            editText.inputType = editText.inputType or
-                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
+                android.text.InputType.TYPE_TEXT_VARIATION_URI
             editText.setSingleLine(false)
             editText.minLines = 3
             editText.maxLines = 8
             editText.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            // Protect credential-bearing DoH URLs against screenshots/recents thumbnails.
+            editText.post {
+                val dialogFragment = supportFragmentManager.findFragmentByTag(
+                    "androidx.preference.PreferenceFragment.DIALOG"
+                ) as? androidx.fragment.app.DialogFragment
+                dialogFragment?.dialog?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
         }
         findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.setOnPreferenceChangeListener { _, newValue ->
             // 多端点容错：每行一个端点，第一行为主端点，其余为镜像。任一行非法即拒绝保存。
-            val lines = (newValue as? String)?.trim().orEmpty()
-                .split('\n')
+            val lines = (newValue as? String).orEmpty()
+                .lineSequence()
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
+                .toList()
             lines.isEmpty() || runCatching {
                 lines.forEach {
                     moe.matsuri.nb4a.SingBoxDnsServerParser.parseGroupNodeDns(it, "dns-group-validate")
@@ -219,6 +229,8 @@ class GroupSettingsActivity(
             }.isSuccess
         }
         findPreference<Preference>("groupDnsCandidates")?.setOnPreferenceClickListener {
+            // Reset any prior single-client UA override when starting a fresh inspection.
+            dnsCandidateUserAgents = null
             loadDnsCandidates(this)
             true
         }
@@ -229,16 +241,20 @@ class GroupSettingsActivity(
         if (loadingDnsCandidates) return
         val link = DataStore.subscriptionLink
         if (link.isBlank()) return
-        val confirm = !DataStore.serviceState.connected &&
+        val isConnected = DataStore.serviceState.connected
+        val confirm = !isConnected &&
             (link.startsWith("http://", ignoreCase = true) || DataStore.subscriptionUpdateWhenConnectedOnly)
         if (confirm) {
             dnsCandidatesDialog = AlertDialog.Builder(this).setMessage(R.string.update_subscription_warning)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.group_dns_candidates_load) { _, _ ->
-                    if (link == DataStore.subscriptionLink) fetchDnsCandidates(fragment, link)
+                    if (link == DataStore.subscriptionLink) {
+                        fetchDnsCandidates(fragment, link, forceProxy = DataStore.serviceState.connected)
+                    }
                 }.show()
         } else {
-            fetchDnsCandidates(fragment, link)
+            // Lock forceProxy when connected so a mid-loop VPN drop fails closed instead of leaking direct.
+            fetchDnsCandidates(fragment, link, forceProxy = isConnected)
         }
     }
 
@@ -248,14 +264,25 @@ class GroupSettingsActivity(
     /** The preferences fragment that owns the DNS row, reused by follow-up dialogs. */
     private var dnsCandidateFragment: PreferenceFragmentCompat? = null
 
-    private fun fetchDnsCandidates(fragment: PreferenceFragmentCompat, link: String) {
+    private fun fetchDnsCandidates(
+        fragment: PreferenceFragmentCompat,
+        link: String,
+        forceProxy: Boolean,
+    ) {
         dnsCandidateFragment = fragment
         loadingDnsCandidates = true
         updateNodeDnsStatus(fragment)
+        val customUserAgent = DataStore.subscriptionUserAgent.trim().takeIf { it.isNotEmpty() }
+        val userAgents = dnsCandidateUserAgents ?: RawUpdater.DNS_CANDIDATE_USER_AGENTS
         lifecycleScope.launch {
             val profile = try {
                 withContext(Dispatchers.IO) {
-                    RawUpdater.inspectSubscriptionDns(link, dnsCandidateUserAgents ?: RawUpdater.DNS_CANDIDATE_USER_AGENTS)
+                    RawUpdater.inspectSubscriptionDns(
+                        link = link,
+                        userAgents = userAgents,
+                        forceProxy = forceProxy,
+                        customUserAgent = if (dnsCandidateUserAgents == null) customUserAgent else null,
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -267,15 +294,17 @@ class GroupSettingsActivity(
             }
             if (isFinishing || isDestroyed || link != DataStore.subscriptionLink ||
                 DataStore.groupType != GroupType.SUBSCRIPTION) return@launch
+            val isRemoteSubscription = !link.startsWith("content://")
             when {
                 profile == null -> showDnsCandidatesMessage(
-                    R.string.group_dns_candidates_failed, allowClientSwitch = true,
+                    R.string.group_dns_candidates_failed,
+                    allowClientSwitch = isRemoteSubscription,
                 )
                 profile.malformed -> showDnsCandidatesMessage(R.string.group_dns_candidates_malformed)
                 !profile.hasDns -> showDnsCandidatesMessage(
-                    if (link.startsWith("content://")) R.string.group_dns_candidates_no_dns_file
+                    if (!isRemoteSubscription) R.string.group_dns_candidates_no_dns_file
                     else R.string.group_dns_candidates_no_dns_meta,
-                    allowClientSwitch = !link.startsWith("content://"),
+                    allowClientSwitch = isRemoteSubscription,
                 )
                 profile.rows.isEmpty() -> showDnsCandidatesMessage(R.string.group_dns_candidates_empty)
                 else -> showDnsCandidatesPicker(fragment, link, profile)
@@ -320,9 +349,9 @@ class GroupSettingsActivity(
 
     private fun showCandidatesAfterClientPick() {
         val fragment = dnsCandidateFragment ?: return
-        val link = DataStore.subscriptionLink
-        if (link.isBlank()) return
-        fetchDnsCandidates(fragment, link)
+        // Route through loadDnsCandidates so updateWhenConnectedOnly, http:// warnings,
+        // and the loadingDnsCandidates re-entrancy guard are enforced consistently.
+        loadDnsCandidates(fragment)
     }
 
     private fun showDnsCandidatesPicker(
@@ -489,6 +518,9 @@ class GroupSettingsActivity(
                 }
 
                 onMainDispatcher {
+                    if (isFinishing || isDestroyed || supportFragmentManager.isStateSaved) {
+                        return@onMainDispatcher
+                    }
                     supportFragmentManager.beginTransaction()
                         .replace(R.id.settings, MyPreferenceFragmentCompat())
                         .commit()
@@ -503,10 +535,18 @@ class GroupSettingsActivity(
             runOnDefaultDispatcher {
                 val sub = SagerDatabase.groupDao.getById(DataStore.editingId)?.subscription
                 onMainDispatcher {
+                    if (isFinishing || isDestroyed) return@onMainDispatcher
                     savedAdoptedDns = !sub?.adoptedNodeDns.isNullOrBlank()
                     savedSubscriptionLink = sub?.link.orEmpty()
-                    (supportFragmentManager.findFragmentById(R.id.settings) as? PreferenceFragmentCompat)
-                        ?.let { updateNodeDnsStatus(it) }
+                    val existing = supportFragmentManager.findFragmentById(R.id.settings) as? PreferenceFragmentCompat
+                    if (existing != null) {
+                        updateNodeDnsStatus(existing)
+                    } else if (!supportFragmentManager.isStateSaved) {
+                        // Recover if Activity rotated before the initial async Room load committed the fragment.
+                        supportFragmentManager.beginTransaction()
+                            .replace(R.id.settings, MyPreferenceFragmentCompat())
+                            .commit()
+                    }
                 }
             }
         }
@@ -553,6 +593,10 @@ class GroupSettingsActivity(
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         if (key != Key.PROFILE_DIRTY) {
             DataStore.dirty = true
+        }
+        if (key == Key.SUBSCRIPTION_LINK) {
+            // Reset any manually chosen inspection UA when the subscription URL changes.
+            dnsCandidateUserAgents = null
         }
         if (key == Key.SUBSCRIPTION_NODE_DNS || key == Key.SUBSCRIPTION_AUTO_ADOPT_NODE_DNS || key == Key.SUBSCRIPTION_LINK) {
             runOnUiThread {

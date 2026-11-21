@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/metacubex/mihomo/adapter/outbound"
-	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -37,10 +36,6 @@ type Outbound struct {
 	uotClient *uot.Client
 	logger    log.ContextLogger
 	release   func()
-}
-
-func setMihomoIPv6Enabled() {
-	resolver.DisableIPv6 = false
 }
 
 func parseFingerprint(fp, clientFP string) (certFingerprint string, browserFingerprint string) {
@@ -206,7 +201,6 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	release := mihomo_adapter.InstallProtectHook(ctx)
-	setMihomoIPv6Enabled()
 
 	proxy, err := outbound.NewVless(*vlessOption)
 	if err != nil {
