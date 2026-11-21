@@ -250,34 +250,65 @@ jobs:
             fi
           fi
 
+          is_prerelease="false"
+          make_latest="true"
+          display_tag="$tag_name"
+          release_name=""
+          # WHY: Any tag outside strict stable `vX.Y.Z` (e.g. `test-v1.4.6-rc1`, `v1.4.6-rc1`)
+          # or any manual dispatch from a non-main branch must stay a Pre-release and never
+          # overwrite the repository's `latest` stable release.
+          if [[ -n "$tag_name" ]]; then
+            display_tag="${tag_name#test-}"
+            if [[ ! "$tag_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$GITHUB_REF_STR" == refs/heads/* && "$GITHUB_REF_STR" != "refs/heads/main" ]]; then
+              is_prerelease="true"
+              make_latest="false"
+              release_name="Neko Pro ${display_tag} (Pre-release)"
+            else
+              release_name="Neko Pro ${tag_name}"
+            fi
+          fi
+
           has_notes="false"
           notes_path="${RUNNER_TEMP}/release-notes.md"
           if [[ "$should_release" == "true" && -n "$tag_name" ]]; then
-            python3 - "$tag_name" "$notes_path" <<'PY'
+            python3 - "$tag_name" "$display_tag" "$is_prerelease" "$GITHUB_REF_NAME_STR" "$notes_path" <<'PY'
           import re
           import sys
           from pathlib import Path
 
-          tag = sys.argv[1]
-          out_path = Path(sys.argv[2])
-          readme = Path("README.md").read_text(encoding="utf-8").splitlines()
+          raw_tag = sys.argv[1]
+          display_tag = sys.argv[2]
+          is_prerelease = sys.argv[3] == "true"
+          branch_name = sys.argv[4]
+          out_path = Path(sys.argv[5])
+          readme_lines = Path("README.md").read_text(encoding="utf-8").splitlines()
 
-          heading_re = re.compile(rf"^###\s+{re.escape(tag)}\b")
-          start = None
-          for idx, line in enumerate(readme):
-              if heading_re.match(line):
-                  start = idx + 1
+          # WHY: Match trailing whitespace or EOL instead of `\b` so stable `v1.4.6`
+          # cannot accidentally match a prerelease heading such as `### v1.4.6-rc1`.
+          heading_pattern = re.compile(rf"^###\s+{re.escape(display_tag)}(?:\s|$)")
+          section_start = None
+          for line_index, line in enumerate(readme_lines):
+              if heading_pattern.match(line):
+                  section_start = line_index + 1
                   break
 
-          if start is not None:
+          if section_start is not None:
               body_lines = []
-              for line in readme[start:]:
+              for line in readme_lines[section_start:]:
                   if line.startswith("## ") or line.startswith("### "):
                       break
                   body_lines.append(line)
-              body = "\n".join(body_lines).strip()
-              if body:
-                  out_path.write_text(f"## Neko Pro {tag} 更新说明\n\n{body}\n", encoding="utf-8")
+              changelog_body = "\n".join(body_lines).strip()
+              if changelog_body:
+                  sections = [f"## Neko Pro {display_tag} 更新说明"]
+                  if is_prerelease:
+                      sections.append(
+                          f"> **预发布测试版（Pre-release / 未合并 `main` 主线）**："
+                          f"本构建来自开发分支 `{branch_name}`（Tag: `{raw_tag}`），仅用于真机回归与 UI 验证，"
+                          f"不会覆盖 `latest` 正式版。与正式版使用同一发布签名密钥，支持直接覆盖安装。"
+                      )
+                  sections.append(changelog_body)
+                  out_path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
           PY
             if [ -s "$notes_path" ]; then
               has_notes="true"
@@ -287,22 +318,25 @@ jobs:
           {
             echo "should_release=${should_release}"
             echo "tag_name=${tag_name}"
+            echo "release_name=${release_name}"
+            echo "is_prerelease=${is_prerelease}"
+            echo "make_latest=${make_latest}"
             echo "has_notes=${has_notes}"
             echo "body_path=${notes_path}"
           } >> "$GITHUB_OUTPUT"
-          echo "Resolved release metadata: should_release=${should_release} tag_name=${tag_name} has_notes=${has_notes}"
+          echo "Resolved release metadata: should_release=${should_release} tag_name=${tag_name} is_prerelease=${is_prerelease} make_latest=${make_latest} has_notes=${has_notes}"
       - name: Publish GitHub Release
         if: steps.release_meta.outputs.should_release == 'true' && steps.release_meta.outputs.tag_name != ''
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.release_meta.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
-          name: Neko Pro ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.release_name }}
           body_path: ${{ steps.release_meta.outputs.has_notes == 'true' && steps.release_meta.outputs.body_path || '' }}
           generate_release_notes: ${{ steps.release_meta.outputs.has_notes != 'true' }}
-          make_latest: true
+          make_latest: ${{ steps.release_meta.outputs.make_latest }}
           files: |
             NekoBox/app/build/outputs/apk/oss/release/*.apk
             NekoBox/app/build/outputs/apk/oss/release/checksums/*.txt
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.release_meta.outputs.is_prerelease == 'true' }}
