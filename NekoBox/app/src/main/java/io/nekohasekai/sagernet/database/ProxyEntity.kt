@@ -328,7 +328,7 @@ data class ProxyEntity(
      */
     fun exportLink(universal: Boolean): String {
         val bean = runCatching { requireBean() }.getOrNull()
-            ?: return if (universal) toUniversalLink() else toStdLink()
+            ?: return toUri()  // 没有可用 bean 时退回既有的协议链接逻辑
         val host = bean.serverAddress.orEmpty()
         val resolved = entryIp.trim()
         val substitutable = resolved.isNotEmpty() &&
