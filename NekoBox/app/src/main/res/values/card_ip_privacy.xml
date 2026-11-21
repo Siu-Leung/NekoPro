@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="card_hidden_title">Address hidden</string>
+    <string name="card_entry_literal">Configured entry</string>
+    <string name="card_entry_dns">Entry DNS answer</string>
+    <string name="card_exit_sample">Tested exit</string>
+    <string name="card_ip_probe">Check IP / ASN</string>
+    <string name="card_ip_probe_disclosure">Looks up the entry using group HTTPS DNS or, if no group resolver is set, system DNS. Sends the entry IP to api.ip.sb for ASN lookup. For supported nodes, api.ip.sb also sees the test connection through that exact node. Hiding addresses only changes display.</string>
+    <string name="card_ip_probe_failed">No verified result. Previous results kept.</string>
+    <string name="card_ip_probe_entry_only">Entry updated. Could not verify this node’s exit.</string>
+    <string name="card_ip_probe_complete">IP information updated.</string>
+</resources>

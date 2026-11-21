@@ -146,37 +146,47 @@ class GroupNodeDnsRegressionTest {
         }
     }
 
-    /** 同一服务的多域名镜像：主端点打 dns-group-N，其余按序打 -1 / -2。 */
     @Test
-    fun mirrorEndpointsGetOrderedTags() {
+    fun fiveEndpointsUseOneOrderedFallbackTagForOutboundAndTun() {
+        val group = ProxyGroup(type = GroupType.SUBSCRIPTION, subscription = SubscriptionBean().apply {
+            autoAdoptNodeDns = true
+            adoptedNodeDns = ('a'..'e').joinToString("\n") { "https://resolver-$it.example/dns-query/fixture" }
+        })
         val plan = GroupNodeDnsPlan()
-        val primary = plan.bind(
-            37,
-            listOf(
-                "https://resolver-a.example:44443/dns-query/token",
-                "https://resolver-b.example:44443/dns-query/token",
-                "https://resolver-c.example/dns-query/token",
-            ),
-            "entry.example",
-        )
-        assertEquals("dns-group-37", primary)
-        val tags = plan.servers.map { it.tag }
-        assertEquals(listOf("dns-group-37", "dns-group-37-1", "dns-group-37-2"), tags)
-        // 三个端点路径一致（同一私有服务），全部保留为可用镜像
-        assertTrue(plan.servers.all { it.path == "/dns-query/token" })
+        val tag = plan.bind(37, group.effectiveNodeDnsList(), "entry.example")
+        assertEquals("dns-group-37", tag)
+        val tags = (1..5).map { "dns-group-37-$it" }
+        val endpoints = plan.servers.dropLast(1)
+        assertEquals(tags, endpoints.map { it.tag })
+        assertEquals(('a'..'e').map { "resolver-$it.example" }, endpoints.map { it.server })
+        assertTrue(endpoints.all { it.path == "/dns-query/fixture" && it.domain_resolver == "dns-direct" })
+        val aggregate = plan.servers.last()
+        assertEquals(mapOf("type" to "fallback", "tag" to tag, "servers" to tags), aggregate.asMap())
+        assertEquals(tag, plan.domainRules().single().server)
     }
 
-    /** 其中一行写坏时跳过该行，主端点仍然可用，不整组失败。 */
     @Test
-    fun invalidMirrorIsSkippedWithoutLosingPrimary() {
+    fun invalidFirstEndpointAndDuplicatesDoNotLoseSingleEndpointPassthrough() {
+        val warnings = mutableListOf<String>()
+        val plan = GroupNodeDnsPlan { warnings.add(it) }
+        val malformed = "https://bad.example:99999/dns-query/fixture"
+        val tag = plan.bind(5, listOf(malformed, "  $first  ", first), "entry.example")
+        assertEquals("dns-group-5", tag)
+        val endpoint = plan.servers.single()
+        assertEquals(tag, endpoint.tag)
+        assertEquals("https", endpoint.type)
+        assertNull(endpoint.servers)
+        assertEquals(listOf("Skipping invalid group DNS endpoint #1 for group 5"), warnings)
+        assertThrows(IllegalArgumentException::class.java) {
+            GroupNodeDnsPlan().bind(6, listOf(malformed), "entry.example")
+        }
+    }
+
+    @Test
+    fun fallbackMembersKeepTheirNativeTransportTypes() {
         val plan = GroupNodeDnsPlan()
-        val primary = plan.bind(
-            5,
-            listOf("https://good.example/dns-query/t", "https://bad.example:99999/dns-query/t"),
-            "entry.example",
-        )
-        assertEquals("dns-group-5", primary)
-        assertEquals(listOf("dns-group-5"), plan.servers.map { it.tag })
+        plan.bind(6, listOf(first, "h3://resolver.example/path", "tls://resolver.example", "quic://resolver.example", "tcp://192.0.2.1", "192.0.2.2", "local"), null)
+        assertEquals(listOf("https", "h3", "tls", "quic", "tcp", "udp", "local", "fallback"), plan.servers.map { it.type })
     }
 
     /** 组级手填支持多行，取第一行为主端点。 */

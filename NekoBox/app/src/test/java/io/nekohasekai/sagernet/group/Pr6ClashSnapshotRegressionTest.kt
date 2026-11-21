@@ -76,20 +76,29 @@ class Pr6ClashSnapshotRegressionTest {
             "['http://[::1]:7874/dns-query']",
             "['tcp://localhost:53']",
             "['https://resolver.example:65536/dns-query']",
-            "['https://resolver-a.example/dns-query', 'https://resolver-b.example/dns-query']",
             "['https://resolver.example/dns-query', {unexpected: mapping}]",
+            "['https://resolver.example/dns-query', 'udp://127.0.0.1:7874']",
+            "['https://resolver.example/dns-query', null]",
         )) {
             val text = "dns:\n  proxy-server-nameserver: $candidate\n$valid"
             assertEquals(emptyList<String>(), RawUpdater.extractClashProxyServerNameservers(text))
         }
     }
 
-    /** Kuromis 形态：psn 指向 Clash 自身监听，真实解析器在 dns.nameserver 的同服务多域名镜像里。 */
+    @Test
+    fun directNodeResolversKeepExplicitOrderEvenWhenDifferentServices() {
+        val resolvers = listOf("https://resolver-b.example:9443/first", "tls://resolver-a.example")
+        val text = "dns:\n  proxy-server-nameserver: [${resolvers.joinToString()}, ${resolvers.first()}]\n$valid"
+        assertEquals(resolvers, RawUpdater.extractClashProxyServerNameservers(text))
+    }
+
+    /** The local listener may forward to a single private DoH service with multiple mirrors. */
     @Test
     fun selfPointingResolverFallsBackToNameserverMirrors() {
-        val mirrorPath = "/dns-query/6e4d9b50-uuid"
+        val mirrorPath = "/dns-query/01234567-89ab-cdef-0123-456789abcdef"
         val kuromis = """
             dns:
+              enable: true
               listen: 0.0.0.0:7874
               proxy-server-nameserver: [udp://127.0.0.1:7874]
               nameserver:

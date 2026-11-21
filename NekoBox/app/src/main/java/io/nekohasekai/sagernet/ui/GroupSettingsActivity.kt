@@ -9,11 +9,17 @@ import android.os.Parcelable
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.WindowManager
+import android.widget.CheckBox
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.LayoutRes
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
 import com.github.shadowsocks.plugin.Empty
 import com.github.shadowsocks.plugin.fragment.AlertDialogFragment
@@ -23,12 +29,18 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
+import io.nekohasekai.sagernet.group.ClashDnsCandidates
+import io.nekohasekai.sagernet.group.RawUpdater
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.OutboundPreference
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
 import moe.matsuri.nb4a.ui.SimpleMenuPreference
 
@@ -42,6 +54,8 @@ class GroupSettingsActivity(
     private lateinit var landingProxyPreference: OutboundPreference
     private var savedAdoptedDns: Boolean = false
     private var savedSubscriptionLink: String = ""
+    private var loadingDnsCandidates = false
+    private var dnsCandidatesDialog: AlertDialog? = null
 
     /** Populate the editor from Room, including manual DNS saved by older releases. */
     fun ProxyGroup.init() {
@@ -194,7 +208,139 @@ class GroupSettingsActivity(
                 Toast.makeText(this@GroupSettingsActivity, R.string.group_node_dns_invalid, Toast.LENGTH_SHORT).show()
             }.isSuccess
         }
+        findPreference<Preference>("groupDnsCandidates")?.setOnPreferenceClickListener {
+            loadDnsCandidates(this)
+            true
+        }
         updateNodeDnsStatus(this)
+    }
+
+    private fun loadDnsCandidates(fragment: PreferenceFragmentCompat) {
+        if (loadingDnsCandidates) return
+        val link = DataStore.subscriptionLink
+        if (link.isBlank()) return
+        val confirm = !DataStore.serviceState.connected &&
+            (link.startsWith("http://", ignoreCase = true) || DataStore.subscriptionUpdateWhenConnectedOnly)
+        if (confirm) {
+            dnsCandidatesDialog = AlertDialog.Builder(this).setMessage(R.string.update_subscription_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.group_dns_candidates_load) { _, _ ->
+                    if (link == DataStore.subscriptionLink) fetchDnsCandidates(fragment, link)
+                }.show()
+        } else {
+            fetchDnsCandidates(fragment, link)
+        }
+    }
+
+    private fun fetchDnsCandidates(fragment: PreferenceFragmentCompat, link: String) {
+        loadingDnsCandidates = true
+        updateNodeDnsStatus(fragment)
+        lifecycleScope.launch {
+            val profile = try {
+                withContext(Dispatchers.IO) { RawUpdater.inspectSubscriptionDns(link) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null // Don't expose the request URL or a credential-bearing YAML exception.
+            } finally {
+                loadingDnsCandidates = false
+                if (!isFinishing && !isDestroyed) updateNodeDnsStatus(fragment)
+            }
+            if (isFinishing || isDestroyed || link != DataStore.subscriptionLink ||
+                DataStore.groupType != GroupType.SUBSCRIPTION) return@launch
+            when {
+                profile == null -> showDnsCandidatesMessage(R.string.group_dns_candidates_failed)
+                profile.malformed -> showDnsCandidatesMessage(R.string.group_dns_candidates_malformed)
+                !profile.hasDns -> showDnsCandidatesMessage(
+                    if (link.startsWith("content://")) R.string.group_dns_candidates_no_dns_file
+                    else R.string.group_dns_candidates_no_dns_meta,
+                )
+                profile.rows.isEmpty() -> showDnsCandidatesMessage(R.string.group_dns_candidates_empty)
+                else -> showDnsCandidatesPicker(fragment, link, profile)
+            }
+        }
+    }
+
+    private fun showDnsCandidatesMessage(message: Int) {
+        dnsCandidatesDialog = AlertDialog.Builder(this).setTitle(R.string.group_dns_candidates_title)
+            .setMessage(message).setPositiveButton(android.R.string.ok, null).show()
+    }
+
+    private fun showDnsCandidatesPicker(
+        fragment: PreferenceFragmentCompat, link: String, profile: ClashDnsCandidates.Profile,
+    ) {
+        val padding = (24 * resources.displayMetrics.density).toInt()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding / 2, padding, padding / 2)
+        }
+        fun paragraph(text: CharSequence) = TextView(this).apply {
+            this.text = text
+            setPadding(0, padding / 4, 0, padding / 4)
+        }.also { content.addView(it) }
+        paragraph(getText(R.string.group_dns_candidates_help))
+        if (profile.truncated) paragraph(getString(R.string.group_dns_candidates_truncated, ClashDnsCandidates.MAX_ROWS))
+
+        val selectable = profile.rows.mapNotNull { it.selectable }.toSet()
+        val selected = DataStore.subscriptionNodeDns.lineSequence().map { it.trim() }
+            .filter { it in selectable }.toCollection(linkedSetOf())
+        val boxes = mutableListOf<Pair<String, CheckBox>>()
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.group_dns_candidates_title)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.group_dns_candidates_use, null)
+            .create()
+        fun updateOrder() {
+            val order = selected.withIndex().associate { it.value to it.index + 1 }
+            for ((endpoint, box) in boxes) {
+                val index = order[endpoint]
+                box.isChecked = index != null
+                box.text = if (index == null) endpoint else getString(R.string.group_dns_candidates_order, index, endpoint)
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = selected.isNotEmpty()
+        }
+
+        var previousCategory: ClashDnsCandidates.Category? = null
+        for (row in profile.rows) {
+            if (row.category != previousCategory) {
+                paragraph(row.category.key).setTypeface(null, android.graphics.Typeface.BOLD)
+                previousCategory = row.category
+            }
+            row.policy?.let { paragraph(getString(R.string.group_dns_candidates_policy, it)) }
+            val endpoint = row.selectable
+            if (endpoint != null) {
+                val box = CheckBox(this).apply {
+                    setOnClickListener {
+                        if (isChecked) selected.add(endpoint) else selected.remove(endpoint)
+                        updateOrder()
+                    }
+                }
+                content.addView(box)
+                boxes.add(endpoint to box)
+            } else {
+                val reason = when (row.status) {
+                    ClashDnsCandidates.Status.SELF_REFERENCE -> R.string.group_dns_candidates_self
+                    ClashDnsCandidates.Status.LOCAL -> R.string.group_dns_candidates_local
+                    ClashDnsCandidates.Status.UNSUPPORTED -> R.string.group_dns_candidates_unsupported
+                    ClashDnsCandidates.Status.UNSAFE -> R.string.group_dns_candidates_unsafe
+                    else -> R.string.group_dns_candidates_invalid
+                }
+                val label = row.label
+                paragraph(if (label == null) getText(reason) else getString(R.string.group_dns_candidates_unavailable, label, getText(reason)))
+            }
+        }
+        dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (selected.isNotEmpty() && DataStore.subscriptionLink == link && DataStore.groupType == GroupType.SUBSCRIPTION) {
+                fragment.findPreference<EditTextPreference>(Key.SUBSCRIPTION_NODE_DNS)?.text = selected.joinToString("\n")
+                DataStore.dirty = true
+                updateNodeDnsStatus(fragment)
+            }
+            dialog.dismiss()
+        }
+        updateOrder()
+        dnsCandidatesDialog = dialog
     }
 
     /** Show the source of the yet-to-be-saved DNS setting, never its credential-bearing URL. */
@@ -210,6 +356,10 @@ class GroupSettingsActivity(
             else -> R.string.group_node_dns_waiting
         }
         fragment.findPreference<Preference>("subscriptionNodeDnsStatus")?.setSummary(status)
+        fragment.findPreference<Preference>("groupDnsCandidates")?.apply {
+            isEnabled = !loadingDnsCandidates && DataStore.subscriptionLink.isNotBlank()
+            setSummary(if (loadingDnsCandidates) R.string.group_dns_candidates_loading else R.string.group_dns_candidates_summary)
+        }
     }
 
     class UnsavedChangesDialogFragment : AlertDialogFragment<Empty, Empty>() {
@@ -330,6 +480,7 @@ class GroupSettingsActivity(
     }
 
     override fun onDestroy() {
+        dnsCandidatesDialog?.dismiss()
         DataStore.profileCacheStore.unregisterChangeListener(this)
         super.onDestroy()
     }

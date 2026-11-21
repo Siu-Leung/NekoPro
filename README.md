@@ -29,10 +29,17 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.2`
+`Neko-Pro-1.4.3`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.2)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.2-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.3)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.3-arm64-v8a.apk`
+
+### v1.4.3 改动日志 (2026-11-21)
+
+- **组 DNS 容错**：完整 Clash 配置可从分组设置 →「订阅 DNS 候选」按类型查看并多选，按顺序主备。只有明确指向本配置 DNS 监听的回环项，才允许自动采纳 `nameserver` 的同路径私有 DoH 镜像；纯节点订阅缺 DNS 时会说明，不猜测地址。
+- **真实入口导出**：导出节点链接、二维码、配置或整组节点时，使用组内私有 DoH 的实际解析结果替换可转换节点的连接地址，保留 TLS SNI、证书固定与显式 Host。不改原节点、不从公网 DNS猜测；解析失败或不支持时保留原域名并提示。固定 IP 是导出时的快照。
+- **节点地址和服务商**：节点卡片可按需检测入口/出口 IP 与归属。开启「隐藏地址」后仍显示服务商，只遮住地址和名称里的地址；服务商查询使用 `api.ip.sb`，仅在确认后请求。无法证明出口经过指定节点时不显示出口结果。
+- 组 DNS 缺失不再阻止公网可解析的节点测速；运行中的任务占用测速时会明确提示。Room 9/10 升级仅新增字段，保留已有节点和备份。
 
 ### v1.4.2 改动日志 (2026-11-21)
 

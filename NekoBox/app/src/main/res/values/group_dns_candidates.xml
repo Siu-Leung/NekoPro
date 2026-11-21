@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="group_dns_candidates_title">Subscription DNS candidates</string>
+    <string name="group_dns_candidates_summary">Read the original source and pick resolvers for this group only</string>
+    <string name="group_dns_candidates_loading">Reading DNS settings from the subscription…</string>
+    <string name="group_dns_candidates_load">Read candidates</string>
+    <string name="group_dns_candidates_failed">Could not read the subscription. Existing nodes and DNS were kept.</string>
+    <string name="group_dns_candidates_malformed">The Clash profile or its DNS section is malformed. Existing nodes and DNS were kept.</string>
+    <string name="group_dns_candidates_no_dns_meta">The original subscription returned no Clash DNS settings when requested as Clash Meta. It may be a nodes-only URL. Use a full Clash profile or enter Node Domain DNS manually.</string>
+    <string name="group_dns_candidates_no_dns_file">The selected file contains no Clash DNS settings. Use a full Clash profile or enter Node Domain DNS manually.</string>
+    <string name="group_dns_candidates_empty">The Clash DNS section has no resolver entries to display.</string>
+    <string name="group_dns_candidates_auto_missing">No supported node resolver was supplied for automatic adoption. Existing nodes and DNS were kept. Open Subscription DNS candidates or enter Node Domain DNS manually.</string>
+    <string name="group_dns_candidates_refresh_failed">Could not download or parse the subscription. Existing nodes and DNS were kept.</string>
+    <string name="group_dns_candidates_help">Choose trusted endpoints in the order they should be tried. Use selection replaces Node Domain DNS for this group; apply group settings to save. Clash rules and global DNS are not imported. URLs may contain private credentials.</string>
+    <string name="group_dns_candidates_truncated">Only the first %1$d entries are shown.</string>
+    <string name="group_dns_candidates_order">%1$d. %2$s</string>
+    <string name="group_dns_candidates_policy">Policy: %1$s</string>
+    <string name="group_dns_candidates_use">Use selection</string>
+    <string name="group_dns_candidates_self">Not selectable: points to the Clash local listener</string>
+    <string name="group_dns_candidates_local">Not selectable: depends on the local system or uses a local or reserved address</string>
+    <string name="group_dns_candidates_unsupported">Not selectable: unsupported DNS transport or URL form</string>
+    <string name="group_dns_candidates_unsafe">Not selectable: routing parameter, credentials in the authority, query, or ambiguous address</string>
+    <string name="group_dns_candidates_invalid">Not selectable: invalid DNS entry</string>
+    <string name="group_dns_candidates_unavailable">%1$s\n%2$s</string>
+</resources>

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -40,10 +41,13 @@ type TransportRegistry struct {
 }
 
 func NewTransportRegistry() *TransportRegistry {
-	return &TransportRegistry{
+	registry := &TransportRegistry{
 		optionsType:  make(map[string]optionsConstructorFunc),
 		constructors: make(map[string]constructorFunc),
 	}
+	// Both the standard and Android registries use this constructor.
+	RegisterTransport(registry, C.DNSTypeFallback, newFallbackTransport)
+	return registry
 }
 
 func (r *TransportRegistry) OptionTypes() []string {

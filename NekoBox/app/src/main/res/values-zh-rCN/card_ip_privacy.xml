@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="card_hidden_title">地址已隐藏</string>
+    <string name="card_entry_literal">配置入口</string>
+    <string name="card_entry_dns">入口 DNS 应答</string>
+    <string name="card_exit_sample">实测出口</string>
+    <string name="card_ip_probe">查询 IP / ASN</string>
+    <string name="card_ip_probe_disclosure">入口域名通过组内 HTTPS DNS 查询；未设置组解析器时使用系统 DNS。入口 IP 将发送至 api.ip.sb 查询归属。支持的节点还会通过该节点向 api.ip.sb 发送出口探测请求。隐藏地址仅影响显示。</string>
+    <string name="card_ip_probe_failed">未得到可验证结果，保留上次成功结果。</string>
+    <string name="card_ip_probe_entry_only">已更新入口，未能验证此节点的出口。</string>
+    <string name="card_ip_probe_complete">IP 信息已更新。</string>
+</resources>

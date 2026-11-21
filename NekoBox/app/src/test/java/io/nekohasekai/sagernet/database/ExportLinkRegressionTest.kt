@@ -1,71 +1,91 @@
 package io.nekohasekai.sagernet.database
 
+import io.nekohasekai.sagernet.fmt.parseUniversal
+import io.nekohasekai.sagernet.ipinfo.NodeShareExport
+import kotlinx.coroutines.runBlocking
+import moe.matsuri.nb4a.proxy.anytls.AnyTLSBean
+import moe.matsuri.nb4a.proxy.anytls.parseAnytls
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 导出链接的纯 JVM 回归：私有入口域名必须换成已解析的真实 IP，
- * 而公网可解析域名、纯 IP 节点、以及没有解析结果的节点都必须保持原样。
- */
+/** Round-trip node links without an Android runtime or a live resolver. */
 class ExportLinkRegressionTest {
+    private fun fixture(host: String, sni: String = "", pin: String = ""): ProxyEntity =
+        ProxyEntity().putBean(AnyTLSBean().apply {
+            initializeDefaultValues()
+            name = "fixture"
+            serverAddress = host
+            serverPort = 15009
+            password = "fixture-pass"
+            this.sni = sni
+            certificateSha256 = pin
+        })
 
-    private fun anyTls(server: String) = AnyTlsFixture(server)
-
-    private class AnyTlsFixture(private val server: String) {
-        fun entity(entryIp: String): ProxyEntity = ProxyEntity().apply {
-            type = ProxyEntity.TYPE_ANYTLS
-            anyTLSBean = moe.matsuri.nb4a.proxy.anytls.AnyTLSBean().apply {
-                initializeDefaultValues()
-                name = "fixture"
-                serverAddress = server
-                serverPort = 15009
-                password = "dummy"
-                sni = "sni.example.com"
-            }
-            this.entryIp = entryIp
+    @Test
+    fun privateEntryUsesIpButKeepsExplicitSniAndPin() {
+        val pin = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        val node = fixture("entry.example", "sni.example", pin)
+        for (universal in listOf(true, false)) {
+            val link = node.exportLink(universal, "192.0.2.9")
+            assertTrue(link.startsWith("sn://")) // AnyTLS with pin requires the universal form.
+            val decoded = parseUniversal(link) as AnyTLSBean
+            assertEquals("192.0.2.9", decoded.serverAddress)
+            assertEquals(15009, decoded.serverPort)
+            assertEquals("sni.example", decoded.sni)
+            assertEquals(pin, decoded.certificateSha256)
+            assertEquals("fixture-pass", decoded.password)
+            assertFalse(decoded.allowInsecure == true)
         }
+        assertEquals("entry.example", node.requireBean().serverAddress)
     }
 
     @Test
-    fun privateEntryDomainIsExportedAsResolvedIp() {
-        val entity = anyTls("27a57b10-a7d0-45d2-b28e-4d361c4519f6.csmmdglwhg.example").entity("212.87.192.20")
-        val link = entity.exportLink(universal = true)
-        assertTrue("link should carry the IP: $link", link.contains("212.87.192.20"))
-        assertTrue("link must not leak the private host: $link", !link.contains("csmmdglwhg"))
-        // 导出后节点本身必须还原，不能影响卡片与连接
-        assertEquals(
-            "27a57b10-a7d0-45d2-b28e-4d361c4519f6.csmmdglwhg.example",
-            entity.requireBean().serverAddress,
-        )
+    fun ipv6KeepsImplicitTlsNameInStandardLink() {
+        val node = fixture("entry.example")
+        val link = node.exportLink(false, "2001:db8::9")
+        assertTrue(link.contains("[2001:db8::9]:15009"))
+        val decoded = parseAnytls(link)
+        assertEquals("2001:db8::9", decoded.serverAddress)
+        assertEquals("entry.example", decoded.sni)
+        assertEquals("", node.anyTLSBean!!.sni)
     }
 
     @Test
-    fun publicHostWithoutResolutionStaysUntouched() {
-        val entity = anyTls("public.example.com").entity("")
-        val link = entity.exportLink(universal = true)
-        assertTrue(link.contains("public.example.com"))
+    fun unknownOrInvalidAnswerAndLiteralNodesRemainUnchanged() {
+        val hostname = fixture("entry.example").apply { entryIp = "192.0.2.10" }
+        assertEquals(hostname.toStdLink(), hostname.exportLink(false))
+        assertEquals(hostname.toStdLink(), hostname.exportLink(false, "not-an-ip"))
+        val literal = fixture("198.51.100.9")
+        assertEquals(literal.toStdLink(), literal.exportLink(false, "203.0.113.7"))
     }
 
     @Test
-    fun ipLiteralNodeIsNeverRewritten() {
-        val entity = anyTls("198.51.100.9").entity("203.0.113.7")
-        val link = entity.exportLink(universal = false)
-        assertTrue(link.contains("198.51.100.9"))
-        assertTrue(!link.contains("203.0.113.7"))
+    fun resolvesOnlyConfiguredDnsAndReusesAnswerForRepeatedHost() = runBlocking {
+        val node = fixture("entry.example")
+        var requests = 0
+        val dns = listOf("https://resolver.example/dns-query", "https://backup.example/dns-query")
+        val resolve: suspend (String, List<String>) -> String? = { host, endpoints ->
+            requests++
+            assertEquals("entry.example", host)
+            assertEquals(dns, endpoints)
+            "192.0.2.9"
+        }
+        assertNull(NodeShareExport(emptyList(), resolve).entryAddress(node))
+        val batch = NodeShareExport(dns, resolve)
+        assertEquals("192.0.2.9", parseAnytls(batch.link(node)).serverAddress)
+        assertEquals("192.0.2.9", parseAnytls(batch.link(fixture("ENTRY.example"))).serverAddress)
+        assertEquals(1, requests)
+        assertEquals(0, batch.unresolvedCount)
     }
 
     @Test
-    fun invalidStoredValueIsIgnored() {
-        val entity = anyTls("private.example.com").entity("not-an-ip")
-        val link = entity.exportLink(universal = true)
-        assertTrue(link.contains("private.example.com"))
-    }
-
-    @Test
-    fun standardLinkAlsoUsesResolvedIp() {
-        val entity = anyTls("token.private.example.net").entity("212.87.192.20")
-        val std = entity.exportLink(universal = false)
-        assertTrue("standard link should use the IP: $std", std.contains("212.87.192.20"))
+    fun failedPrivateDnsKeepsOriginalLinkAndReportsPartialResult() = runBlocking {
+        val node = fixture("entry.example").apply { entryIp = "192.0.2.10" }
+        val export = NodeShareExport(listOf("https://resolver.example/dns-query")) { _, _ -> null }
+        assertEquals(node.toStdLink(), export.link(node))
+        assertEquals(1, export.unresolvedCount)
     }
 }

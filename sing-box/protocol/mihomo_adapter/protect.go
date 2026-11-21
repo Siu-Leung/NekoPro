@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -274,26 +272,10 @@ func NewOutboundResolver(ctx context.Context, dialOptions option.DialerOptions, 
 		if _, loaded := transports.Transport(dialOptions.DomainResolver.Server); !loaded {
 			return nil, errors.New("domain resolver not found: " + dialOptions.DomainResolver.Server)
 		}
-		// 镜像端点回退（2026-11-21）：NekoPro 组节点 DNS 支持多个端点。Kotlin 侧按
-		// dns-group-<gid>（主）、dns-group-<gid>-1、dns-group-<gid>-2…（镜像）命名注册
-		// transports。这里按前缀收集镜像 tag，主端点解析失败时依序回退，避免单一
-		// 私有 DoH 故障导致整组节点不可用。
-		var mirrorTags []string
-		for _, transport := range transports.Transports() {
-			tag := transport.Tag()
-			if tag == dialOptions.DomainResolver.Server {
-				continue
-			}
-			if isGroupDNSMirrorTag(dialOptions.DomainResolver.Server, tag) {
-				mirrorTags = append(mirrorTags, tag)
-			}
-		}
-		sort.Strings(mirrorTags)
 		return &outboundSingBoxResolver{
-			router:      dnsRouter,
-			transports:  transports,
-			serverTag:   dialOptions.DomainResolver.Server,
-			mirrorTags:  mirrorTags,
+			router:     dnsRouter,
+			transports: transports,
+			serverTag:  dialOptions.DomainResolver.Server,
 			queryOptions: adapter.DNSQueryOptions{
 				Strategy:       strategy,
 				LookupStrategy: strategy,
@@ -316,71 +298,22 @@ type outboundSingBoxResolver struct {
 	router       adapter.DNSRouter
 	transports   adapter.DNSTransportManager
 	serverTag    string
-	mirrorTags   []string
 	queryOptions adapter.DNSQueryOptions
 }
 
 var _ resolver.Resolver = (*outboundSingBoxResolver)(nil)
-
-// isGroupDNSMirrorTag 判定 candidate 是否是 primary 的镜像端点 tag。
-// 约定：主 tag dns-group-<gid>，镜像 dns-group-<gid>-1、dns-group-<gid>-2…
-// 数字后缀按字典序即数值序（个位数；组内镜像超过 9 个不现实）。
-func isGroupDNSMirrorTag(primary, candidate string) bool {
-	if !strings.HasPrefix(primary, "dns-group-") {
-		return false
-	}
-	if !strings.HasPrefix(candidate, primary+"-") {
-		return false
-	}
-	suffix := candidate[len(primary)+1:]
-	if suffix == "" {
-		return false
-	}
-	for _, ch := range suffix {
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// lookupTransport 按主端点→镜像端点的顺序查找可用 transport。
-func (r *outboundSingBoxResolver) lookupTransport(tag string) (adapter.DNSTransport, bool) {
-	tr, loaded := r.transports.Transport(tag)
-	if loaded {
-		return tr, true
-	}
-	for _, mirror := range r.mirrorTags {
-		tr, loaded = r.transports.Transport(mirror)
-		if loaded {
-			return tr, true
-		}
-	}
-	return nil, false
-}
-
-// resolveTransport 返回当前应使用的 transport；主端点缺失时自动落到镜像。
-func (r *outboundSingBoxResolver) resolveTransport() adapter.DNSTransport {
-	if r.serverTag != "" && r.transports != nil {
-		if tr, loaded := r.lookupTransport(r.serverTag); loaded {
-			return tr
-		}
-	}
-	return nil
-}
 
 func (r *outboundSingBoxResolver) resolveOptions(strategyOverride boxConstant.DomainStrategy) (adapter.DNSQueryOptions, error) {
 	if r.router == nil {
 		return adapter.DNSQueryOptions{}, resolver.ErrIPNotFound
 	}
 	opts := r.queryOptions
-	if tr := r.resolveTransport(); tr != nil {
-		opts.Transport = tr
-	} else if r.serverTag != "" {
-		if r.transports == nil {
+	if r.serverTag != "" {
+		transport, loaded := r.transports.Transport(r.serverTag)
+		if !loaded {
 			return adapter.DNSQueryOptions{}, resolver.ErrIPNotFound
 		}
-		return adapter.DNSQueryOptions{}, resolver.ErrIPNotFound
+		opts.Transport = transport
 	}
 	if strategyOverride != boxConstant.DomainStrategyAsIS {
 		opts.Strategy = strategyOverride
@@ -397,26 +330,7 @@ func (r *outboundSingBoxResolver) lookup(ctx context.Context, host string, strat
 	if err != nil {
 		return nil, err
 	}
-	// 主端点失败（网络/超时/SERVFAIL）时按序尝试镜像端点；全部失败才返回最后错误。
 	addrs, err := r.router.Lookup(ctx, host, opts)
-	if err != nil && len(r.mirrorTags) > 0 && r.serverTag != "" && r.transports != nil {
-		for _, mirror := range r.mirrorTags {
-			tr, loaded := r.transports.Transport(mirror)
-			if !loaded {
-				continue
-			}
-			retryOpts := opts
-			retryOpts.Transport = tr
-			var retryErr error
-			addrs, retryErr = r.router.Lookup(ctx, host, retryOpts)
-			if retryErr == nil && len(addrs) > 0 {
-				return addrs, nil
-			}
-			if retryErr != nil {
-				err = retryErr
-			}
-		}
-	}
 	if err != nil {
 		return nil, err
 	}

@@ -1,123 +1,116 @@
 package io.nekohasekai.sagernet.ipinfo
 
+import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 地址归属的纯 JVM 回归：DNS 报文构造/解析与脱敏判定都在本地完成，
- * 不需要网络、真实 DoH 或任何凭据。
- */
 class IpInfoRegressionTest {
-
     @Test
-    fun buildsAQueryWithValidWireLayout() {
-        val query = IpInfoStore.buildDnsQueryA("entry.example.com")
-        // 头部 12 字节：ID(2) flags(2) QD(2) AN(2) NS(2) AR(2)
-        assertEquals(0x01, query[2].toInt() and 0xFF)
-        assertEquals(0x00, query[3].toInt() and 0xFF)
-        assertEquals(1, query[5].toInt() and 0xFF)
-        // QNAME: 5"entry" 7"example" 3"com" 0
-        assertEquals(5, query[12].toInt())
-        assertEquals("entry".toByteArray().toList(), query.copyOfRange(13, 18).toList())
-        assertEquals(7, query[18].toInt())
-        assertEquals("example".toByteArray().toList(), query.copyOfRange(19, 26).toList())
-        assertEquals(3, query[26].toInt())
-        assertEquals("com".toByteArray().toList(), query.copyOfRange(27, 30).toList())
-        assertEquals(0, query[30].toInt())
-        // QTYPE=A(1) 在 31-32，QCLASS=IN(1) 在 33-34（高字节为 0）
-        assertEquals(0, query[31].toInt())
-        assertEquals(1, query[32].toInt())
-        assertEquals(0, query[33].toInt())
-        assertEquals(1, query[34].toInt())
-        assertEquals(35, query.size)
+    fun literalsDoNotRequireDns() {
+        assertTrue(IpInfoStore.isIpLiteral("192.0.2.19"))
+        assertTrue(IpInfoStore.isIpLiteral("[2001:db8::19]"))
+        assertFalse(IpInfoStore.isIpLiteral("node.example"))
+        assertFalse(IpInfoStore.isIpLiteral("192.0.2.999"))
+        assertFalse(IpInfoStore.isIpLiteral("192.0.2.19:443"))
+        assertFalse(IpInfoStore.isIpLiteral("fe80::1%iface"))
     }
 
     @Test
-    fun parsesFirstAnswerAddress() {
-        val response = dnsResponse("entry.example.com", byteArrayOf(212.toByte(), 87, 192.toByte(), 20))
-        assertEquals("212.87.192.20", IpInfoStore.parseFirstA(response))
+    fun validatesDnsResponseAndQuestion() {
+        val query = IpInfoStore.buildDnsQueryA("node.example")
+        assertEquals(1, query[2].toInt())
+        assertEquals(1, query[5].toInt())
+        val response = answer(query, 1, byteArrayOf(192.toByte(), 0, 2, 19))
+        assertEquals("192.0.2.19", IpInfoStore.parseAnswer(response, query))
+        assertNull(IpInfoStore.parseAnswer(response.copyOf(response.size - 1), query))
+        assertNull(IpInfoStore.parseAnswer(response.copyOf().apply { this[0] = (this[0].toInt() xor 1).toByte() }, query))
+        assertNull(IpInfoStore.parseAnswer(response.copyOf().apply { this[2] = 0x83.toByte() }, query))
+        assertNull(IpInfoStore.parseAnswer(response.copyOf().apply { this[13] = 'x'.code.toByte() }, query))
+        assertNull(IpInfoStore.parseAnswer(response.copyOf().apply { this[query.size + 1] = query.size.toByte() }, query))
     }
 
     @Test
-    fun rejectsMalformedAnswers() {
-        assertNull(IpInfoStore.parseFirstA(ByteArray(0)))
-        assertNull(IpInfoStore.parseFirstA(ByteArray(11)))
-        // 没有 answer
-        assertNull(IpInfoStore.parseFirstA(IpInfoStore.buildDnsQueryA("a.example")))
-        // answer 段被截断
-        val truncated = dnsResponse("a.example", byteArrayOf(1, 2, 3, 4)).copyOf(20)
-        assertNull(IpInfoStore.parseFirstA(truncated))
+    fun acceptsAaaaButNotUnrelatedAnswer() {
+        val query = IpInfoStore.buildQuery("node.example", 28)
+        val address = byteArrayOf(0x20, 0x01, 0x0d, 0xb8.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+        val response = answer(query, 28, address)
+        assertEquals("2001:db8::1", IpInfoStore.parseAnswer(response, query))
+        assertNull(IpInfoStore.parseAnswer(response.copyOf().apply { this[query.size + 1] = 17 }, query))
     }
 
     @Test
-    fun countryFlagIsSafeForOddInput() {
-        assertEquals("\uD83C\uDDED\uD83C\uDDF0", IpOwner.countryFlag("HK"))
-        assertEquals("\uD83C\uDDED\uD83C\uDDF0", IpOwner.countryFlag("hk"))
-        assertEquals("", IpOwner.countryFlag(""))
-        assertEquals("", IpOwner.countryFlag("H"))
+    fun groupEndpointsAreNeverSilentlyRewrittenToUntrustedDestinations() {
+        assertEquals("https://dns.example/dns-query", IpInfoStore.groupDohUrl("https://dns.example").toString())
+        assertEquals("https://dns.example/private-path", IpInfoStore.groupDohUrl("https+local://dns.example/private-path").toString())
+        assertEquals("https://dns.example/", IpInfoStore.groupDohUrl("https://dns.example/").toString())
+        assertNull(IpInfoStore.groupDohUrl("https://dns.example/path?secret=test"))
+        assertNull(IpInfoStore.groupDohUrl("https://user@dns.example/path"))
+        assertNull(IpInfoStore.groupDohUrl("tls://dns.example"))
+    }
+
+    @Test
+    fun hidesAddressesButKeepsProviderText() {
+        val hostname = "private.node.example"
+        assertEquals("Address hidden", AddressRedactor.cardTitle("$hostname:443", "", hostname, "Address hidden", true))
+        assertEquals("$hostname:443", AddressRedactor.cardTitle("$hostname:443", "", hostname, "Address hidden", false))
+        assertEquals("Named node", AddressRedactor.cardTitle("Named node", "Named node", hostname, "Address hidden", true))
+        assertEquals("•••", AddressRedactor.redactAddress("$hostname:443"))
+        assertEquals("•••", AddressRedactor.maskIp("192.0.2.19", true))
+        assertEquals("192.0.2.19", AddressRedactor.maskIp("192.0.2.19", false))
+        assertEquals(
+            "AS64500 Example ISP (•••) ••• ••• •••",
+            AddressRedactor.scrub(
+                "AS64500 Example ISP (192.0.2.19) [2001:db8::19] fe80::19%iface PRIVATE.NODE.EXAMPLE.",
+                hostname,
+            ),
+        )
+    }
+
+    @Test
+    fun validatesOwnerResponseAgainstRequestedAddress() {
+        val payload = """{"ip":"2001:db8::19","country_code":"HK","asn":64500,"asn_organization":"Example ISP"}"""
+            .encodeToByteArray()
+        val owner = IpInfoStore.parseOwner(payload, "2001:db8:0:0:0:0:0:19")
+        assertNotNull(owner)
+        assertTrue(owner!!.label().contains("AS64500 Example ISP"))
+        assertNull(IpInfoStore.parseOwner(payload, "2001:db8::20"))
+        assertNull(IpInfoStore.parseOwner("""{"ip":"example.invalid"}""".encodeToByteArray()))
         assertEquals("", IpOwner.countryFlag("香港"))
     }
 
     @Test
-    fun ownerLabelKeepsProviderAndPlace() {
-        val label = IpOwner("212.87.192.20", "HK", "Hong Kong", "AS13335", "Cloudflare, Inc.").label()
-        assertTrue(label.contains("HK"))
-        assertTrue(label.contains("AS13335"))
-        assertTrue(label.contains("Cloudflare, Inc."))
-        // 只有 IP 时标签为空——调用方据此隐藏该行而不是显示空白
-        assertEquals("", IpOwner("1.2.3.4").label())
+    fun testBoxHasOnlyPinnedOutboundAndRejectsUnprovableInputs() {
+        val generated = """
+            {"dns":{"servers":[]},"outbounds":[
+              {"tag":"proxy","type":"socks","server":"192.0.2.19","server_port":1080},
+              {"tag":"direct","type":"direct"},{"tag":"bypass","type":"direct"}
+            ],"route":{"final":"direct"}}
+        """.trimIndent()
+        val config = JsonParser.parseString(IpInfoStore.exitProbeConfig(generated, 12345, "fixture-only")!!).asJsonObject
+        assertEquals("proxy", config.getAsJsonObject("route").get("final").asString)
+        assertEquals(1, config.getAsJsonArray("outbounds").size())
+        assertEquals("socks", config.getAsJsonArray("outbounds")[0].asJsonObject.get("type").asString)
+        val inbound = config.getAsJsonArray("inbounds")[0].asJsonObject
+        assertEquals("127.0.0.1", inbound.get("listen").asString)
+        assertEquals("fixture-only", inbound.getAsJsonArray("users")[0].asJsonObject.get("password").asString)
+        assertTrue(config.getAsJsonObject("log").get("disabled").asBoolean)
+        assertNull(IpInfoStore.exitProbeConfig(generated.replace("\"socks\"", "\"direct\""), 12345, "fixture-only"))
+        assertNull(IpInfoStore.exitProbeConfig(generated.replace("\"socks\"", "\"selector\""), 12345, "fixture-only"))
+        assertNull(IpInfoStore.exitProbeConfig(
+            generated.replace("\"server_port\":1080", "\"server_port\":1080,\"detour\":\"direct\""),
+            12345,
+            "fixture-only",
+        ))
     }
 
-    @Test
-    fun distinguishesLiteralsFromHostnames() {
-        assertTrue(IpInfoStore.isIpLiteral("212.87.192.20"))
-        assertTrue(IpInfoStore.isIpLiteral("2606:4700::1111"))
-        assertTrue(IpInfoStore.isIpLiteral("[2606:4700::1111]"))
-        assertTrue(!IpInfoStore.isIpLiteral("entry.example.com"))
-        assertTrue(!IpInfoStore.isIpLiteral(""))
-    }
-
-    @Test
-    fun redactsDomainsButKeepsPortAndTld() {
-        assertEquals(
-            "27a5****.***.sbs:15009",
-            AddressRedactor.redactAddress("27a57b10-a7d0-45d2-b28e-4d361c4519f6.csmmdglwhg.sbs:15009"),
-        )
-        // 短标签整体遮蔽，避免只剩一两个字符仍可辨认
-        assertEquals("****.***.com", AddressRedactor.redactAddress("ab.example.com"))
-        // 端口不参与遮蔽
-        assertTrue(AddressRedactor.redactAddress("node.example.net:443").endsWith(":443"))
-    }
-
-    @Test
-    fun redactsIpv4AndIpv6KeepingLeadingOctets() {
-        assertEquals("212.87.*.*", AddressRedactor.redactAddress("212.87.192.20"))
-        assertEquals("212.87.*.*:443", AddressRedactor.redactAddress("212.87.192.20:443"))
-        assertEquals("2606::***", AddressRedactor.redactAddress("2606:4700::1111"))
-        assertEquals("2606::***:443", AddressRedactor.redactAddress("[2606:4700::1111]:443"))
-    }
-
-    @Test
-    fun maskIpHonoursToggleAndNeverTouchesBlankOrProvider() {
-        assertEquals("212.87.192.20", AddressRedactor.maskIp("212.87.192.20", false))
-        assertEquals("212.87.*.*", AddressRedactor.maskIp("212.87.192.20", true))
-        assertEquals("", AddressRedactor.maskIp("", true))
-        // 服务商标签由调用方拼接，这里不可能出现
-        assertEquals("AS13335 Cloudflare", AddressRedactor.maskIp("AS13335 Cloudflare", true))
-    }
-
-    /** 最小 A 应答：头部 + 问题段 + 一条压缩指针答案。 */
-    private fun dnsResponse(host: String, address: ByteArray): ByteArray {
-        val question = IpInfoStore.buildDnsQueryA(host).copyOfRange(12, IpInfoStore.buildDnsQueryA(host).size)
-        val out = ArrayList<Byte>()
-        // flags: response + recursion available, QD=1, AN=1
-        listOf(0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00).forEach { out.add(it.toByte()) }
-        question.forEach { out.add(it) }
-        // 指针指向 offset 12，TYPE=A CLASS=IN TTL=60 RDLENGTH=4
-        listOf(0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04).forEach { out.add(it.toByte()) }
-        address.forEach { out.add(it) }
-        return out.toByteArray()
-    }
+    private fun answer(query: ByteArray, type: Int, address: ByteArray): ByteArray =
+        query.copyOf().apply {
+            this[2] = 0x81.toByte()
+            this[3] = 0x80.toByte()
+            this[7] = 1
+        } + byteArrayOf(0xc0.toByte(), 12, 0, type.toByte(), 0, 1, 0, 0, 0, 60, 0, address.size.toByte()) + address
 }

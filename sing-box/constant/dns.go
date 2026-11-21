@@ -20,6 +20,7 @@ const (
 	DNSTypeTCP         = "tcp"
 	DNSTypeTLS         = "tls"
 	DNSTypeHTTPS       = "https"
+	DNSTypeFallback    = "fallback"
 	DNSTypeQUIC        = "quic"
 	DNSTypeHTTP3       = "h3"
 	DNSTypeLocal       = "local"

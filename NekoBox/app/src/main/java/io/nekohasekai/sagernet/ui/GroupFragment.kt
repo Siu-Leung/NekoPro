@@ -26,7 +26,15 @@ import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
+import androidx.lifecycle.lifecycleScope
+import io.nekohasekai.sagernet.ipinfo.NodeShareExport
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.Util
 import moe.matsuri.nb4a.utils.toBytesString
 import java.lang.NumberFormatException
@@ -130,33 +138,66 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         return true
     }
 
-    private lateinit var selectedGroup: ProxyGroup
+    private var pendingExportGroupId: Long? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingExportGroupId = savedInstanceState?.getLong(EXPORT_GROUP_STATE)?.takeIf { it > 0L }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingExportGroupId?.let { outState.putLong(EXPORT_GROUP_STATE, it) }
+    }
+
+    private companion object {
+        const val EXPORT_GROUP_STATE = "groupExport.id"
+    }
+
+    /** Build a single resolver snapshot for a deliberate group export. */
+    private suspend fun groupExport(groupId: Long): Pair<String, Int> =
+        withContext(Dispatchers.IO) {
+            val group = SagerDatabase.groupDao.getById(groupId)
+                ?: error("The selected group no longer exists")
+            val snapshot = NodeShareExport(group.effectiveNodeDnsList())
+            val links = mutableListOf<String>()
+            for (node in SagerDatabase.proxyDao.getByGroup(groupId)) {
+                currentCoroutineContext().ensureActive()
+                links += snapshot.link(node)
+            }
+            links.joinToString("\n") to snapshot.unresolvedCount
+        }
 
     private val exportProfiles =
         registerForActivityResult(ActivityResultContracts.CreateDocument()) { data ->
-            if (data != null) {
-                runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(selectedGroup.id)
-                    val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
-                    try {
-                        (requireActivity() as MainActivity).contentResolver.openOutputStream(
-                            data
-                        )!!.bufferedWriter().use {
-                            it.write(links)
-                        }
-                        onMainDispatcher {
-                            snackbar(getString(R.string.action_export_msg)).show()
-                        }
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                        onMainDispatcher {
-                            snackbar(e.readableMessage).show()
-                        }
+            val groupId = pendingExportGroupId
+            pendingExportGroupId = null
+            if (data == null || groupId == null) return@registerForActivityResult
+            val resolver = requireContext().contentResolver
+            viewLifecycleOwner.lifecycleScope.launch {
+                try {
+                    val (links, unresolved) = groupExport(groupId)
+                    withContext(Dispatchers.IO) {
+                        checkNotNull(resolver.openOutputStream(data)).bufferedWriter().use { it.write(links) }
                     }
-
+                    if (isAdded) showGroupExportResult(true, unresolved)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    if (isAdded) showGroupExportResult(false, 0)
                 }
             }
         }
+
+    /** Report partial export separately from a successful file or clipboard operation. */
+    private fun showGroupExportResult(success: Boolean, unresolved: Int) {
+        val message = when {
+            !success -> R.string.action_export_err
+            unresolved > 0 -> R.string.share_entry_ip_unavailable
+            else -> R.string.action_export_msg
+        }
+        snackbar(getString(message)).show()
+    }
 
     inner class GroupAdapter : RecyclerView.Adapter<GroupHolder>(),
         GroupManager.Listener,
@@ -347,17 +388,21 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 }
 
                 R.id.action_export_clipboard -> {
-                    runOnDefaultDispatcher {
-                        val profiles = SagerDatabase.proxyDao.getByGroup(selectedGroup.id)
-                        val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
-                        onMainDispatcher {
-                            SagerNet.trySetPrimaryClip(links)
-                            snackbar(getString(R.string.copy_toast_msg)).show()
+                    val groupId = proxyGroup.id
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        try {
+                            val (links, unresolved) = groupExport(groupId)
+                            if (isAdded) showGroupExportResult(SagerNet.trySetPrimaryClip(links), unresolved)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            if (isAdded) showGroupExportResult(false, 0)
                         }
                     }
                 }
 
                 R.id.action_export_file -> {
+                    pendingExportGroupId = proxyGroup.id
                     startFilesForResult(exportProfiles, "profiles_${proxyGroup.displayName()}.txt")
                 }
 
@@ -398,8 +443,6 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
 
             optionsButton.setOnClickListener {
-                selectedGroup = proxyGroup
-
                 val popup = PopupMenu(requireContext(), it)
                 popup.menuInflater.inflate(R.menu.group_action_menu, popup.menu)
 

@@ -176,6 +176,10 @@ func (o *DNSServerAddressOptions) ReplaceServerOptions(options ServerOptions) {
 	*o = DNSServerAddressOptions(options)
 }
 
+type FallbackDNSServerOptions struct {
+	Servers []string `json:"servers" reference:"dns_server"`
+}
+
 type HostsDNSServerOptions struct {
 	Path       badoption.Listable[string]                                `json:"path,omitempty"`
 	Predefined *badjson.TypedMap[string, badoption.Listable[netip.Addr]] `json:"predefined,omitempty"`

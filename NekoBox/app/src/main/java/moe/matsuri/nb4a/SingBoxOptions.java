@@ -349,6 +349,8 @@ public class SingBoxOptions {
 
         public String tag;
 
+        public List<String> servers;
+
         public String server;
 
         public Integer server_port;

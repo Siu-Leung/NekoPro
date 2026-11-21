@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="group_dns_candidates_title">订阅 DNS 候选</string>
+    <string name="group_dns_candidates_summary">从原订阅读取候选，并选择仅供本组使用的解析器</string>
+    <string name="group_dns_candidates_loading">正在从订阅读取 DNS 设置…</string>
+    <string name="group_dns_candidates_load">读取候选</string>
+    <string name="group_dns_candidates_failed">无法读取订阅，原节点和 DNS 未更改。</string>
+    <string name="group_dns_candidates_malformed">Clash 配置或其中的 DNS 格式无效，原节点和 DNS 未更改。</string>
+    <string name="group_dns_candidates_no_dns_meta">以 Clash Meta 请求原订阅，未返回 Clash DNS 设置。该链接可能仅提供节点；请使用完整 Clash 配置，或手填「节点域名 DNS」。</string>
+    <string name="group_dns_candidates_no_dns_file">所选文件没有 Clash DNS 设置。请使用完整 Clash 配置，或手填「节点域名 DNS」。</string>
+    <string name="group_dns_candidates_empty">Clash DNS 配置中没有可显示的解析器条目。</string>
+    <string name="group_dns_candidates_auto_missing">订阅未提供可自动采纳的节点解析器，已保留原节点和 DNS。请打开「订阅 DNS 候选」或手填「节点域名 DNS」。</string>
+    <string name="group_dns_candidates_refresh_failed">无法下载或解析订阅，已保留原节点和 DNS。</string>
+    <string name="group_dns_candidates_help">按尝试顺序勾选可信端点。「使用所选」会替换本组的「节点域名 DNS」，应用分组设置后保存。不会导入 Clash 规则或全局 DNS。地址可能含有私密凭据。</string>
+    <string name="group_dns_candidates_truncated">仅显示前 %1$d 条。</string>
+    <string name="group_dns_candidates_order">%1$d. %2$s</string>
+    <string name="group_dns_candidates_policy">策略：%1$s</string>
+    <string name="group_dns_candidates_use">使用所选</string>
+    <string name="group_dns_candidates_self">不可选择：指向 Clash 本地监听</string>
+    <string name="group_dns_candidates_local">不可选择：依赖本机系统或使用本地、保留地址</string>
+    <string name="group_dns_candidates_unsupported">不可选择：不支持的 DNS 协议或地址形式</string>
+    <string name="group_dns_candidates_unsafe">不可选择：含路由参数、主机凭据、查询参数，或地址含义不明确</string>
+    <string name="group_dns_candidates_invalid">不可选择：无效 DNS 条目</string>
+    <string name="group_dns_candidates_unavailable">%1$s\n%2$s</string>
+</resources>

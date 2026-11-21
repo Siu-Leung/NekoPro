@@ -76,6 +76,13 @@
             app:title="@string/subscription_auto_adopt_node_dns" />
 
         <Preference
+            app:icon="@drawable/ic_action_dns"
+            app:key="groupDnsCandidates"
+            app:persistent="false"
+            app:summary="@string/group_dns_candidates_summary"
+            app:title="@string/group_dns_candidates_title" />
+
+        <Preference
             app:key="subscriptionNodeDnsStatus"
             app:selectable="false"
             app:title="@string/subscription_node_dns_status" />

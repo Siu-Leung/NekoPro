@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="share_entry_ip_unavailable">Could not replace one or more entry addresses via the group DNS. Export kept the original hostnames.</string>
+</resources>

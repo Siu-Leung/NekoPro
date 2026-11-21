@@ -476,9 +476,9 @@ fun buildConfig(
                     _hack_config_map["domain_strategy"] =
                         if (forTest) "" else defaultServerDomainStrategy
 
-                    // Explicit resolver also applies in URL tests and on detoured chain hops.
-                    // 多端点容错：第一行为主端点，其余为镜像（Go 侧按 tag 后缀回退）。
-                    if (groupNodeDnsList.isNotEmpty() && !proxyEntity.needExternal()) {
+                    // Use the same group resolver for native, bridged, and test dialers.
+                    // A pinned export address no longer needs the resolver or its private URL.
+                    if (groupNodeDnsList.isNotEmpty() && !proxyEntity.needExternal() && (!forExport || entryIsDomain)) {
                         _hack_config_map["domain_resolver"] = try {
                             groupNodeDnsPlan.bind(proxyEntity.groupId, groupNodeDnsList, entryHost)
                         } catch (_: IllegalArgumentException) {

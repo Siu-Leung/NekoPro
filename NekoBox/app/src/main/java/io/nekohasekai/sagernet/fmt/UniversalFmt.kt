@@ -3,34 +3,38 @@ package io.nekohasekai.sagernet.fmt
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import moe.matsuri.nb4a.utils.Util
+import java.util.Base64
+
+/** Preserve the existing unpadded URL-safe wire encoding, independently of Android UI APIs. */
+private fun encodeUniversalPayload(data: ByteArray): String =
+    Base64.getUrlEncoder().withoutPadding().encodeToString(Util.zlibCompress(data, 9))
+
+/** Accept the URL-safe encoding and the alphabet/padding used by older exporters. */
+private fun decodeUniversalPayload(encoded: String): ByteArray =
+    Base64.getUrlDecoder().decode(encoded.filterNot(Char::isWhitespace).replace('+', '-').replace('/', '_'))
 
 fun parseUniversal(link: String): AbstractBean {
     return if (link.contains("?")) {
         val type = link.substringAfter("sn://").substringBefore("?")
         ProxyEntity(type = TypeMap[type] ?: error("Type $type not found")).apply {
-            putByteArray(Util.zlibDecompress(Util.b64Decode(link.substringAfter("?"))))
+            putByteArray(Util.zlibDecompress(decodeUniversalPayload(link.substringAfter("?"))))
         }.requireBean()
     } else {
         val type = link.substringAfter("sn://").substringBefore(":")
         ProxyEntity(type = TypeMap[type] ?: error("Type $type not found")).apply {
-            putByteArray(Util.b64Decode(link.substringAfter(":").substringAfter(":")))
+            putByteArray(decodeUniversalPayload(link.substringAfter(":").substringAfter(":")))
         }.requireBean()
     }
 }
 
+/** Export only the node bean; the group's private DNS does not travel in a node link. */
 fun AbstractBean.toUniversalLink(): String {
-    var link = "sn://"
-    link += TypeMap.reversed[ProxyEntity().putBean(this).type]
-    link += "?"
-    link += Util.b64EncodeUrlSafe(Util.zlibCompress(KryoConverters.serialize(this), 9))
-    return link
+    val type = TypeMap.reversed[ProxyEntity().putBean(this).type]
+    return "sn://$type?${encodeUniversalPayload(KryoConverters.serialize(this))}"
 }
 
-
+/** Export the subscription descriptor without its local DNS settings. */
 fun ProxyGroup.toUniversalLink(): String {
-    var link = "sn://subscription?"
-    export = true
-    link += Util.b64EncodeUrlSafe(Util.zlibCompress(KryoConverters.serialize(this), 9))
-    export = false
-    return link
+    val share = copy().apply { export = true }
+    return "sn://subscription?${encodeUniversalPayload(KryoConverters.serialize(share))}"
 }

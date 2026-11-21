@@ -28,7 +28,6 @@ import org.ini4j.Ini
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
-import moe.matsuri.nb4a.SingBoxDnsServerParser
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
@@ -43,7 +42,60 @@ import kotlinx.coroutines.ensureActive
 @Suppress("EXPERIMENTAL_API_USAGE")
 object RawUpdater : GroupUpdater() {
 
+    private const val CLASH_META_USER_AGENT = "clash-meta"
+
     @SuppressLint("Recycle")
+    private fun readSubscriptionFile(link: String): String =
+        app.contentResolver.openInputStream(link.toUri())?.bufferedReader()?.use { reader ->
+            val maxChars = 16 * 1024 * 1024
+            val text = StringBuilder()
+            val buffer = CharArray(8192)
+            var count: Int
+            while (reader.read(buffer).also { count = it } != -1) {
+                require(text.length + count <= maxChars) { "Subscription file exceeds 16 MB limit" }
+                text.append(buffer, 0, count)
+            }
+            text.toString()
+        } ?: error(app.getString(R.string.no_proxies_found_in_subscription))
+
+    private inline fun <T> withSubscriptionResponse(
+        link: String, userAgent: String, forceProxy: Boolean, block: (libcore.HTTPResponse) -> T,
+    ): T {
+        val client = Libcore.newHttpClient()
+        try {
+            if (forceProxy) {
+                client.forceSocks5(DataStore.mixedPort)
+            } else {
+                client.trySocks5(DataStore.mixedPort)
+                client.tryH3Direct()
+            }
+            if (DataStore.appTLSVersion == "1.3") client.restrictedTLS()
+            val response = client.newRequest().apply {
+                if (DataStore.allowInsecureOnRequest) allowInsecure()
+                setURL(link)
+                setUserAgent(userAgent)
+            }.execute()
+            return block(response)
+        } finally {
+            client.close()
+        }
+    }
+
+    /** Read-only, on demand: same source/transport as refresh, without committing a node snapshot. */
+    internal suspend fun inspectSubscriptionDns(link: String): ClashDnsCandidates.Profile {
+        currentCoroutineContext().ensureActive()
+        val profile = if (link.startsWith("content://")) {
+            ClashDnsCandidates.parse(readSubscriptionFile(link))
+        } else {
+            require(link.startsWith("http://", true) || link.startsWith("https://", true))
+            withSubscriptionResponse(link, CLASH_META_USER_AGENT, DataStore.serviceState.connected) {
+                ClashDnsCandidates.parse(Util.getStringBox(it.contentString))
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        return profile
+    }
+
     override suspend fun doUpdate(
         proxyGroup: ProxyGroup,
         subscription: SubscriptionBean,
@@ -51,33 +103,33 @@ object RawUpdater : GroupUpdater() {
         byUser: Boolean
     ) {
 
-        val link = subscription.link
+        val link = subscription.link.orEmpty()
         // An explicit group DNS is sufficient; a nodes-only subscription can still refresh.
         val requireAdoptedDns = proxyGroup.requiresNodeDnsAdoption()
         val savedManualDns = proxyGroup.manualNodeDns()
         var adoptedNodeDnsCandidate: List<String> = emptyList()
         var proxies: List<AbstractBean>
-        if (link!!.startsWith("content://")) {
-            val maxChars = 16 * 1024 * 1024
-            val contentText = app.contentResolver.openInputStream(link!!.toUri())?.use { input ->
-                val reader = input.bufferedReader()
-                val sb = StringBuilder()
-                val buf = CharArray(8192)
-                var read: Int
-                while (reader.read(buf).also { read = it } != -1) {
-                    if (sb.length + read > maxChars) {
-                        error("Subscription file exceeds 16 MB limit")
-                    }
-                    sb.append(buf, 0, read)
-                }
-                sb.toString()
+        if (link.startsWith("content://")) {
+            val contentText = try {
+                readSubscriptionFile(link)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                error(app.getString(R.string.group_dns_candidates_failed))
             }
-
-            proxies = contentText?.let { parseSubscription(it)?.takeIf(List<AbstractBean>::isNotEmpty) }
-                ?: error(app.getString(R.string.no_proxies_found_in_subscription))
+            proxies = try {
+                parseSubscription(contentText).orEmpty()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SubscriptionFoundException) {
+                throw e
+            } catch (_: Exception) {
+                error(app.getString(R.string.group_dns_candidates_refresh_failed))
+            }
+            if (proxies.isEmpty()) error(app.getString(R.string.no_proxies_found_in_subscription))
             if (requireAdoptedDns) {
                 adoptedNodeDnsCandidate = extractClashProxyServerNameservers(contentText)
-                if (adoptedNodeDnsCandidate.isEmpty()) error(app.getString(R.string.group_node_dns_refresh_missing))
+                if (adoptedNodeDnsCandidate.isEmpty()) error(app.getString(R.string.group_dns_candidates_auto_missing))
             }
         } else {
             // Keep both Clash UAs for automatic subscription DNS. Prefer Clash with a manual
@@ -85,18 +137,17 @@ object RawUpdater : GroupUpdater() {
             val candidateUserAgents = buildList {
                 subscription.customUserAgent?.takeIf { it.isNotBlank() }?.let { add(it) }
                 if (requireAdoptedDns || savedManualDns != null) {
-                    add("clash-meta")
+                    add(CLASH_META_USER_AGENT)
                     add("FlClash/v0.9.4 clash-verge Platform/android")
                 }
                 if (!requireAdoptedDns) {
                     add(USER_AGENT)
-                    add("clash-meta")
+                    add(CLASH_META_USER_AGENT)
                     add("v2rayN/7.8.2")
                     add("sing-box/1.14.0")
                 }
             }.distinct()
 
-            var lastError: Throwable? = null
             var validNodesWithoutDns = false
             var lastUserinfo = ""
             var lastDisposition = ""
@@ -106,62 +157,41 @@ object RawUpdater : GroupUpdater() {
                 (!byUser && subscription.updateWhenConnectedOnly == true)
 
             for (candidate in candidateUserAgents) {
-                val client = Libcore.newHttpClient().apply {
-                    if (forceProxy) {
-                        forceSocks5(DataStore.mixedPort)
-                    } else {
-                        trySocks5(DataStore.mixedPort)
-                        tryH3Direct()
-                    }
-                    when (DataStore.appTLSVersion) {
-                        "1.3" -> restrictedTLS()
-                    }
-                }
                 try {
-                    val response = client.newRequest().apply {
-                        if (DataStore.allowInsecureOnRequest) {
-                            allowInsecure()
-                        }
-                        setURL(subscription.link)
-                        setUserAgent(candidate)
-                    }.execute()
-                    val responseText = Util.getStringBox(response.contentString)
-                    val parsed = parseSubscription(responseText)
-                    if (parsed.isNullOrEmpty()) {
-                        throw IllegalStateException("no proxies found with UA: $candidate")
-                    }
-                    val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameservers(responseText) else emptyList()
-                    if (requireAdoptedDns && candidateDns.isEmpty()) {
-                        validNodesWithoutDns = true
-                        continue
-                    }
+                    val accepted = withSubscriptionResponse(link, candidate, forceProxy) { response ->
+                        val responseText = Util.getStringBox(response.contentString)
+                        val parsed = parseSubscription(responseText).orEmpty()
+                        if (parsed.isEmpty()) return@withSubscriptionResponse false
 
-                    Util.getStringBox(response.getHeader("Subscription-Userinfo"))
-                        .takeIf { it.isNotBlank() }?.let { lastUserinfo = it }
-                    if (proxyGroup.name?.startsWith("Subscription #") == true) {
-                        val remoteName = Util.getStringBox(response.getHeader("content-disposition"))
-                        if (remoteName.isNotBlank()) {
-                            lastDisposition = remoteName
+                        val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameservers(responseText)
+                        else emptyList()
+                        if (requireAdoptedDns && candidateDns.isEmpty()) {
+                            validNodesWithoutDns = true
+                            return@withSubscriptionResponse false
                         }
+
+                        lastUserinfo = Util.getStringBox(response.getHeader("Subscription-Userinfo"))
+                        if (proxyGroup.name?.startsWith("Subscription #") == true) {
+                            lastDisposition = Util.getStringBox(response.getHeader("content-disposition"))
+                        }
+                        proxies = parsed
+                        adoptedNodeDnsCandidate = candidateDns
+                        true
                     }
-                    proxies = parsed
-                    adoptedNodeDnsCandidate = candidateDns
-                    break
+                    if (accepted) break
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: SubscriptionFoundException) {
                     throw e
-                } catch (e: Throwable) {
-                    lastError = e
-                    Logs.d("Subscription download failed with UA $candidate: ${e.message}")
-                } finally {
-                    client.close()
+                } catch (_: Exception) {
+                    // Network and parse exceptions can include the subscription URL or YAML content.
+                    Logs.d("Subscription response could not be downloaded or parsed")
                 }
             }
 
             if (proxies.isEmpty()) {
-                if (validNodesWithoutDns) error(app.getString(R.string.group_node_dns_refresh_missing))
-                throw (lastError ?: error(app.getString(R.string.no_proxies_found)))
+                if (validNodesWithoutDns) error(app.getString(R.string.group_dns_candidates_auto_missing))
+                error(app.getString(R.string.group_dns_candidates_refresh_failed))
             }
 
             subscription.subscriptionUserinfo = lastUserinfo
@@ -333,87 +363,8 @@ object RawUpdater : GroupUpdater() {
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? =
         parseRaw(text, fileName, forSubscription = false)
 
-    /**
-     * Read usable node resolvers from a Clash snapshot, never ordinary website DNS.
-     * 返回顺序与配置一致（主端点在前，镜像在后）。proxy-server-nameserver 是回环/自指
-     * 指针（Kuromis 类完整配置指向 Clash 自身监听）时，回退采纳 dns.nameserver 中同一
-     * 私有服务的多域名镜像端点，全部返回供 Go 侧逐个回退。
-     */
-    internal fun extractClashProxyServerNameservers(text: String): List<String> {
-        if (!clashProxiesKey.containsMatchIn(text)) return emptyList()
-        val loaderOptions = LoaderOptions().apply {
-            codePointLimit = 8 * 1024 * 1024
-        }
-        val yaml = runCatching {
-            Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<*, *>
-        }.getOrNull() ?: return emptyList()
-        val dns = yaml["dns"] as? Map<*, *> ?: return emptyList()
-
-        // 1) proxy-server-nameserver：直接的节点解析器指针。接受单一可移植端点或
-        //    一组彼此独立的可移植端点（罕见；一般是一个）。
-        val psnRaw = (dns["proxy-server-nameserver"] as? List<*>)
-            ?: (dns["proxy-server-nameserver"] as? String)?.let { listOf(it) }
-        val direct = extractPortableEndpointList(psnRaw, includeMirrors = false)
-        if (direct.isNotEmpty()) return direct
-
-        // 2) 回退：仅当 proxy-server-nameserver 明确指向本机（udp://127.0.0.1:xxxx /
-        //    localhost，即 Clash 自身 DNS 监听）时，才采纳 dns.nameserver 的镜像端点组。
-        //    普通订阅没有 psn 时绝不碰 nameserver——那是网站 DNS，不是节点解析器。
-        val selfPointing = psnRaw?.map { (it as? String)?.trim() }
-            ?.filter { !it.isNullOrEmpty() }?.map { it!! }
-            ?.all { entry ->
-                if (entry.contains('?') || entry.contains('#')) return@all false
-                runCatching {
-                    val transport = SingBoxDnsServerParser.parseGroupNodeDns(entry, "probe-node-dns")
-                    val host = transport.server?.trimEnd('.')?.lowercase() ?: return@runCatching false
-                    host == "localhost" || host.endsWith(".localhost") || host == "::1" ||
-                        host == "0.0.0.0" ||
-                        (SingBoxDnsServerParser.isIpLiteral(host) && host.startsWith("127."))
-                }.getOrDefault(false)
-            } == true && !psnRaw.isNullOrEmpty()
-        if (!selfPointing) return emptyList()
-        return extractPortableEndpointList(dns["nameserver"] as? List<*>, includeMirrors = true)
-    }
-
-    /**
-     * 从一组 Clash DNS 端点字符串中提取可移植解析器。
-     * @param includeMirrors true 时允许返回多个端点（要求同一服务镜像：type+port+path
-     *   完全一致，path 常含每用户 UUID）；false 时只接受单一端点。
-     * 永远拒绝：裸词（明文 UDP 域名歧义）、system/local/DHCP、回环、query/fragment。
-     */
-    private fun extractPortableEndpointList(raw: List<*>?, includeMirrors: Boolean): List<String> {
-        val candidates = raw?.map { (it as? String)?.trim() }?.filter { !it.isNullOrEmpty() }?.map { it!! }
-            ?: return emptyList()
-        data class Endpoint(val raw: String, val type: String, val host: String, val port: Int?, val path: String?)
-
-        val endpoints = candidates.mapNotNull { entry ->
-            // Bare words are parsed as plaintext UDP hosts. Only an explicit transport or a
-            // literal IP is an unambiguous, portable resolver; never adopt an unknown hostname.
-            if (!entry.contains("://") && !SingBoxDnsServerParser.isIpLiteral(entry)) return@mapNotNull null
-            if (entry.contains('?') || entry.contains('#')) return@mapNotNull null
-            // 非法端口/authority 等直接跳过该端点，不让一条坏记录毁掉整组采纳。
-            val transport = runCatching {
-                SingBoxDnsServerParser.parseGroupNodeDns(entry, "probe-node-dns")
-            }.getOrNull() ?: return@mapNotNull null
-            val host = transport.server?.trimEnd('.')?.lowercase() ?: return@mapNotNull null
-            val loopback = host == "localhost" || host.endsWith(".localhost") || host == "::1" ||
-                host == "0.0.0.0" ||
-                (SingBoxDnsServerParser.isIpLiteral(host) && host.startsWith("127."))
-            if (loopback) return@mapNotNull null
-            Endpoint(entry, transport.type ?: "", host, transport.server_port,
-                transport.path?.takeIf { it.isNotBlank() })
-        }.distinctBy { it.raw }
-        if (endpoints.isEmpty()) return emptyList()
-        if (!includeMirrors) {
-            return if (endpoints.size == 1) listOf(endpoints[0].raw) else emptyList()
-        }
-        // 同一服务镜像判定：type+port+path 全一致。path 常含每用户 UUID，是比域名更强的身份。
-        val first = endpoints[0]
-        val sameService = endpoints.all {
-            it.type == first.type && it.port == first.port && it.path == first.path
-        }
-        return if (sameService) endpoints.map { it.raw } else emptyList()
-    }
+    /** Only the explicit node resolver or a proven listener mirror set is eligible. */
+    internal fun extractClashProxyServerNameservers(text: String): List<String> = ClashDnsCandidates.parse(text).auto
 
     internal suspend fun parseSubscription(text: String): List<AbstractBean>? {
         currentCoroutineContext().ensureActive()
@@ -1103,7 +1054,7 @@ object RawUpdater : GroupUpdater() {
         } catch (e: SubscriptionFoundException) {
             throw e
         } catch (e: Exception) {
-            Logs.d(e.message ?: "Base64 decode fallback")
+            if (!forSubscription) Logs.d(e.message ?: "Base64 decode fallback")
         }
 
         try {

@@ -296,7 +296,10 @@ data class ProxyEntity(
         }
     }
 
-    fun toStdLink(compact: Boolean = false): String = with(requireBean()) {
+    fun toStdLink(compact: Boolean = false): String = standardLink(requireBean())
+
+    /** Encode a standard link from the original node or an independent export copy. */
+    private fun standardLink(bean: AbstractBean): String = with(bean) {
         when (this) {
             is SOCKSBean -> toUri()
             is HttpBean -> toUri()
@@ -318,41 +321,23 @@ data class ProxyEntity(
     }
 
     /**
-     * 导出/分享用的链接。
-     *
-     * 私有入口域名（Kuromis 这类）通常只能被机场自己的 DoH 解析：直接导出域名，
-     * 对方导入后既解析不了也连不上。此时改用已探测到的真实入口 IP，
-     * 让链接在别人机器上可以直接使用。没有可用 IP 时保持原样导出。
-     *
-     * @param universal true 导出通用链接，false 导出标准协议链接
+     * Encode a node share link. [privateDnsAnswer] must come from this node's configured group resolver,
+     * not from display metadata. An absent or unsuitable answer leaves the original link unchanged.
      */
-    fun exportLink(universal: Boolean): String {
-        val bean = runCatching { requireBean() }.getOrNull()
-            ?: return toStdLink()  // 没有可用 bean 时退回既有的标准协议链接
-        val host = bean.serverAddress.orEmpty()
-        val resolved = entryIp.trim()
-        val substitutable = resolved.isNotEmpty() &&
-            io.nekohasekai.sagernet.ipinfo.IpInfoStore.isIpLiteral(resolved) &&
-            host.isNotEmpty() &&
-            !io.nekohasekai.sagernet.ipinfo.IpInfoStore.isIpLiteral(host)
-        if (!substitutable) {
-            return if (universal) bean.toUniversalLink() else toStdLink()
-        }
-        // 只在生成链接的瞬间替换，链接生成后立刻还原，避免影响卡片与连接。
-        return try {
-            bean.serverAddress = resolved
-            if (universal) bean.toUniversalLink() else toStdLink()
-        } finally {
-            bean.serverAddress = host
-        }
+    fun exportLink(universal: Boolean, privateDnsAnswer: String? = null): String {
+        val original = requireBean()
+        val bean = original.copyForEntryAddress(privateDnsAnswer) ?: original
+        return if (universal) bean.toUniversalLink() else standardLink(bean)
     }
 
-    fun exportConfig(): Pair<String, String> {
+    /** Build the same configuration for a copied root profile when a group DNS answer exists. */
+    fun exportConfig(privateDnsAnswer: String? = null): Pair<String, String> {
         var name = "${requireBean().displayName()}.json"
+        val profile = copy().putBean(requireBean().copyForEntryAddress(privateDnsAnswer) ?: requireBean().clone())
 
-        return with(requireBean()) {
+        return with(profile.requireBean()) {
             StringBuilder().apply {
-                val config = buildConfig(this@ProxyEntity, forExport = true)
+                val config = buildConfig(profile, forExport = true)
                 append(config.config)
 
                 if (!config.externalIndex.all { it.chain.isEmpty() }) {

@@ -131,16 +131,6 @@
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?android:attr/textColorSecondary" />
 
-                <TextView
-                    android:id="@+id/profile_ip_info"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:visibility="gone"
-                    tools:text="入口 🇭🇰 HK · AS13335 Cloudflare"
-                    tools:visibility="visible" />
-
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -155,6 +145,33 @@
                     android:textColor="?android:attr/textColorSecondary" />
 
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/profile_ip_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp"
+                android:textAppearance="?android:attr/textAppearanceSmall"
+                android:textColor="?android:attr/textColorSecondary"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/profile_ip_probe"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="8dp"
+                android:text="@string/card_ip_probe"
+                android:textAppearance="?android:attr/textAppearanceSmall"
+                android:textColor="?attr/accentOrTextSecondary"
+                android:visibility="gone" />
 
             <LinearLayout
                 android:layout_width="match_parent"

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="share_entry_ip_unavailable">部分节点无法通过组 DNS 换成入口 IP，导出保留了原域名。</string>
+</resources>
