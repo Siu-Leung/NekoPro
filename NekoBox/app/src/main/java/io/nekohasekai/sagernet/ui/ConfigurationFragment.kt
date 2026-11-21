@@ -2100,11 +2100,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                     address = ""
                 }
                 if (DataStore.hideNodeAddress && address.isNotEmpty()) {
-                    address = redactNodeAddress(address)
+                    address = pf.redactNodeAddress(address)
                 }
 
                 profileAddress.text = address
-                val ipInfoText = if (DataStore.showNodeIpOwner) ipInfoLabel(proxyEntity) else null
+                val ipInfoText = if (DataStore.showNodeIpOwner) pf.ipInfoLabel(proxyEntity) else null
                 profileIpInfo.text = ipInfoText.orEmpty()
                 profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
                 if (!ipInfoText.isNullOrBlank() && !isDualColumn) {
