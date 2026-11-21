@@ -6,7 +6,7 @@
     android:layout_height="match_parent"
     android:background="@color/surge_canvas"
     android:orientation="vertical"
-    tools:context=".ui.ConfigurationFragment">
+    tools:context=".ui.MainActivity">
 
     <include
         layout="@layout/layout_appbar"
@@ -16,14 +16,19 @@
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/group_tab"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="46dp"
         android:background="@color/surge_surface"
+        android:clipToPadding="false"
         android:elevation="0dp"
-        android:visibility="gone"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        app:tabBackground="@drawable/bg_surge_tab_item"
+        app:tabGravity="start"
         app:tabIndicator="@drawable/bg_surge_tab_indicator"
         app:tabIndicatorColor="?tabIndicatorColor"
         app:tabIndicatorFullWidth="false"
-        app:tabIndicatorHeight="2.5dp"
+        app:tabIndicatorHeight="3dp"
+        app:tabMinWidth="0dp"
         app:tabMode="scrollable"
         app:tabPaddingEnd="14dp"
         app:tabPaddingStart="14dp"
@@ -37,10 +42,8 @@
         android:id="@+id/group_tab_divider"
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="@color/surge_divider"
-        android:visibility="gone" />
+        android:background="@color/surge_divider" />
 
-    <!-- Surge-inspired compact telemetry & quick route-mode control bar -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/surge_status_card"
         android:layout_width="match_parent"
@@ -49,8 +52,10 @@
         android:layout_marginTop="10dp"
         android:layout_marginEnd="12dp"
         android:layout_marginBottom="4dp"
+        android:clickable="true"
+        android:focusable="true"
         app:cardBackgroundColor="@color/surge_surface"
-        app:cardCornerRadius="13dp"
+        app:cardCornerRadius="16dp"
         app:cardElevation="0dp"
         app:strokeColor="@color/card_stroke"
         app:strokeWidth="1dp">
@@ -60,44 +65,72 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="12dp"
-            android:paddingTop="9dp"
+            android:paddingStart="13dp"
+            android:paddingTop="10dp"
             android:paddingEnd="10dp"
-            android:paddingBottom="9dp">
+            android:paddingBottom="10dp">
 
-            <View
-                android:id="@+id/surge_status_dot"
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:layout_marginEnd="9dp"
-                android:background="@drawable/bg_surge_status_dot" />
+            <FrameLayout
+                android:id="@+id/surge_status_beacon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:background="@drawable/bg_surge_status_beacon">
 
-            <TextView
-                android:id="@+id/surge_active_profile"
+                <View
+                    android:id="@+id/surge_status_dot"
+                    android:layout_width="9dp"
+                    android:layout_height="9dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_surge_status_dot" />
+
+            </FrameLayout>
+
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="8dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:maxLines="1"
-                android:text="@string/surge_status_idle_hint"
-                android:textColor="@color/surge_text_primary"
-                android:textSize="13sp" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/surge_active_profile"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:text="@string/surge_status_idle_hint"
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/surge_status_subtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/surge_status_idle_sub"
+                    android:textColor="@color/surge_text_secondary"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/surge_route_mode_chip"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
                 android:background="@drawable/bg_surge_mode_pill"
                 android:clickable="true"
                 android:focusable="true"
                 android:fontFamily="sans-serif-medium"
                 android:gravity="center"
-                android:minHeight="28dp"
+                android:maxLines="1"
                 android:paddingStart="11dp"
+                android:paddingTop="5.5dp"
                 android:paddingEnd="11dp"
-                android:singleLine="true"
+                android:paddingBottom="5.5dp"
                 android:text="@string/route_mode_rule"
                 android:textColor="@color/surge_text_primary"
                 android:textSize="11.5sp" />

@@ -83,6 +83,13 @@
             app:title="@string/group_dns_candidates_title" />
 
         <Preference
+            app:icon="@drawable/ic_action_description"
+            app:key="groupRawConfig"
+            app:persistent="false"
+            app:summary="@string/raw_sub_pref_empty"
+            app:title="@string/raw_sub_pref_title" />
+
+        <Preference
             app:key="subscriptionNodeDnsStatus"
             app:selectable="false"
             app:title="@string/subscription_node_dns_status" />

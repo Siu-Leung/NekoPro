@@ -15,7 +15,12 @@
     <string name="card_ip_probe_started">Checking entry &amp; exit IP / ASN…</string>
     <string name="card_ip_probe_busy">Already checking a node’s IP…</string>
     <string name="surge_status_idle_hint">Disconnected · Tap button to start</string>
+    <string name="surge_status_connected_sub">Connected · Tap card to locate active node</string>
+    <string name="surge_status_connecting_sub">Connecting proxy core…</string>
+    <string name="surge_status_stopping_sub">Stopping proxy core…</string>
+    <string name="surge_status_idle_sub">Tap action button below to connect</string>
     <string name="surge_drawer_subtitle">sing-box · mihomo Dual-Core Engine</string>
+    <string name="card_more">More options</string>
     <string name="group_dns_multi_hint">One endpoint per line; the first line is primary and later lines are ordered fallbacks.</string>
     <plurals name="group_node_dns_count">
         <item quantity="one">%d endpoint configured</item>

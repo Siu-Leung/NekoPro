@@ -25,6 +25,9 @@
         </menu>
     </item>
     <item
+        android:id="@+id/action_view_raw_subscription"
+        android:title="@string/raw_sub_view_raw" />
+    <item
         android:id="@+id/action_clear"
         android:title="@string/clear_profiles" />
 </menu>

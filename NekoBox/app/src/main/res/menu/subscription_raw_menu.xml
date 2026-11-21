@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_apply"
+        android:icon="@drawable/ic_action_done"
+        android:title="@string/raw_sub_apply"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_extract_dns"
+        android:title="@string/raw_sub_extract_dns"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_refetch"
+        android:title="@string/raw_sub_refetch"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_save_only"
+        android:title="@string/raw_sub_save_only"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_copy"
+        android:title="@string/raw_sub_copy"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_export_file"
+        android:title="@string/raw_sub_export_file"
+        app:showAsAction="never" />
+</menu>

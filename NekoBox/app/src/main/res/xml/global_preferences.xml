@@ -72,6 +72,7 @@
             app:summary="@string/always_show_address_sum"
             app:title="@string/always_show_address" />
         <SwitchPreference
+            app:defaultValue="true"
             app:key="showNodeIpOwner"
             app:summary="@string/show_node_ip_owner_sum"
             app:title="@string/show_node_ip_owner" />

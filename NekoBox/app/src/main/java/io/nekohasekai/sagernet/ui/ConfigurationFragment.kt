@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
@@ -12,6 +13,7 @@ import android.text.format.Formatter
 import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.LayoutInflater
+import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
@@ -22,7 +24,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
+import androidx.core.graphics.ColorUtils
 import androidx.core.net.toUri
+import androidx.core.view.ViewCompat
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.size
@@ -33,6 +37,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
@@ -101,6 +106,7 @@ import io.nekohasekai.sagernet.bg.proto.completedSpeedTestCount
 import io.nekohasekai.sagernet.ui.profile.JuicitySettingsActivity
 import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
+import io.nekohasekai.sagernet.widget.BottomPaddingInsetsListener
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -197,9 +203,11 @@ class ConfigurationFragment @JvmOverloads constructor(
     internal var probingProxyId: Long? = null
 
     private var groupTabDivider: View? = null
-    private var surgeStatusCard: View? = null
+    private var surgeStatusCard: MaterialCardView? = null
+    private var surgeStatusBeacon: View? = null
     private var surgeStatusDot: View? = null
     private var surgeActiveProfile: TextView? = null
+    private var surgeStatusSubtitle: TextView? = null
     private var surgeRouteModeChip: TextView? = null
 
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
@@ -219,6 +227,13 @@ class ConfigurationFragment @JvmOverloads constructor(
         ) {
             if (adapter.groupList.size > position) {
                 DataStore.selectedGroup = adapter.groupList[position].id
+            }
+        }
+
+        override fun onPageSelected(position: Int) {
+            if (adapter.groupList.size > position) {
+                DataStore.selectedGroup = adapter.groupList[position].id
+                refreshToolbarSubscriptionMenu()
             }
         }
     }
@@ -273,8 +288,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         tabLayout = view.findViewById(R.id.group_tab)
         groupTabDivider = view.findViewById(R.id.group_tab_divider)
         surgeStatusCard = view.findViewById(R.id.surge_status_card)
+        surgeStatusBeacon = view.findViewById(R.id.surge_status_beacon)
         surgeStatusDot = view.findViewById(R.id.surge_status_dot)
         surgeActiveProfile = view.findViewById(R.id.surge_active_profile)
+        surgeStatusSubtitle = view.findViewById(R.id.surge_status_subtitle)
         surgeRouteModeChip = view.findViewById(R.id.surge_route_mode_chip)
 
         surgeStatusCard?.isGone = select
@@ -331,26 +348,78 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     /**
+     * Shows subscription-only actions only when the active tab belongs to a subscription group.
+     */
+    private fun refreshToolbarSubscriptionMenu() {
+        if (select || !isAdded) return
+        val currentGroup = if (::adapter.isInitialized) {
+            val selectedId = DataStore.selectedGroup
+            adapter.groupList.firstOrNull { it.id == selectedId }
+                ?: adapter.groupList.getOrNull(groupPager.currentItem)
+        } else {
+            null
+        }
+        val isSubscription = currentGroup?.type == GroupType.SUBSCRIPTION
+        toolbar.menu.findItem(R.id.action_update_subscription)?.isVisible = isSubscription
+        toolbar.menu.findItem(R.id.action_view_raw_subscription)?.isVisible = isSubscription
+    }
+
+    /**
      * Refreshes the compact Surge status strip above the node list with live connection
      * state, active proxy name (respecting screenshot address redaction), and route mode.
      */
     fun refreshSurgeStatusHeader() {
         if (select || !isAdded) return
+        val card = surgeStatusCard
+        val beacon = surgeStatusBeacon
         val dot = surgeStatusDot ?: return
         val titleView = surgeActiveProfile ?: return
+        val subtitleView = surgeStatusSubtitle
         val modeChip = surgeRouteModeChip ?: return
         val ctx = context ?: return
 
         val state = DataStore.serviceState
-        val dotColorRes = when (state) {
+        val stateColorRes = when (state) {
             BaseService.State.Connected -> R.color.surge_green
             BaseService.State.Connecting, BaseService.State.Stopping -> R.color.surge_amber
             else -> R.color.surge_status_idle
         }
-        dot.backgroundTintList = android.content.res.ColorStateList.valueOf(ctx.getColour(dotColorRes))
+        val stateColor = ctx.getColour(stateColorRes)
+        dot.backgroundTintList = ColorStateList.valueOf(stateColor)
+        beacon?.backgroundTintList = ColorStateList.valueOf(
+            ColorUtils.setAlphaComponent(stateColor, 34)
+        )
+
+        val surfaceColor = ctx.getColour(R.color.surge_surface)
+        card?.apply {
+            if (state == BaseService.State.Connected) {
+                strokeColor = ColorUtils.setAlphaComponent(stateColor, 140)
+                setCardBackgroundColor(ColorUtils.blendARGB(surfaceColor, stateColor, 0.05f))
+            } else {
+                strokeColor = ctx.getColour(R.color.card_stroke)
+                setCardBackgroundColor(surfaceColor)
+            }
+        }
+
+        subtitleView?.setText(
+            when (state) {
+                BaseService.State.Connected -> R.string.surge_status_connected_sub
+                BaseService.State.Connecting -> R.string.surge_status_connecting_sub
+                BaseService.State.Stopping -> R.string.surge_status_stopping_sub
+                else -> R.string.surge_status_idle_sub
+            }
+        )
 
         val isGlobal = DataStore.routeMode == 1
         modeChip.text = getString(if (isGlobal) R.string.route_mode_global else R.string.route_mode_rule)
+        val accentColor = ctx.getColorAttr(R.attr.selectedColorPrimary)
+        if (isGlobal) {
+            modeChip.setTextColor(accentColor)
+            modeChip.backgroundTintList = ColorStateList.valueOf(ColorUtils.setAlphaComponent(accentColor, 30))
+        } else {
+            modeChip.setTextColor(ctx.getColour(R.color.surge_text_primary))
+            modeChip.backgroundTintList = null
+        }
 
         val selectedId = DataStore.selectedProxy
         val hideAddress = DataStore.hideNodeAddress
@@ -358,19 +427,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             val entity = if (selectedId > 0L) SagerDatabase.proxyDao.getById(selectedId) else null
             val displayTitle = if (entity != null) {
                 val bean = entity.requireBean()
-                val safeName = AddressRedactor.cardTitle(
+                AddressRedactor.cardTitle(
                     entity.displayName(),
                     bean.name,
                     bean.serverAddress.orEmpty(),
                     getString(R.string.card_hidden_title),
                     hideAddress,
                 )
-                when (state) {
-                    BaseService.State.Connected -> safeName
-                    BaseService.State.Connecting -> "${getString(R.string.connecting)} · $safeName"
-                    BaseService.State.Stopping -> "${getString(R.string.stopping)} · $safeName"
-                    else -> "${getString(R.string.not_connected)} · $safeName"
-                }
             } else {
                 when (state) {
                     BaseService.State.Connected -> getString(R.string.vpn_connected)
@@ -415,8 +478,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
         groupTabDivider = null
         surgeStatusCard = null
+        surgeStatusBeacon = null
         surgeStatusDot = null
         surgeActiveProfile = null
+        surgeStatusSubtitle = null
         surgeRouteModeChip = null
         verifiedExits.clear()
         super.onDestroyView()
@@ -667,6 +732,21 @@ class ConfigurationFragment @JvmOverloads constructor(
                     runOnLifecycleDispatcher {
                         GroupUpdater.startUpdate(group, true)
                     }
+                }
+            }
+
+            R.id.action_view_raw_subscription -> {
+                val group = DataStore.currentGroup()
+                if (group.type != GroupType.SUBSCRIPTION) {
+                    snackbar(R.string.group_not_subscription).show()
+                } else {
+                    startActivity(
+                        SubscriptionRawActivity.intent(
+                            requireContext(),
+                            group.id,
+                            fetchIfEmpty = true,
+                        )
+                    )
                 }
             }
 
@@ -1691,6 +1771,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                         toolbar.elevation = 0F
                         if (!select) {
                             groupPager.registerOnPageChangeCallback(updateSelectedCallback)
+                            refreshToolbarSubscriptionMenu()
+                            refreshSurgeStatusHeader()
                         }
                     }
                 }
@@ -1958,6 +2040,17 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (!::proxyGroup.isInitialized) return
 
             configurationListView = view.findViewById(R.id.configuration_list)
+            val baseBottom = if (select) dp2px(24) else configurationListView.paddingBottom
+            configurationListView.setPadding(
+                configurationListView.paddingLeft,
+                configurationListView.paddingTop,
+                configurationListView.paddingRight,
+                baseBottom,
+            )
+            ViewCompat.setOnApplyWindowInsetsListener(
+                configurationListView,
+                BottomPaddingInsetsListener(baseBottom),
+            )
             applyLayoutMode()
             adapter = ConfigurationAdapter()
             ProfileManager.addListener(adapter!!)
@@ -1970,7 +2063,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 undoManager = UndoSnackbarManager(activity as MainActivity, adapter!!)
 
                 ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
-                    ItemTouchHelper.UP or ItemTouchHelper.DOWN, ItemTouchHelper.START
+                    ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
+                    ItemTouchHelper.START,
                 ) {
                     override fun getSwipeDirs(
                         recyclerView: RecyclerView,
@@ -1982,7 +2076,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                     override fun getDragDirs(
                         recyclerView: RecyclerView,
                         viewHolder: RecyclerView.ViewHolder,
-                    ) = if (isEnabled) super.getDragDirs(recyclerView, viewHolder) else 0
+                    ): Int {
+                        if (!isEnabled) return 0
+                        val dirs = ItemTouchHelper.UP or ItemTouchHelper.DOWN
+                        return if (DataStore.profileLayoutMode == 1) {
+                            dirs or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
+                        } else {
+                            dirs
+                        }
+                    }
 
                     override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                     }
@@ -2292,9 +2394,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             lateinit var entity: ProxyEntity
 
-            val cardView = view as? com.google.android.material.card.MaterialCardView
+            val cardView = view as? MaterialCardView
             val profileName: TextView = view.findViewById(R.id.profile_name)
             val profileType: TextView = view.findViewById(R.id.profile_type)
+            val profileMetaRow: View = view.findViewById(R.id.profile_meta_row)
             val profileAddress: TextView = view.findViewById(R.id.profile_address)
             val profileStatus: TextView = view.findViewById(R.id.profile_status)
             val profileIpInfo: TextView = view.findViewById(R.id.profile_ip_info)
@@ -2302,6 +2405,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             val profileSpeedTest: TextView = view.findViewById(R.id.profile_speed_test)
             val profileActionDivider: View = view.findViewById(R.id.profile_action_divider)
             val profileActionRow: View = view.findViewById(R.id.profile_action_row)
+            val profileActionGap: View = view.findViewById(R.id.profile_action_gap)
+            val profileBottomSpacer: View = view.findViewById(R.id.profile_bottom_spacer)
 
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
             val selectedView: View = view.findViewById(R.id.selected_view)
@@ -2310,6 +2415,85 @@ class ConfigurationFragment @JvmOverloads constructor(
             val shareLayer: LinearLayout = view.findViewById(R.id.share_layer)
             val shareButton: ImageView = view.findViewById(R.id.shareIcon)
             val removeButton: ImageView = view.findViewById(R.id.remove)
+            val profileMore: ImageView = view.findViewById(R.id.profile_more)
+
+            private var boundStarted = false
+            private var boundCanProbeIp = false
+
+            private fun applySelectionVisual(selected: Boolean) {
+                val ctx = view.context
+                selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
+                val surfaceColor = ctx.getColour(R.color.surge_surface)
+                val accentColor = ctx.getColorAttr(R.attr.selectedColorPrimary)
+                cardView?.apply {
+                    strokeWidth = dp2px(if (selected) 2 else 1)
+                    strokeColor = if (selected) accentColor else ctx.getColour(R.color.card_stroke)
+                    setCardBackgroundColor(
+                        if (selected) ColorUtils.blendARGB(surfaceColor, accentColor, 0.08f) else surfaceColor
+                    )
+                }
+            }
+
+            private fun filterShareMenu(menu: Menu, proxyEntity: ProxyEntity) {
+                when {
+                    !proxyEntity.haveStandardLink() -> {
+                        menu.findItem(R.id.action_group_qr)?.subMenu?.removeItem(R.id.action_standard_qr)
+                        menu.findItem(R.id.action_group_clipboard)?.subMenu?.removeItem(
+                            R.id.action_standard_clipboard
+                        )
+                    }
+                    !proxyEntity.haveLink() -> {
+                        menu.removeItem(R.id.action_group_qr)
+                        menu.removeItem(R.id.action_group_clipboard)
+                    }
+                }
+                if (proxyEntity.nekoBean != null) {
+                    menu.removeItem(R.id.action_group_configuration)
+                }
+            }
+
+            private fun showShare(anchor: View) {
+                val popup = PopupMenu(requireContext(), anchor)
+                popup.menuInflater.inflate(R.menu.profile_share_menu, popup.menu)
+                filterShareMenu(popup.menu, entity)
+                popup.setOnMenuItemClickListener(this)
+                popup.show()
+            }
+
+            private fun showMoreMenu(anchor: View) {
+                val popup = PopupMenu(requireContext(), anchor)
+                popup.menu.add(Menu.NONE, -101, 0, R.string.edit).isEnabled = !boundStarted
+                popup.menu.add(Menu.NONE, -102, 1, R.string.card_speed_test)
+                if (boundCanProbeIp) {
+                    popup.menu.add(Menu.NONE, -103, 2, R.string.card_ip_probe_short)
+                }
+                if (entity.type != ProxyEntity.TYPE_CHAIN && entity.nekoBean == null) {
+                    val shareSub = popup.menu.addSubMenu(Menu.NONE, -105, 3, R.string.share)
+                    popup.menuInflater.inflate(R.menu.profile_share_menu, shareSub)
+                    filterShareMenu(shareSub, entity)
+                }
+                popup.menu.add(Menu.NONE, -104, 4, R.string.delete).isEnabled = !boundStarted
+                popup.setOnMenuItemClickListener(this)
+                popup.show()
+            }
+
+            private fun triggerEdit() {
+                view.context.startActivity(
+                    entity.settingIntent(
+                        view.context, proxyGroup.type == GroupType.SUBSCRIPTION
+                    )
+                )
+            }
+
+            private fun triggerRemove() {
+                adapter?.let { listAdapter ->
+                    val index = listAdapter.configurationIdList.indexOf(entity.id)
+                    if (index >= 0) {
+                        listAdapter.remove(index)
+                        undoManager.remove(index to entity)
+                    }
+                }
+            }
 
             private fun speedTestResultText(proxyEntity: ProxyEntity): String? {
                 val outcome = SpeedTestOutcome(
@@ -2331,6 +2515,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             fun bind(proxyEntity: ProxyEntity, trafficData: TrafficData? = null) {
                 val pf = parentFragment as? ConfigurationFragment ?: return
                 val isDualColumn = DataStore.profileLayoutMode == 1
+                val ctx = requireContext()
 
                 entity = proxyEntity
 
@@ -2349,8 +2534,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 DataStore.selectedProxy = proxyEntity.id
                                 onMainDispatcher {
                                     if (entity.id == proxyEntity.id) {
-                                        selectedView.visibility = View.VISIBLE
-                                        cardView?.strokeColor = requireContext().getColorAttr(R.attr.selectedColorPrimary)
+                                        applySelectionVisual(true)
                                     }
                                     pf.refreshSurgeStatusHeader()
                                 }
@@ -2372,16 +2556,21 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
 
-                    // 测速改为下方显式按钮；长按不再触发，避免与入口查询/滑动冲突。
+                    // 测速改为下方显式按钮；长按保留给 ItemTouchHelper 拖拽排序。
                 }
 
                 val bean = proxyEntity.requireBean()
                 val hideAddress = DataStore.hideNodeAddress
                 val host = bean.serverAddress.orEmpty()
+                profileName.maxLines = if (isDualColumn) 2 else 1
                 profileName.text = AddressRedactor.cardTitle(proxyEntity.displayName(), bean.name, host,
                     getString(R.string.card_hidden_title), hideAddress)
+                val protoColor = ctx.getProtocolColor(proxyEntity.type)
                 profileType.text = proxyEntity.displayType()
-                profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
+                profileType.setTextColor(protoColor)
+                profileType.backgroundTintList = ColorStateList.valueOf(
+                    ColorUtils.setAlphaComponent(protoColor, 26)
+                )
 
                 var rx = proxyEntity.rx
                 var tx = proxyEntity.tx
@@ -2409,9 +2598,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                     else -> rawAddress
                 }
                 profileAddress.text = address
-                (trafficText.parent as View).isGone = (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
+                profileAddress.isVisible = address.isNotBlank()
+                profileMetaRow.isVisible = showTraffic || address.isNotBlank()
 
                 val canProbeIp = !select && DataStore.showNodeIpOwner && pf.supportsCardEntry(proxyEntity)
+                boundCanProbeIp = canProbeIp
                 val ipInfoText = if (DataStore.showNodeIpOwner) pf.ipInfoLabel(proxyEntity, proxyGroup, hideAddress) else null
                 profileIpInfo.text = ipInfoText.orEmpty()
                 profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
@@ -2435,17 +2626,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val showActionRow = profileSpeedTest.isVisible || profileIpProbe.isVisible
                 profileActionDivider.isVisible = showActionRow
                 profileActionRow.isVisible = showActionRow
+                profileActionGap.isVisible = profileSpeedTest.isVisible && profileIpProbe.isVisible
+                profileBottomSpacer.isVisible = !showActionRow
 
                 val stText = speedTestResultText(proxyEntity)
 
                 if (proxyEntity.status <= 0) {
                     if (stText != null) {
                         profileStatus.text = stText
-                        profileStatus.setTextColor(requireContext().getColour(R.color.surge_text_secondary))
-                    } else if (showTraffic) {
-                        profileStatus.text = trafficText.text
-                        profileStatus.setTextColor(requireContext().getColour(R.color.surge_text_secondary))
-                        trafficText.text = ""
+                        profileStatus.setTextColor(ctx.getColour(R.color.surge_text_secondary))
                     } else {
                         profileStatus.text = ""
                     }
@@ -2457,9 +2646,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                         proxyEntity.ping <= 350 -> R.color.surge_amber
                         else -> R.color.surge_red
                     }
-                    profileStatus.setTextColor(requireContext().getColour(latencyColorRes))
+                    profileStatus.setTextColor(ctx.getColour(latencyColorRes))
                 } else {
-                    profileStatus.setTextColor(requireContext().getColour(R.color.surge_red))
+                    profileStatus.setTextColor(ctx.getColour(R.color.surge_red))
                     if (proxyEntity.status == 2) {
                         profileStatus.text = if (hideAddress) getString(R.string.unavailable)
                             else if (stText != null) "${proxyEntity.error}\n$stText" else proxyEntity.error
@@ -2477,92 +2666,34 @@ class ConfigurationFragment @JvmOverloads constructor(
                     profileStatus.setOnClickListener(null)
                 }
 
-                editButton.setOnClickListener {
-                    it.context.startActivity(
-                        proxyEntity.settingIntent(
-                            it.context, proxyGroup.type == GroupType.SUBSCRIPTION
-                        )
-                    )
-                }
+                val selected = (selectedItem?.id ?: DataStore.selectedProxy) == proxyEntity.id
+                val started =
+                    selected && DataStore.serviceState.started && DataStore.currentProfile == proxyEntity.id
+                boundStarted = started
+                applySelectionVisual(selected)
 
-                removeButton.setOnClickListener {
-                    adapter?.let { listAdapter ->
-                        val index = listAdapter.configurationIdList.indexOf(proxyEntity.id)
-                        if (index >= 0) {
-                            listAdapter.remove(index)
-                            undoManager.remove(index to proxyEntity)
-                        }
-                    }
-                }
+                editButton.isEnabled = !started
+                removeButton.isEnabled = !started
+                editButton.setOnClickListener { triggerEdit() }
+                removeButton.setOnClickListener { triggerRemove() }
 
-                val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN || isDualColumn
-                shareLayout.isGone = selectOrChain
-                editButton.isGone = select
+                val hideShare = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN || proxyEntity.nekoBean != null || isDualColumn
+                shareLayout.isGone = hideShare
+                editButton.isGone = select || isDualColumn
                 removeButton.isGone = select || isDualColumn
+                profileMore.isVisible = !select && isDualColumn
+                profileMore.setOnClickListener(if (!select && isDualColumn) View.OnClickListener {
+                    showMoreMenu(it)
+                } else null)
 
-                proxyEntity.nekoBean?.apply {
-                    shareLayout.isGone = true
-                }
-
-                val boundEntityId = proxyEntity.id
-                runOnDefaultDispatcher {
-                    val selected = (selectedItem?.id ?: DataStore.selectedProxy) == boundEntityId
-                    val started =
-                        selected && DataStore.serviceState.started && DataStore.currentProfile == boundEntityId
-                    onMainDispatcher {
-                        // Guard against fast-scroll ViewHolder recycling before mutating state.
-                        if (entity.id != boundEntityId) return@onMainDispatcher
-                        editButton.isEnabled = !started
-                        removeButton.isEnabled = !started
-                        selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
-                        cardView?.strokeColor = if (selected) {
-                            requireContext().getColorAttr(R.attr.selectedColorPrimary)
-                        } else {
-                            requireContext().getColour(R.color.card_stroke)
-                        }
-                    }
-
-                    fun showShare(anchor: View) {
-                        val popup = PopupMenu(requireContext(), anchor)
-                        popup.menuInflater.inflate(R.menu.profile_share_menu, popup.menu)
-
-                        when {
-                            !proxyEntity.haveStandardLink() -> {
-                                popup.menu.findItem(R.id.action_group_qr).subMenu?.removeItem(R.id.action_standard_qr)
-                                popup.menu.findItem(R.id.action_group_clipboard).subMenu?.removeItem(
-                                    R.id.action_standard_clipboard
-                                )
-                            }
-
-                            !proxyEntity.haveLink() -> {
-                                popup.menu.removeItem(R.id.action_group_qr)
-                                popup.menu.removeItem(R.id.action_group_clipboard)
-                            }
-                        }
-
-                        if (proxyEntity.nekoBean != null) {
-                            popup.menu.removeItem(R.id.action_group_configuration)
-                        }
-
-                        popup.setOnMenuItemClickListener(this@ConfigurationHolder)
-                        popup.show()
-                    }
-
-                    if (!(select || proxyEntity.type == ProxyEntity.TYPE_CHAIN)) {
-                        onMainDispatcher {
-                            if (entity.id != boundEntityId) return@onMainDispatcher
-                            shareLayer.setBackgroundColor(Color.TRANSPARENT)
-                            shareButton.setImageResource(R.drawable.ic_social_share)
-                            shareButton.setColorFilter(requireContext().getColour(R.color.card_icon_tint))
-                            shareButton.isVisible = true
-
-                            shareLayout.setOnClickListener {
-                                if (entity.id == boundEntityId) {
-                                    showShare(it)
-                                }
-                            }
-                        }
-                    }
+                if (!hideShare) {
+                    shareLayer.setBackgroundColor(Color.TRANSPARENT)
+                    shareButton.setImageResource(R.drawable.ic_social_share)
+                    shareButton.setColorFilter(ctx.getColour(R.color.card_icon_tint))
+                    shareButton.isVisible = true
+                    shareLayout.setOnClickListener { showShare(it) }
+                } else {
+                    shareLayout.setOnClickListener(null)
                 }
 
             }
@@ -2623,6 +2754,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             override fun onMenuItemClick(item: MenuItem): Boolean {
                 try {
                     when (item.itemId) {
+                        -101 -> triggerEdit()
+                        -102 -> (parentFragment as? ConfigurationFragment)?.speedTest(entity)
+                        -103 -> (parentFragment as? ConfigurationFragment)?.confirmNodeIpInfo(entity.id)
+                        -104 -> triggerRemove()
+                        -105 -> return true
                         R.id.action_standard_qr, R.id.action_universal_qr -> {
                             val name = entity.displayName().orEmpty()
                             val universal = item.itemId == R.id.action_universal_qr

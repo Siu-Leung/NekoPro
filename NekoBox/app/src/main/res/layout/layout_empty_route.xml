@@ -5,7 +5,11 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="4dp"
-    app:cardElevation="2dp">
+    app:cardBackgroundColor="@color/surge_surface"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="0dp"
+    app:strokeColor="@color/card_stroke"
+    app:strokeWidth="1dp">
 
     <LinearLayout
         android:layout_width="wrap_content"
@@ -15,10 +19,11 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textAppearance="?android:attr/textAppearanceSmall"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textStyle="bold"
-            android:text="@string/route_warn"/>
+            android:fontFamily="sans-serif-medium"
+            android:lineSpacingExtra="2dp"
+            android:text="@string/route_warn"
+            android:textColor="@color/surge_text_primary"
+            android:textSize="13sp" />
     </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>

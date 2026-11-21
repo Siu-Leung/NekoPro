@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <layer-list>
+            <item android:bottom="7dp" android:left="3dp" android:right="3dp" android:top="5dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/surge_surface_subtle" />
+                    <stroke android:width="1dp" android:color="@color/card_stroke" />
+                    <corners android:radius="11dp" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item>
+        <ripple android:color="?attr/colorControlHighlight">
+            <item android:id="@android:id/mask">
+                <inset android:insetBottom="7dp" android:insetLeft="3dp" android:insetRight="3dp" android:insetTop="5dp">
+                    <shape android:shape="rectangle">
+                        <solid android:color="@color/surge_surface_subtle" />
+                        <corners android:radius="11dp" />
+                    </shape>
+                </inset>
+            </item>
+        </ripple>
+    </item>
+</selector>

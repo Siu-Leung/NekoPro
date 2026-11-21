@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><!-- Based on: https://github.com/android/platform_frameworks_base/blob/505e3ab/core/res/res/layout/simple_list_item_2.xml -->
+<?xml version="1.0" encoding="utf-8"?>
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -12,97 +12,86 @@
     android:clickable="true"
     android:focusable="true"
     app:cardBackgroundColor="@color/surge_surface"
-    app:cardCornerRadius="14dp"
+    app:cardCornerRadius="16dp"
     app:cardElevation="0dp"
     app:strokeColor="@color/card_stroke"
     app:strokeWidth="1dp">
 
     <LinearLayout
-        android:id="@+id/content_lin"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:focusable="true"
         android:orientation="horizontal">
 
         <View
             android:id="@+id/selected_view"
-            android:layout_width="3.5dp"
+            android:layout_width="4dp"
             android:layout_height="match_parent"
             android:layout_marginStart="4dp"
-            android:layout_marginTop="10dp"
-            android:layout_marginBottom="10dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="12dp"
             android:background="@drawable/bg_selected_indicator"
-            android:visibility="invisible"
-            tools:visibility="visible" />
+            android:visibility="invisible" />
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:nextFocusRight="@+id/edit"
             android:orientation="vertical">
 
-            <!-- Row 1: Node Name + subtle secondary action icons -->
+            <!-- Row 1: Node Name + Action Controls -->
             <LinearLayout
                 android:id="@+id/container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
+                android:gravity="top"
                 android:orientation="horizontal"
-                android:paddingTop="4dp"
-                android:paddingEnd="4dp">
+                android:paddingStart="10dp"
+                android:paddingTop="11dp"
+                android:paddingEnd="6dp">
 
-                <LinearLayout
+                <TextView
+                    android:id="@+id/profile_name"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center_vertical"
+                    android:layout_marginEnd="4dp"
                     android:layout_weight="1"
-                    android:gravity="center_vertical"
-                    android:paddingStart="10dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="4dp"
-                    android:paddingBottom="2dp">
-
-                    <TextView
-                        android:id="@+id/profile_name"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:fontFamily="sans-serif-medium"
-                        android:maxLines="1"
-                        android:textColor="@color/surge_text_primary"
-                        android:textSize="14.5sp"
-                        tools:text="@string/profile_name" />
-                </LinearLayout>
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="14.5sp"
+                    tools:text="Hong Kong IEPL 01" />
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/edit"
-                    android:layout_width="34dp"
-                    android:layout_height="34dp"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:layout_gravity="center_vertical"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/edit"
                     android:focusable="true"
-                    android:padding="7dp"
+                    android:padding="6dp"
                     app:srcCompat="@drawable/ic_image_edit"
                     app:tint="@color/card_icon_tint" />
 
                 <LinearLayout
                     android:id="@+id/share"
-                    android:layout_width="34dp"
-                    android:layout_height="34dp"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:layout_gravity="center_vertical"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/share"
                     android:focusable="true"
-                    android:nextFocusLeft="@+id/container">
+                    android:nextFocusLeft="@+id/container"
+                    android:visibility="gone">
 
                     <LinearLayout
                         android:id="@+id/share_layer"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:gravity="center"
-                        android:padding="7dp">
+                        android:padding="6dp">
 
                         <androidx.appcompat.widget.AppCompatImageView
                             android:id="@+id/shareIcon"
@@ -116,29 +105,42 @@
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/remove"
-                    android:layout_width="34dp"
-                    android:layout_height="34dp"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:layout_gravity="center_vertical"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/delete"
                     android:focusable="true"
-                    android:padding="7dp"
-                    android:visibility="gone"
+                    android:nextFocusLeft="@+id/container"
+                    android:padding="6dp"
                     app:srcCompat="@drawable/ic_action_delete"
+                    app:tint="@color/card_icon_tint" />
+
+                <androidx.appcompat.widget.AppCompatImageView
+                    android:id="@+id/profile_more"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="top"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/card_more"
+                    android:focusable="true"
+                    android:padding="5dp"
+                    android:visibility="gone"
+                    app:srcCompat="@drawable/ic_baseline_more_vert_24"
                     app:tint="@color/card_icon_tint" />
 
             </LinearLayout>
 
-            <!-- Row 2: Protocol Badge (left) + Surge Tabular Latency / Speed Readout (right) -->
+            <!-- Row 2: Protocol Badge + Latency / Speed Metric -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
-                android:paddingTop="3dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="6dp">
+                android:paddingTop="6dp"
+                android:paddingEnd="11dp"
+                android:paddingBottom="2dp">
 
                 <TextView
                     android:id="@+id/profile_type"
@@ -146,103 +148,97 @@
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_protocol_badge"
                     android:fontFamily="sans-serif-medium"
-                    android:paddingStart="7dp"
-                    android:paddingTop="2dp"
-                    android:paddingEnd="7dp"
-                    android:paddingBottom="2dp"
-                    android:singleLine="true"
-                    android:textColor="?attr/accentOrTextSecondary"
-                    android:textSize="11sp"
-                    tools:text="VLESS" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1" />
+                    android:letterSpacing="0.01"
+                    android:maxLines="1"
+                    android:paddingStart="7.5dp"
+                    android:paddingTop="2.5dp"
+                    android:paddingEnd="7.5dp"
+                    android:paddingBottom="2.5dp"
+                    android:textSize="10.5sp"
+                    tools:text="Shadowsocks" />
 
                 <TextView
                     android:id="@+id/profile_status"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:fontFamily="sans-serif-medium"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:fontFeatureSettings="tnum"
+                    android:fontFamily="sans-serif-medium"
                     android:gravity="end"
-                    android:lineSpacingExtra="2dp"
+                    android:maxLines="2"
                     android:textColor="@color/surge_text_secondary"
-                    android:textSize="12sp"
-                    tools:text="42 ms" />
+                    android:textSize="11.5sp"
+                    tools:text="48 ms" />
 
             </LinearLayout>
 
-            <!-- Row 3 (conditional): Server address + traffic (parent visibility toggled in holder) -->
+            <!-- Row 3: Optional Server Address & Persistent Traffic Telemetry -->
             <LinearLayout
+                android:id="@+id/profile_meta_row"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="6dp"
-                android:visibility="gone"
-                tools:visibility="visible">
+                android:paddingTop="4dp"
+                android:paddingEnd="11dp"
+                android:visibility="gone">
 
                 <TextView
                     android:id="@+id/profile_address"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     android:ellipsize="end"
                     android:maxLines="1"
-                    android:text="@string/server_address"
                     android:textColor="@color/surge_text_secondary"
-                    android:textSize="11.5sp" />
+                    android:textSize="11sp"
+                    tools:text="example.com:443" />
 
                 <TextView
                     android:id="@+id/traffic_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
                     android:fontFeatureSettings="tnum"
-                    android:text="@string/traffic"
+                    android:maxLines="1"
                     android:textColor="@color/surge_text_secondary"
-                    android:textSize="11sp" />
+                    android:textSize="11sp"
+                    tools:text="1.2 MB↑ 18.4 MB↓" />
 
             </LinearLayout>
 
-            <!-- Row 4 (conditional): Surge inset diagnostic panel for Entry/Exit IP & ISP -->
+            <!-- Row 4: Entry / Exit IP & ASN Inset Card -->
             <TextView
                 android:id="@+id/profile_ip_info"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
-                android:layout_marginEnd="12dp"
-                android:layout_marginBottom="7dp"
+                android:layout_marginTop="7dp"
+                android:layout_marginEnd="11dp"
                 android:background="@drawable/bg_surge_ip_panel"
-                android:clickable="true"
-                android:focusable="true"
+                android:ellipsize="end"
                 android:fontFeatureSettings="tnum"
-                android:lineSpacingExtra="3dp"
-                android:paddingStart="9dp"
+                android:lineSpacingExtra="2dp"
+                android:maxLines="2"
+                android:paddingStart="8dp"
                 android:paddingTop="6dp"
-                android:paddingEnd="9dp"
+                android:paddingEnd="8dp"
                 android:paddingBottom="6dp"
                 android:textColor="@color/surge_text_secondary"
-                android:textSize="11.5sp"
-                android:visibility="gone"
-                tools:text="入口 DNS 应答 1.2.3.4 🇨🇳 CN · AS4134\n实测出口 5.6.7.8 🇭🇰 HK · AS9269"
-                tools:visibility="visible" />
+                android:textSize="11sp"
+                android:visibility="gone" />
 
-            <!-- Row 5: Dedicated Surge Action Strip (never collides with protocol/latency even in 2-column mode) -->
+            <!-- Row 5: Symmetric Segmented Action Footer -->
             <View
                 android:id="@+id/profile_action_divider"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:layout_marginStart="10dp"
-                android:layout_marginEnd="12dp"
+                android:layout_marginTop="8dp"
                 android:background="@color/surge_divider"
-                android:visibility="gone"
-                tools:visibility="visible" />
+                android:visibility="gone" />
 
             <LinearLayout
                 android:id="@+id/profile_action_row"
@@ -250,54 +246,88 @@
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingStart="10dp"
-                android:paddingTop="7dp"
-                android:paddingEnd="12dp"
+                android:paddingStart="9dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="10dp"
                 android:paddingBottom="9dp"
-                android:visibility="gone"
-                tools:visibility="visible">
+                android:visibility="gone">
 
-                <!-- 测速与出入口 IP/归属查询独立成行，单列与双列模式下都不会被协议名或测速结果挤出屏幕。 -->
-                <TextView
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/profile_speed_test"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_card_action_pill"
-                    android:clickable="true"
-                    android:focusable="true"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:fontFamily="sans-serif-medium"
                     android:gravity="center"
-                    android:minHeight="28dp"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="6dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="0dp"
                     android:singleLine="true"
                     android:text="@string/card_speed_test"
+                    android:textAllCaps="false"
                     android:textColor="@color/surge_text_primary"
                     android:textSize="11.5sp"
-                    android:visibility="gone"
-                    tools:visibility="visible" />
+                    app:backgroundTint="@color/card_action_bg"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/ic_baseline_speed_24"
+                    app:iconGravity="textStart"
+                    app:iconPadding="4dp"
+                    app:iconSize="13.5dp"
+                    app:iconTint="?attr/primaryOrTextPrimary"
+                    app:strokeColor="@color/card_action_stroke"
+                    app:strokeWidth="1dp" />
 
-                <TextView
+                <View
+                    android:id="@+id/profile_action_gap"
+                    android:layout_width="7dp"
+                    android:layout_height="1dp" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/profile_ip_probe"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_card_action_pill"
-                    android:clickable="true"
-                    android:focusable="true"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:fontFamily="sans-serif-medium"
                     android:gravity="center"
-                    android:minHeight="28dp"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="6dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="0dp"
                     android:singleLine="true"
                     android:text="@string/card_ip_probe_short"
+                    android:textAllCaps="false"
                     android:textColor="@color/surge_text_primary"
                     android:textSize="11.5sp"
-                    android:visibility="gone"
-                    tools:visibility="visible" />
+                    app:backgroundTint="@color/card_action_bg"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/baseline_public_24"
+                    app:iconGravity="textStart"
+                    app:iconPadding="4dp"
+                    app:iconSize="13.5dp"
+                    app:iconTint="?attr/primaryOrTextPrimary"
+                    app:strokeColor="@color/card_action_stroke"
+                    app:strokeWidth="1dp" />
 
             </LinearLayout>
+
+            <View
+                android:id="@+id/profile_bottom_spacer"
+                android:layout_width="match_parent"
+                android:layout_height="10dp"
+                android:visibility="visible" />
 
         </LinearLayout>
 

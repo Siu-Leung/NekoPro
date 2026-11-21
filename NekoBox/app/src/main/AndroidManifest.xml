@@ -214,6 +214,10 @@
             android:name="io.nekohasekai.sagernet.ui.GroupSettingsActivity"
             android:configChanges="uiMode" />
         <activity
+            android:name="io.nekohasekai.sagernet.ui.SubscriptionRawActivity"
+            android:configChanges="uiMode"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name="io.nekohasekai.sagernet.ui.RouteSettingsActivity"
             android:configChanges="uiMode" />
         <activity

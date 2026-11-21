@@ -7,6 +7,8 @@ import android.widget.TextView
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -36,12 +38,13 @@ abstract class ThemedActivity : AppCompatActivity {
 
         uiMode = resources.configuration.uiMode
         if (!isDialog) {
-            // WHY: Surge surfaces use a crisp light bar in Day mode and dark slate in Night mode,
-            // so system status/nav icons must follow the active Day/Night contrast automatically.
-            val isLightMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES
+            // Surge surfaces use a crisp light bar in Day mode and dark slate in Night mode,
+            // so system status/nav icons follow the resolved surface luminance.
+            val surfaceLuminance = ColorUtils.calculateLuminance(ContextCompat.getColor(this, R.color.surge_surface))
+            val isLightSurface = surfaceLuminance > 0.5
             WindowCompat.getInsetsController(window, window.decorView).apply {
-                isAppearanceLightStatusBars = isLightMode
-                isAppearanceLightNavigationBars = isLightMode
+                isAppearanceLightStatusBars = isLightSurface
+                isAppearanceLightNavigationBars = isLightSurface
             }
         }
 

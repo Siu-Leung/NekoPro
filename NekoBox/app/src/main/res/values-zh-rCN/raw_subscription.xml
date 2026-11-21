@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="raw_sub_title">订阅配置原文件</string>
+    <string name="raw_sub_pref_title">查看 / 编辑配置原文件</string>
+    <string name="raw_sub_pref_empty">尚未缓存原文件 · 更新订阅后自动保留，或点击立即拉取查看</string>
+    <string name="raw_sub_pref_cached">已缓存 %1$s · %2$s · %3$s 更新</string>
+    <string name="raw_sub_save_group_first_title">先保存分组？</string>
+    <string name="raw_sub_save_group_first_msg">当前订阅分组尚未保存创建。是否先保存此分组并立即拉取原始配置？</string>
+    <string name="raw_sub_fetch_now">立即拉取并查看</string>
+    <string name="raw_sub_view_raw">查看配置原文件</string>
+    <string name="raw_sub_apply">保存并应用到分组</string>
+    <string name="raw_sub_save_only">仅保存原文件</string>
+    <string name="raw_sub_extract_dns">从当前文本识别 DNS</string>
+    <string name="raw_sub_refetch">重新从订阅拉取</string>
+    <string name="raw_sub_export_file">导出原文件</string>
+    <string name="raw_sub_copy">复制全文</string>
+    <string name="raw_sub_format_yaml">Clash YAML</string>
+    <string name="raw_sub_format_json">JSON</string>
+    <string name="raw_sub_format_list">节点列表 / URI</string>
+    <string name="raw_sub_meta_summary">%1$s · %2$s · %3$d 行 · 来源: %4$s</string>
+    <string name="raw_sub_dns_found_chip">可识别 DNS (%d)</string>
+    <string name="raw_sub_dns_none_chip">未识别到 DNS</string>
+    <string name="raw_sub_dns_none_dialog">当前配置文本中未识别到可选择的 Clash DNS 条目。\n\n若遇库洛米等机场未返回标准 `dns:` 字段，可直接在此编辑补全 `dns:` -&gt; `proxy-server-nameserver:` 后再次点击识别，或点击右上角菜单「换个客户端」重新拉取原文件。</string>
+    <string name="raw_sub_dns_saved">已将 %d 个 DNS 端点写入本组节点解析器</string>
+    <string name="raw_sub_applied">已应用 %1$d 个节点（变更 %2$d 项）</string>
+    <string name="raw_sub_saved_only">配置原文件已保存（尚未重新应用到节点）</string>
+    <string name="raw_sub_copied">原文件全文已复制</string>
+    <string name="raw_sub_large_readonly">文件较大 (%1$s)：已关闭语法高亮以保证流畅编辑</string>
+    <string name="raw_sub_fetch_pick_client">选择拉取原文件的客户端标识</string>
+    <string name="raw_sub_client_default_chain">自动多客户端回退（推荐）</string>
+    <string name="raw_sub_fetching">正在拉取配置原文件…</string>
+    <string name="raw_sub_fetch_failed">拉取原文件失败：%s</string>
+    <string name="raw_sub_enter_link_first">请先填写订阅链接或选择本地配置文件</string>
+    <string name="raw_sub_key_tab">插入缩进</string>
+    <string name="raw_sub_key_undo">撤销</string>
+    <string name="raw_sub_key_redo">重做</string>
+</resources>

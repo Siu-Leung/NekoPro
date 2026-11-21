@@ -122,6 +122,7 @@ object RawUpdater : GroupUpdater() {
      * @param userAgents Ordered client identifiers; the first usable answer wins.
      * @param forceProxy Locked proxy requirement across all UA attempts so mid-loop VPN drops fail closed.
      * @param customUserAgent Optional group custom UA tried first when non-blank.
+     * @param groupId Optional positive group ID; when supplied, valid non-HTML raw responses are cached for offline inspection.
      * @throws Exception if every HTTP attempt failed with a network/TLS/HTTP error.
      */
     internal suspend fun inspectSubscriptionDns(
@@ -129,10 +130,15 @@ object RawUpdater : GroupUpdater() {
         userAgents: List<String>,
         forceProxy: Boolean = DataStore.serviceState.connected,
         customUserAgent: String? = null,
+        groupId: Long = 0L,
     ): ClashDnsCandidates.Profile {
         currentCoroutineContext().ensureActive()
         if (link.startsWith("content://")) {
-            return ClashDnsCandidates.parse(readSubscriptionFile(link))
+            val contentText = readSubscriptionFile(link)
+            if (groupId > 0L && contentText.isNotBlank() && !isLikelyHtmlDocument(contentText)) {
+                SubscriptionRawStore.save(groupId, contentText, SubscriptionRawStore.SOURCE_CONTENT)
+            }
+            return ClashDnsCandidates.parse(contentText)
         }
         require(link.startsWith("http://", true) || link.startsWith("https://", true))
         val effectiveUserAgents = buildList {
@@ -140,12 +146,14 @@ object RawUpdater : GroupUpdater() {
             addAll(userAgents.ifEmpty { DNS_CANDIDATE_USER_AGENTS })
         }.distinct()
         var lastProfile: ClashDnsCandidates.Profile? = null
+        var bestRaw: Pair<String, String>? = null
         var lastError: Exception? = null
         for (userAgent in effectiveUserAgents) {
             currentCoroutineContext().ensureActive()
-            val profile = try {
+            val fetched = try {
                 withSubscriptionResponse(link, userAgent, forceProxy) { response ->
-                    ClashDnsCandidates.parse(readBoundedResponseText(response))
+                    val text = readBoundedResponseText(response)
+                    text to ClashDnsCandidates.parse(text)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -153,8 +161,25 @@ object RawUpdater : GroupUpdater() {
                 lastError = e
                 continue
             }
-            if (profile.hasDns && profile.rows.any { it.selectable != null }) return profile
-            if (lastProfile == null || (profile.hasDns && !lastProfile.hasDns)) lastProfile = profile
+            val (responseText, profile) = fetched
+            if (profile.hasDns && profile.rows.any { it.selectable != null }) {
+                if (groupId > 0L && !isLikelyHtmlDocument(responseText)) {
+                    SubscriptionRawStore.save(groupId, responseText, userAgent)
+                }
+                return profile
+            }
+            if (bestRaw == null && responseText.isNotBlank() && !isLikelyHtmlDocument(responseText)) {
+                bestRaw = responseText to userAgent
+            }
+            if (lastProfile == null || (profile.hasDns && !lastProfile.hasDns)) {
+                lastProfile = profile
+                if (responseText.isNotBlank() && !isLikelyHtmlDocument(responseText)) {
+                    bestRaw = responseText to userAgent
+                }
+            }
+        }
+        if (groupId > 0L && bestRaw != null) {
+            SubscriptionRawStore.save(groupId, bestRaw.first, bestRaw.second)
         }
         if (lastProfile == null && lastError != null) {
             throw lastError
@@ -162,6 +187,126 @@ object RawUpdater : GroupUpdater() {
         return lastProfile ?: ClashDnsCandidates.Profile(
             emptyList(), emptyList(), false, false,
         )
+    }
+
+    /**
+     * Fetches the raw subscription response using either caller-specified or fallback client UAs
+     * and stores it in [SubscriptionRawStore] for manual inspection/editing without modifying DB nodes.
+     */
+    internal suspend fun fetchAndSaveRawSubscription(
+        proxyGroup: ProxyGroup,
+        linkOverride: String? = null,
+        userAgents: List<String>? = null,
+        forceProxy: Boolean = DataStore.serviceState.connected,
+        customUserAgentOverride: String? = null,
+    ): SubscriptionRawStore.RawSnapshot {
+        currentCoroutineContext().ensureActive()
+        val link = (linkOverride ?: proxyGroup.subscription?.link).orEmpty().trim()
+        require(link.isNotEmpty()) { app.getString(R.string.group_dns_candidates_failed) }
+        if (link.startsWith("content://")) {
+            val contentText = readSubscriptionFile(link)
+            require(contentText.isNotBlank() && !isLikelyHtmlDocument(contentText)) {
+                app.getString(R.string.group_dns_candidates_failed)
+            }
+            SubscriptionRawStore.save(proxyGroup.id, contentText, SubscriptionRawStore.SOURCE_CONTENT)
+            return SubscriptionRawStore.read(proxyGroup.id)
+                ?: error(app.getString(R.string.group_dns_candidates_failed))
+        }
+        require(link.startsWith("http://", true) || link.startsWith("https://", true))
+        val effectiveUserAgents = buildList {
+            if (userAgents.isNullOrEmpty()) {
+                (customUserAgentOverride ?: proxyGroup.subscription?.customUserAgent)
+                    ?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+                addAll(DNS_CANDIDATE_USER_AGENTS)
+                add(USER_AGENT)
+                add("v2rayN/7.8.2")
+                add("sing-box/1.14.0")
+            } else {
+                addAll(userAgents)
+            }
+        }.distinct()
+
+        var bestRaw: Pair<String, String>? = null
+        var lastError: Exception? = null
+        for (candidate in effectiveUserAgents) {
+            currentCoroutineContext().ensureActive()
+            val body = try {
+                withSubscriptionResponse(link, candidate, forceProxy) { response ->
+                    readBoundedResponseText(response)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                continue
+            }
+            if (body.isBlank() || isLikelyHtmlDocument(body)) continue
+            val dnsProfile = ClashDnsCandidates.parse(body)
+            val parsedCount = runCatching { parseSubscription(body)?.size ?: 0 }.getOrDefault(0)
+            if (parsedCount > 0 && dnsProfile.hasDns) {
+                bestRaw = body to candidate
+                break
+            }
+            if (bestRaw == null || parsedCount > 0) {
+                bestRaw = body to candidate
+                if (parsedCount > 0 && userAgents != null && userAgents.size == 1) break
+            }
+        }
+        val chosen = bestRaw ?: throw (lastError ?: IllegalStateException(app.getString(R.string.group_dns_candidates_failed)))
+        SubscriptionRawStore.save(proxyGroup.id, chosen.first, chosen.second)
+        return SubscriptionRawStore.read(proxyGroup.id)
+            ?: error(app.getString(R.string.group_dns_candidates_failed))
+    }
+
+    data class ApplySummary(
+        val proxyCount: Int,
+        val changed: Int,
+        val adoptedDnsCount: Int,
+    )
+
+    /**
+     * Parses and applies an edited raw subscription payload to [proxyGroup] without performing
+     * network requests, saving the edited raw text into [SubscriptionRawStore].
+     */
+    internal suspend fun applyRawSubscriptionText(
+        proxyGroup: ProxyGroup,
+        rawText: String,
+        sourceLabel: String = SubscriptionRawStore.SOURCE_MANUAL_EDIT,
+        userInterface: GroupManager.Interface? = null,
+        byUser: Boolean = true,
+    ): ApplySummary {
+        currentCoroutineContext().ensureActive()
+        require(rawText.isNotBlank() && !isLikelyHtmlDocument(rawText)) {
+            app.getString(R.string.group_dns_candidates_refresh_failed)
+        }
+        val subscription = proxyGroup.subscription
+            ?: error(app.getString(R.string.group_not_subscription))
+        val parsed = parseSubscription(rawText).orEmpty()
+        if (parsed.isEmpty()) error(app.getString(R.string.no_proxies_found_in_subscription))
+
+        val requireAdoptedDns = proxyGroup.requiresNodeDnsAdoption()
+        val adoptedNodeDnsCandidate = if (requireAdoptedDns) {
+            extractClashProxyServerNameservers(rawText)
+        } else {
+            emptyList()
+        }
+        if (requireAdoptedDns && adoptedNodeDnsCandidate.isEmpty()) {
+            SubscriptionRawStore.save(proxyGroup.id, rawText, sourceLabel)
+            error(app.getString(R.string.group_dns_candidates_auto_missing))
+        }
+
+        SubscriptionRawStore.save(proxyGroup.id, rawText, sourceLabel)
+        val summary = applyParsedProxies(
+            proxyGroup = proxyGroup,
+            subscription = subscription,
+            initialProxies = parsed,
+            adoptedNodeDnsCandidate = adoptedNodeDnsCandidate,
+            savedManualDns = proxyGroup.manualNodeDns(),
+            userInterface = userInterface,
+            byUser = byUser,
+        )
+        GroupManager.postUpdate(proxyGroup)
+        return summary
     }
 
     override suspend fun doUpdate(
@@ -190,9 +335,15 @@ object RawUpdater : GroupUpdater() {
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
+                if (contentText.isNotBlank() && !isLikelyHtmlDocument(contentText) &&
+                    !SubscriptionRawStore.exists(proxyGroup.id)
+                ) {
+                    SubscriptionRawStore.save(proxyGroup.id, contentText, SubscriptionRawStore.SOURCE_CONTENT)
+                }
                 error(app.getString(R.string.group_dns_candidates_refresh_failed))
             }
             if (proxies.isEmpty()) error(app.getString(R.string.no_proxies_found_in_subscription))
+            SubscriptionRawStore.save(proxyGroup.id, contentText, SubscriptionRawStore.SOURCE_CONTENT)
             if (requireAdoptedDns) {
                 adoptedNodeDnsCandidate = extractClashProxyServerNameservers(contentText)
                 if (adoptedNodeDnsCandidate.isEmpty()) error(app.getString(R.string.group_dns_candidates_auto_missing))
@@ -216,6 +367,9 @@ object RawUpdater : GroupUpdater() {
             var validNodesWithoutDns = false
             var lastUserinfo = ""
             var lastDisposition = ""
+            var acceptedRawSnapshot: Pair<String, String>? = null
+            var fallbackRawWithNodes: Pair<String, String>? = null
+            var firstNonHtmlRaw: Pair<String, String>? = null
             proxies = emptyList()
 
             val forceProxy = DataStore.serviceState.connected ||
@@ -225,9 +379,15 @@ object RawUpdater : GroupUpdater() {
                 try {
                     val accepted = withSubscriptionResponse(link, candidate, forceProxy) { response ->
                         val responseText = readBoundedResponseText(response)
+                        if (firstNonHtmlRaw == null && responseText.isNotBlank() && !isLikelyHtmlDocument(responseText)) {
+                            firstNonHtmlRaw = responseText to candidate
+                        }
                         val parsed = parseSubscription(responseText).orEmpty()
                         if (parsed.isEmpty()) return@withSubscriptionResponse false
 
+                        if (fallbackRawWithNodes == null) {
+                            fallbackRawWithNodes = responseText to candidate
+                        }
                         val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameservers(responseText)
                         else emptyList()
                         if (requireAdoptedDns && candidateDns.isEmpty()) {
@@ -241,6 +401,7 @@ object RawUpdater : GroupUpdater() {
                         }
                         proxies = parsed
                         adoptedNodeDnsCandidate = candidateDns
+                        acceptedRawSnapshot = responseText to candidate
                         true
                     }
                     if (accepted) break
@@ -254,8 +415,18 @@ object RawUpdater : GroupUpdater() {
             }
 
             if (proxies.isEmpty()) {
+                val inspectFallback = fallbackRawWithNodes ?: firstNonHtmlRaw.takeIf {
+                    !SubscriptionRawStore.exists(proxyGroup.id)
+                }
+                if (inspectFallback != null) {
+                    SubscriptionRawStore.save(proxyGroup.id, inspectFallback.first, inspectFallback.second)
+                }
                 if (validNodesWithoutDns) error(app.getString(R.string.group_dns_candidates_auto_missing))
                 error(app.getString(R.string.group_dns_candidates_refresh_failed))
+            }
+
+            acceptedRawSnapshot?.let { (rawBody, rawSource) ->
+                SubscriptionRawStore.save(proxyGroup.id, rawBody, rawSource)
             }
 
             subscription.subscriptionUserinfo = lastUserinfo
@@ -268,6 +439,28 @@ object RawUpdater : GroupUpdater() {
                 }
             }
         }
+
+        applyParsedProxies(
+            proxyGroup = proxyGroup,
+            subscription = subscription,
+            initialProxies = proxies,
+            adoptedNodeDnsCandidate = adoptedNodeDnsCandidate,
+            savedManualDns = savedManualDns,
+            userInterface = userInterface,
+            byUser = byUser,
+        )
+    }
+
+    private suspend fun applyParsedProxies(
+        proxyGroup: ProxyGroup,
+        subscription: SubscriptionBean,
+        initialProxies: List<AbstractBean>,
+        adoptedNodeDnsCandidate: List<String>,
+        savedManualDns: String?,
+        userInterface: GroupManager.Interface?,
+        byUser: Boolean,
+    ): ApplySummary {
+        var proxies = initialProxies
 
         val proxiesMap = LinkedHashMap<String, AbstractBean>()
         for (proxy in proxies) {
@@ -421,6 +614,11 @@ object RawUpdater : GroupUpdater() {
 
         userInterface?.onUpdateSuccess(
             proxyGroup, changed, added, updated, deleted, duplicate, byUser
+        )
+        return ApplySummary(
+            proxyCount = proxies.size,
+            changed = changed,
+            adoptedDnsCount = adoptedNodeDnsCandidate.size,
         )
     }
 

@@ -10,15 +10,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
-    <LinearLayout
+    <View
         android:layout_width="match_parent"
-        android:layout_height="0.5dp"
-        android:background="@android:color/darker_gray" />
+        android:layout_height="1dp"
+        android:background="@color/surge_divider" />
 
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:background="@color/surge_surface">
 
         <com.blacksquircle.ui.editorkit.widget.TextProcessor
             android:id="@+id/editor"
@@ -27,7 +28,8 @@
             android:background="@null"
             android:completionThreshold="2"
             android:importantForAutofill="no"
-            android:scrollbars="none" />
+            android:scrollbars="none"
+            android:textColor="@color/surge_text_primary" />
 
         <com.blacksquircle.ui.editorkit.widget.TextScroller
             android:id="@+id/scroller"
@@ -38,27 +40,34 @@
 
     </FrameLayout>
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/surge_divider" />
+
     <LinearLayout
         android:id="@+id/keyboard_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@color/surge_surface_subtle"
         android:elevation="2dp"
         android:orientation="horizontal">
 
         <ImageView
             android:id="@+id/action_tab"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="?primaryOrTextPrimary"
-            android:padding="8dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="9dp"
             android:src="@drawable/baseline_keyboard_tab_24"
-            app:tint="?colorOnSurface" />
+            app:tint="@color/surge_text_primary" />
 
         <moe.matsuri.nb4a.ui.ExtendedKeyboard
             android:id="@+id/extended_keyboard"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:background="?colorSecondaryVariant"
+            android:layout_weight="1"
+            android:background="@color/surge_surface_subtle"
             android:orientation="horizontal"
             app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
             tools:itemCount="6"
@@ -66,35 +75,30 @@
 
         <ImageView
             android:id="@+id/action_undo"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="?primaryOrTextPrimary"
-            android:padding="8dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="9dp"
             android:src="@drawable/baseline_undo_24"
-            app:tint="?colorOnSurface" />
+            app:tint="@color/surge_text_primary" />
 
         <ImageView
             android:id="@+id/action_redo"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="?primaryOrTextPrimary"
-            android:padding="8dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="9dp"
             android:src="@drawable/baseline_redo_24"
-            app:tint="?colorOnSurface" />
+            app:tint="@color/surge_text_primary" />
 
         <ImageView
             android:id="@+id/action_format"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="?primaryOrTextPrimary"
-            android:padding="8dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="9dp"
             android:src="@drawable/ic_baseline_format_align_left_24"
-            app:tint="?colorOnSurface" />
-
-        <ImageView
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="?primaryOrTextPrimary" />
+            app:tint="@color/surge_text_primary" />
 
     </LinearLayout>
 

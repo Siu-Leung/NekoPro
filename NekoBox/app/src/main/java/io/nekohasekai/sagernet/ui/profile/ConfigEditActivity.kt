@@ -118,7 +118,6 @@ class ConfigEditActivity : ThemedActivity() {
         }
         extendedKeyboard.setHasFixedSize(true)
         extendedKeyboard.submitList("{},:_\"".map { it.toString() })
-        extendedKeyboard.setBackgroundColor(getColorAttr(R.attr.primaryOrTextPrimary))
 
         val keyboardContainer = findViewById<LinearLayout>(R.id.keyboard_container)
         ViewCompat.setOnApplyWindowInsetsListener(keyboardContainer) { v, windowInsets ->

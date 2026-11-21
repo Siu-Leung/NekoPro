@@ -291,21 +291,21 @@
     <color name="preference_simple_menu_background">#FAFAFA</color>
 
     <!-- Surge-inspired light-mode surface, hairline, typography, and telemetry tokens -->
-    <color name="surge_canvas">#F2F2F7</color>
+    <color name="surge_canvas">#EEF1F7</color>
     <color name="surge_surface">#FFFFFF</color>
-    <color name="surge_surface_subtle">#F5F6FA</color>
-    <color name="surge_divider">#14000000</color>
-    <color name="surge_text_primary">#111827</color>
-    <color name="surge_text_secondary">#6B7280</color>
-    <color name="surge_green">#16A34A</color>
+    <color name="surge_surface_subtle">#F4F6FB</color>
+    <color name="surge_divider">#160F172A</color>
+    <color name="surge_text_primary">#0F172A</color>
+    <color name="surge_text_secondary">#5E6A7D</color>
+    <color name="surge_green">#059669</color>
     <color name="surge_amber">#D97706</color>
     <color name="surge_red">#DC2626</color>
-    <color name="surge_status_idle">#9CA3AF</color>
-    <color name="card_stroke">#12000000</color>
-    <color name="card_badge_bg">#EFF1F5</color>
-    <color name="card_action_bg">#F4F6FA</color>
-    <color name="card_action_stroke">#1A000000</color>
-    <color name="card_icon_tint">#7A828F</color>
-    <color name="stats_bar_divider">#14000000</color>
+    <color name="surge_status_idle">#94A3B8</color>
+    <color name="card_stroke">#170F172A</color>
+    <color name="card_badge_bg">#EAEEF6</color>
+    <color name="card_action_bg">#F3F5FA</color>
+    <color name="card_action_stroke">#1A0F172A</color>
+    <color name="card_icon_tint">#64748B</color>
+    <color name="stats_bar_divider">#160F172A</color>
 
 </resources>

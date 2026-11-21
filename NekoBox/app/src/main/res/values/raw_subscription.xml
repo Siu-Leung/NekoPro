@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="raw_sub_title">Raw Subscription Config</string>
+    <string name="raw_sub_pref_title">View / edit raw config file</string>
+    <string name="raw_sub_pref_empty">No cached raw config yet · Auto-saved after refresh, or tap to fetch now</string>
+    <string name="raw_sub_pref_cached">Cached %1$s · %2$s · Updated %3$s</string>
+    <string name="raw_sub_save_group_first_title">Save group first?</string>
+    <string name="raw_sub_save_group_first_msg">This subscription group has not been created yet. Save the group and pull the raw config file now?</string>
+    <string name="raw_sub_fetch_now">Fetch &amp; open</string>
+    <string name="raw_sub_view_raw">View raw file</string>
+    <string name="raw_sub_apply">Apply to group</string>
+    <string name="raw_sub_save_only">Save raw file only</string>
+    <string name="raw_sub_extract_dns">Detect DNS from text</string>
+    <string name="raw_sub_refetch">Re-fetch from URL</string>
+    <string name="raw_sub_export_file">Export raw file</string>
+    <string name="raw_sub_copy">Copy raw content</string>
+    <string name="raw_sub_format_yaml">Clash YAML</string>
+    <string name="raw_sub_format_json">JSON</string>
+    <string name="raw_sub_format_list">Node / URI List</string>
+    <string name="raw_sub_meta_summary">%1$s · %2$s · %3$d lines · Source: %4$s</string>
+    <string name="raw_sub_dns_found_chip">DNS Ready (%d)</string>
+    <string name="raw_sub_dns_none_chip">No DNS Detected</string>
+    <string name="raw_sub_dns_none_dialog">No selectable Clash DNS entry was found in the current text.\n\nIf a provider such as Kuromis omitted `dns:` or uses a custom layout, you can edit the YAML (`dns:` -&gt; `proxy-server-nameserver:`) directly here and detect again, or try re-fetching with another client identity (FlClash / Clash Verge).</string>
+    <string name="raw_sub_dns_saved">Updated group Node Domain DNS (%d endpoint(s))</string>
+    <string name="raw_sub_applied">Applied %1$d node(s) (%2$d changed)</string>
+    <string name="raw_sub_saved_only">Raw subscription file saved</string>
+    <string name="raw_sub_copied">Raw content copied to clipboard</string>
+    <string name="raw_sub_large_readonly">Large file (%1$s): syntax highlighting disabled to keep editing responsive</string>
+    <string name="raw_sub_fetch_pick_client">Select client User-Agent to fetch</string>
+    <string name="raw_sub_client_default_chain">Auto fallback chain (Recommended)</string>
+    <string name="raw_sub_fetching">Fetching raw subscription config…</string>
+    <string name="raw_sub_fetch_failed">Failed to fetch raw config: %s</string>
+    <string name="raw_sub_enter_link_first">Enter a subscription URL or file first</string>
+    <string name="raw_sub_key_tab">Insert tab</string>
+    <string name="raw_sub_key_undo">Undo</string>
+    <string name="raw_sub_key_redo">Redo</string>
+</resources>
