@@ -37,7 +37,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
     private fun closeResources() {
         val boxToClose = synchronized(lifecycleLock) {
             isClosed = true
-            if (::box.isInitialized && !isBoxClosed) {
+            if (isBoxInitialized && !isBoxClosed) {
                 isBoxClosed = true
                 box
             } else {
@@ -49,7 +49,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
             runCatching { instance.close() }.onFailure { Logs.w(it) }
         }
         deleteCacheFiles()
-        if (::processes.isInitialized) {
+        if (isProcessesInitialized) {
             runCatching {
                 processes.close(GlobalScope + Dispatchers.IO)
             }.onFailure { Logs.w(it) }

@@ -71,7 +71,7 @@ internal object ClashDnsCandidates {
         val options = LoaderOptions().apply {
             codePointLimit = 8 * 1024 * 1024
             isAllowDuplicateKeys = false
-            isAllowRecursiveKeys = false
+            setAllowRecursiveKeys(false)
             maxAliasesForCollections = MAX_YAML_ALIASES
             nestingDepthLimit = MAX_YAML_NESTING_DEPTH
         }

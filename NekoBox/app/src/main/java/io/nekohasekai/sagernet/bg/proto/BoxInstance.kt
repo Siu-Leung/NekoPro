@@ -37,6 +37,12 @@ abstract class BoxInstance(
     lateinit var config: ConfigBuildResult
     lateinit var box: BoxInstance
 
+    protected val isBoxInitialized: Boolean
+        get() = ::box.isInitialized
+
+    protected val isProcessesInitialized: Boolean
+        get() = ::processes.isInitialized
+
     val pluginPath = hashMapOf<String, PluginManager.InitResult>()
     val pluginConfigs = hashMapOf<Int, Pair<Int, String>>()
     val externalInstances = hashMapOf<Int, AbstractInstance>()

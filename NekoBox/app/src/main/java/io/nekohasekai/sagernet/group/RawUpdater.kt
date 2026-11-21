@@ -454,7 +454,7 @@ object RawUpdater : GroupUpdater() {
 
                 val loaderOptions = LoaderOptions().apply {
                     codePointLimit = 8 * 1024 * 1024 // 8 MiB YAML bomb guard
-                    isAllowRecursiveKeys = false
+                    setAllowRecursiveKeys(false)
                     maxAliasesForCollections = MAX_YAML_ALIASES
                     nestingDepthLimit = MAX_YAML_NESTING_DEPTH
                 }
