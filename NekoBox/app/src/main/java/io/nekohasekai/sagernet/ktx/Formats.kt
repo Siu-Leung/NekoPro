@@ -123,27 +123,33 @@ fun String.redactLink(): String {
 
 class SubscriptionFoundException(val link: String) : RuntimeException()
 
-suspend fun parseProxies(text: String): List<AbstractBean> {
-    val links = text.split('\n').flatMap { it.trim().split(' ') }
-    val linksByLine = text.split('\n').map { it.trim() }
+suspend fun parseProxies(text: String, forSubscription: Boolean = false): List<AbstractBean> {
+    val links = text.lineSequence().flatMap { it.trim().splitToSequence(' ') }.filter { it.isNotEmpty() }.toList()
+    val linksByLine = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
 
     val entities = ArrayList<AbstractBean>()
     val entitiesByLine = ArrayList<AbstractBean>()
     var pendingSubscriptionLink: String? = null
 
+    fun String.hasExplicitProxyPortOrCredentials(): Boolean {
+        val parsed = runCatching { java.net.URI(this) }.getOrNull() ?: return false
+        return parsed.port in 1..65535 || !parsed.rawUserInfo.isNullOrBlank()
+    }
+
     fun String.parseLink(entities: ArrayList<AbstractBean>, allowHttpSubscription: Boolean) {
-        if (startsWith("clash://install-config?") || startsWith("sn://subscription?")) {
+        if (!forSubscription && (startsWith("clash://install-config?") || startsWith("sn://subscription?"))) {
             throw SubscriptionFoundException(this)
         }
 
-        if (startsWith("sn://")) {
+        val lower = lowercase()
+        if (lower.startsWith("sn://")) {
             Logs.d("Try parse universal link")
             runCatching {
                 entities.add(parseUniversal(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("socks://") || startsWith("socks4://") || startsWith("socks4a://") || startsWith(
+        } else if (lower.startsWith("socks://") || lower.startsWith("socks4://") || lower.startsWith("socks4a://") || lower.startsWith(
                 "socks5://"
             )
         ) {
@@ -153,13 +159,19 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (matches("(http|https)://.*".toRegex())) {
+        } else if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            // In subscription payloads, never treat a bare webpage URL (e.g. https://example.com
+            // inside an HTTP 200 maintenance page) as an HTTP proxy node unless it declares an
+            // explicit proxy port or credentials.
+            if (forSubscription && !hasExplicitProxyPortOrCredentials()) {
+                return
+            }
             Logs.d("Try parse http link")
             runCatching {
                 entities.add(parseHttp(this))
             }.onFailure {
                 Logs.w(it)
-                if (allowHttpSubscription && pendingSubscriptionLink == null) {
+                if (!forSubscription && allowHttpSubscription && pendingSubscriptionLink == null) {
                     pendingSubscriptionLink = HttpUrl.Builder()
                         .scheme("https")
                         .host("install-config")
@@ -169,98 +181,98 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
                         .replaceFirst("https://", "clash://")
                 }
             }
-        } else if (startsWith("vmess://")) {
+        } else if (lower.startsWith("vmess://")) {
             Logs.d("Try parse v2ray link")
             runCatching {
                 entities.add(parseV2Ray(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("vless://")) {
+        } else if (lower.startsWith("vless://")) {
             Logs.d("Try parse vless link")
             runCatching {
                 entities.add(parseV2Ray(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("trojan://")) {
+        } else if (lower.startsWith("trojan://")) {
             Logs.d("Try parse trojan link")
             runCatching {
                 entities.add(parseTrojan(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("trojan-go://")) {
+        } else if (lower.startsWith("trojan-go://")) {
             Logs.d("Try parse trojan-go link")
             runCatching {
                 entities.add(parseTrojanGo(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("ss://")) {
+        } else if (lower.startsWith("ss://")) {
             Logs.d("Try parse shadowsocks link")
             runCatching {
                 entities.add(parseShadowsocks(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("naive+")) {
+        } else if (lower.startsWith("naive+")) {
             Logs.d("Try parse naive link")
             runCatching {
                 entities.add(parseNaive(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("hysteria://")) {
+        } else if (lower.startsWith("hysteria://")) {
             Logs.d("Try parse hysteria1 link")
             runCatching {
                 entities.add(parseHysteria1(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("hysteria2://") || startsWith("hy2://")) {
+        } else if (lower.startsWith("hysteria2://") || lower.startsWith("hy2://")) {
             Logs.d("Try parse hysteria2 link")
             runCatching {
                 entities.add(parseHysteria2(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("tuic://")) {
+        } else if (lower.startsWith("tuic://")) {
             Logs.d("Try parse TUIC link")
             runCatching {
                 entities.add(parseTuic(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("masque://")) {
+        } else if (lower.startsWith("masque://")) {
             Logs.d("Try parse MASQUE link")
             runCatching {
                 entities.add(parseMasque(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("juicity://")) {
+        } else if (lower.startsWith("juicity://")) {
             Logs.d("Try parse Juicity link")
             runCatching {
                 entities.add(parseJuicity(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("anytls://")) {
+        } else if (lower.startsWith("anytls://")) {
             Logs.d("Try parse anytls link")
             runCatching {
                 entities.add(parseAnytls(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("snell://")) {
+        } else if (lower.startsWith("snell://")) {
             Logs.d("Try parse snell link")
             runCatching {
                 entities.add(moe.matsuri.nb4a.proxy.snell.parseSnell(this))
             }.onFailure {
                 Logs.w(it)
             }
-        } else if (startsWith("mieru://")) {
+        } else if (lower.startsWith("mieru://")) {
             Logs.d("Try parse mieru link")
             runCatching {
                 entities.add(parseMieru(this))
@@ -276,18 +288,16 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
     for (link in linksByLine) {
         link.parseLink(entitiesByLine, allowHttpSubscription = true)
     }
-//    var isBadLink = false
     if (entities.onEach { it.initializeDefaultValues() }.size == entitiesByLine.onEach { it.initializeDefaultValues() }.size) run test@{
         entities.forEachIndexed { index, bean ->
             val lineBean = entitiesByLine[index]
             if (bean == lineBean && bean.displayName() != lineBean.displayName()) {
-//                isBadLink = true
                 return@test
             }
         }
     }
     val result = if (entities.size > entitiesByLine.size) entities else entitiesByLine
-    if (result.isEmpty() && pendingSubscriptionLink != null) {
+    if (!forSubscription && result.isEmpty() && pendingSubscriptionLink != null) {
         throw SubscriptionFoundException(pendingSubscriptionLink!!)
     }
     return result

@@ -585,4 +585,5 @@
     <string name="group_node_dns_refresh_missing">订阅没有提供可用的 dns.proxy-server-nameserver，已保留原节点和 DNS。可手填「节点域名 DNS」后刷新。</string>
     <string name="group_node_dns_required">分组 %1$s 尚未取得节点 DNS。请刷新订阅或手填「节点域名 DNS」。</string>
     <string name="group_node_dns_unsupported_outbound">分组 %1$s 的此类节点无法使用组解析器。</string>
+    <string name="export_config_private_dns_warning">导出的 sing-box 配置包含本组私有节点 DNS 地址（可能含有订阅凭据或令牌），请仅分享给信任的对象。是否继续？</string>
 </resources>

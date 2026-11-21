@@ -20,10 +20,10 @@ class SnellBean : AbstractBean() {
         super.initializeDefaultValues()
         if (psk == null) psk = ""
         if (userkey == null) userkey = ""
-        version = (version ?: 4).coerceIn(4, 6)
-        if (mode.isNullOrBlank()) mode = "default"
+        if (version == null) version = 4
+        mode = mode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "default"
         if (obfsHost == null) obfsHost = ""
-        if (obfsMode.isNullOrBlank()) obfsMode = "none"
+        obfsMode = obfsMode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "none"
         if (clientFingerprint == null) clientFingerprint = ""
     }
 

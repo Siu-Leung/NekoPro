@@ -133,4 +133,23 @@ class Pr6ClashSnapshotRegressionTest {
         val parsed = RawUpdater.parseSubscription(yaml)
         assertEquals(listOf("m1", "s6"), parsed?.map { it.name })
     }
+
+    @Test
+    fun htmlErrorPageIsRejectedInSubscriptionMode() = runBlocking<Unit> {
+        val html = "<!DOCTYPE html><html><body>Visit https://portal.example.com to renew</body></html>"
+        assertNotNull(runCatching { RawUpdater.parseSubscription(html) }.exceptionOrNull())
+    }
+
+    @Test
+    fun clashSubscriptionSkipsKnownUnsupportedTypesAndImportsWireGuard() = runBlocking<Unit> {
+        val yaml = """
+            proxies:
+              - {name: legacy-ssr, type: ssr, server: ssr.example.com, port: 443, cipher: aes-256-cfb, password: p, obfs: plain, protocol: origin}
+              - {name: old-snell, type: snell, server: s3.example.com, port: 443, psk: k, version: 3}
+              - {name: wg1, type: wireguard, server: wg.example.com, port: 51820, ip: 10.0.0.2/32, private-key: priv, public-key: pub, mtu: 1280}
+              - {name: kept, type: socks5, server: example.com, port: 1080}
+        """.trimIndent()
+        val parsed = RawUpdater.parseSubscription(yaml)
+        assertEquals(listOf("wg1", "kept"), parsed?.map { it.name })
+    }
 }

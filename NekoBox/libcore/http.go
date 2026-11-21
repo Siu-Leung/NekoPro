@@ -15,10 +15,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/quic-go"
@@ -28,7 +31,114 @@ import (
 	"github.com/sagernet/sing/protocol/socks/socks5"
 )
 
-var errFailConnectSocks5 = errors.New("fail connect socks5")
+var (
+	errFailConnectSocks5 = errors.New("fail connect socks5")
+	errUnsafeRedirect    = errors.New("http redirect blocked by security policy")
+	errBodyReadTimeout   = errors.New("http response body read timed out")
+)
+
+const (
+	// DefaultHTTPResponseMaxSize is the hard cap used by the legacy gomobile
+	// methods. Callers that need a different budget can use the *WithLimit
+	// methods without changing the existing API.
+	DefaultHTTPResponseMaxSize int64 = 64 << 20
+
+	// maxErrorBodyBytes limits how much of a non-200 response body is read
+	// solely to build a diagnostic error snippet.
+	maxErrorBodyBytes int64 = 4 << 10
+
+	// errorSnippetReadTimeout caps error response body reads so a slow non-200
+	// endpoint cannot stall error reporting.
+	errorSnippetReadTimeout = 5 * time.Second
+
+	// maxRedirectHops matches Go's standard limit while enforcing security checks.
+	maxRedirectHops = 10
+
+	// defaultBodyReadTimeout bounds in-memory response body reads against
+	// slow-drip tarpit servers after response headers arrive.
+	defaultBodyReadTimeout = 30 * time.Second
+
+	// defaultStreamReadTimeout bounds streaming file downloads (e.g. GeoIP/GeoSite)
+	// so broken connections cannot stall indefinitely.
+	defaultStreamReadTimeout = 10 * time.Minute
+)
+
+// validateRedirectPolicy enforces HTTP redirect safety for libcore clients.
+//
+// Parameters:
+//   - req: The candidate redirected *http.Request.
+//   - via: Previously executed requests in the redirect chain (oldest first).
+//
+// Returns nil when the redirect is permitted, or an error wrapping
+// errUnsafeRedirect (or the hop-limit error) when blocked.
+//
+// Policy:
+//  1. Caps redirects at maxRedirectHops.
+//  2. Allows only http/https schemes.
+//  3. Blocks HTTPS-to-HTTP protocol downgrades.
+//  4. Blocks redirects to loopback, private, link-local, CGNAT, FakeIP, or
+//     reserved hosts unless the redirect remains on the exact initial Host
+//     explicitly requested by the caller (e.g. self-hosted LAN subscriptions).
+func validateRedirectPolicy(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirectHops {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req == nil || req.URL == nil {
+		return errUnsafeRedirect
+	}
+	scheme := strings.ToLower(req.URL.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("%w: unsupported scheme %q", errUnsafeRedirect, scheme)
+	}
+	if len(via) > 0 && via[len(via)-1].URL != nil {
+		// Prevent TLS downgrade from HTTPS to cleartext HTTP (protects credentials
+		// and prevents silent MITM downgrade on subscriptions and downloads).
+		if strings.EqualFold(via[len(via)-1].URL.Scheme, "https") && scheme == "http" {
+			return fmt.Errorf("%w: https to http downgrade", errUnsafeRedirect)
+		}
+	}
+	targetHost := strings.ToLower(strings.TrimSuffix(req.URL.Hostname(), "."))
+	if isForbiddenRedirectHost(targetHost) {
+		sameInitialAuthority := len(via) > 0 && via[0].URL != nil &&
+			strings.EqualFold(via[0].URL.Host, req.URL.Host)
+		if !sameInitialAuthority {
+			return fmt.Errorf("%w: private or local redirect target", errUnsafeRedirect)
+		}
+	}
+	return nil
+}
+
+// isForbiddenRedirectHost checks whether a redirect target host is a local
+// hostname or non-public IP literal (loopback, RFC1918, link-local, CGNAT,
+// FakeIP 198.18.0.0/15, IPv6 ULA, unspecified, multicast, or reserved).
+func isForbiddenRedirectHost(host string) bool {
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
+		return true
+	}
+	if addr.Is4() {
+		b := addr.As4()
+		// Block 0.0.0.0/8, CGNAT 100.64.0.0/10, FakeIP/benchmark 198.18.0.0/15, and reserved >= 240/4.
+		if b[0] == 0 || b[0] >= 240 {
+			return true
+		}
+		if b[0] == 100 && (b[1]&0xC0) == 0x40 {
+			return true
+		}
+		if b[0] == 198 && (b[1] == 18 || b[1] == 19) {
+			return true
+		}
+	}
+	return false
+}
 
 // h1TransportCloser adapts *http.Transport (which only has
 // CloseIdleConnections) to io.Closer for unified transport cleanup.
@@ -40,11 +150,6 @@ func (c h1TransportCloser) Close() error {
 	c.Transport.CloseIdleConnections()
 	return nil
 }
-
-// DefaultHTTPResponseMaxSize is the hard cap used by the legacy gomobile
-// methods. Callers that need a different budget can use the *WithLimit
-// methods without changing the existing API.
-const DefaultHTTPResponseMaxSize int64 = 64 << 20
 
 var ErrHTTPResponseTooLarge = errors.New("http response body exceeds maximum size")
 
@@ -104,6 +209,7 @@ type httpClient struct {
 func NewHttpClient() HTTPClient {
 	client := new(httpClient)
 	client.h1h2Client.Transport = &client.h1h2Transport
+	client.h1h2Client.CheckRedirect = validateRedirectPolicy
 	client.h1h2Transport.ForceAttemptHTTP2 = true
 	client.h1h2Transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
 	client.h1h2Transport.TLSHandshakeTimeout = 10 * time.Second
@@ -293,7 +399,7 @@ func (r *httpRequest) prepareH1H2Client() (*http.Client, io.Closer) {
 			tr.TLSClientConfig.InsecureSkipVerify = true
 			tr.DisableKeepAlives = true
 		}
-		return &http.Client{Transport: tr}, h1TransportCloser{tr}
+		return &http.Client{Transport: tr, CheckRedirect: validateRedirectPolicy}, h1TransportCloser{tr}
 	}
 	if !r.h1h2Used {
 		cfg := r.tls.Clone()
@@ -506,7 +612,8 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			}
 			transport = h1TransportCloser{echTransport}
 			echClient := &http.Client{
-				Transport: echTransport,
+				Transport:     echTransport,
+				CheckRedirect: validateRedirectPolicy,
 			}
 			echTransport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 				d := net.Dialer{Timeout: handshakeTimeout}
@@ -553,7 +660,8 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			}
 			transport = h3Transport
 			h3Client := &http.Client{
-				Transport: h3Transport,
+				Transport:     h3Transport,
+				CheckRedirect: validateRedirectPolicy,
 			}
 			response, err = h3Client.Do(request)
 			return
@@ -706,8 +814,10 @@ func (r *httpRequest) raceDirectRequests(funcs []requestFunc) (HTTPResponse, err
 type httpResponse struct {
 	*http.Response
 
-	transportCloser io.Closer
-	cancelFunc      context.CancelFunc
+	transportCloser   io.Closer
+	cancelFunc        context.CancelFunc
+	bodyReadTimeout   time.Duration
+	streamReadTimeout time.Duration
 
 	getContentOnce sync.Once
 	closeBodyOnce  sync.Once
@@ -715,11 +825,37 @@ type httpResponse struct {
 	contentError   error
 }
 
+// armReadDeadline starts a watchdog timer that closes the response body and
+// underlying transport if a read exceeds timeout, preventing slow-drip servers
+// from hanging callers indefinitely.
+func (h *httpResponse) armReadDeadline(timeout time.Duration) (stop func(), didTimeout func() bool) {
+	var timedOut atomic.Bool
+	if timeout <= 0 {
+		return func() {}, timedOut.Load
+	}
+	timer := time.AfterFunc(timeout, func() {
+		timedOut.Store(true)
+		h.closeResources()
+	})
+	return func() { timer.Stop() }, timedOut.Load
+}
+
+// errorString formats a bounded diagnostic message for non-200 HTTP responses.
+// It reads at most maxErrorBodyBytes (4 KiB) within errorSnippetReadTimeout so
+// oversized or stalled error bodies cannot exhaust memory or block execution.
 func (h *httpResponse) errorString() string {
-	content, err := h.getContentString()
-	if err != nil {
+	defer h.closeResources()
+	if h.Body == nil {
 		return fmt.Sprint("HTTP ", h.Status)
 	}
+	stopDeadline, didTimeout := h.armReadDeadline(errorSnippetReadTimeout)
+	defer stopDeadline()
+
+	rawSnippet, readErr := io.ReadAll(io.LimitReader(h.Body, maxErrorBodyBytes))
+	if didTimeout() || (readErr != nil && len(rawSnippet) == 0) {
+		return fmt.Sprint("HTTP ", h.Status)
+	}
+	content := string(rawSnippet)
 	if len(content) > 100 {
 		content = content[:100] + " ..."
 	}
@@ -734,13 +870,33 @@ func (h *httpResponse) GetContent() ([]byte, error) {
 	return h.GetContentWithLimit(DefaultHTTPResponseMaxSize)
 }
 
+// GetContentWithLimit reads the entire response body into memory up to maxBytes
+// within the configured body read timeout.
+//
+// Parameters:
+//   - maxBytes: Maximum permitted payload size in bytes (negative values clamp to 0).
+//
+// Returns the payload bytes, ErrHTTPResponseTooLarge when the body exceeds
+// maxBytes, or errBodyReadTimeout when reading exceeds the body deadline.
 func (h *httpResponse) GetContentWithLimit(maxBytes int64) ([]byte, error) {
 	h.getContentOnce.Do(func() {
 		defer h.closeResources()
 		if maxBytes < 0 {
 			maxBytes = 0
 		}
+		timeout := h.bodyReadTimeout
+		if timeout <= 0 {
+			timeout = defaultBodyReadTimeout
+		}
+		stopDeadline, didTimeout := h.armReadDeadline(timeout)
+		defer stopDeadline()
+
 		h.content, h.contentError = io.ReadAll(io.LimitReader(h.Body, maxBytes+1))
+		if didTimeout() {
+			h.content = nil
+			h.contentError = errBodyReadTimeout
+			return
+		}
 		if h.contentError == nil && int64(len(h.content)) > maxBytes {
 			h.content = nil
 			h.contentError = ErrHTTPResponseTooLarge
@@ -787,6 +943,15 @@ func (h *httpResponse) WriteTo(path string) error {
 	return h.WriteToWithLimit(path, DefaultHTTPResponseMaxSize)
 }
 
+// WriteToWithLimit streams the response body to path, enforcing both maxBytes
+// and the configured streaming read deadline.
+//
+// Parameters:
+//   - path: Destination filesystem path to create/overwrite.
+//   - maxBytes: Maximum permitted payload size in bytes (negative values clamp to 0).
+//
+// Returns nil on success, ErrHTTPResponseTooLarge when truncated at maxBytes,
+// errBodyReadTimeout on deadline expiry, or any underlying I/O error.
 func (h *httpResponse) WriteToWithLimit(path string, maxBytes int64) error {
 	defer h.closeResources()
 	file, err := os.Create(path)
@@ -797,9 +962,19 @@ func (h *httpResponse) WriteToWithLimit(path string, maxBytes int64) error {
 	if maxBytes < 0 {
 		maxBytes = 0
 	}
-	var n int64
-	n, err = io.Copy(file, io.LimitReader(h.Body, maxBytes+1))
-	if err == nil && n > maxBytes {
+	timeout := h.streamReadTimeout
+	if timeout <= 0 {
+		timeout = defaultStreamReadTimeout
+	}
+	stopDeadline, didTimeout := h.armReadDeadline(timeout)
+	defer stopDeadline()
+
+	var written int64
+	written, err = io.Copy(file, io.LimitReader(h.Body, maxBytes+1))
+	if didTimeout() {
+		return errBodyReadTimeout
+	}
+	if err == nil && written > maxBytes {
 		err = ErrHTTPResponseTooLarge
 		_ = file.Truncate(maxBytes)
 	}

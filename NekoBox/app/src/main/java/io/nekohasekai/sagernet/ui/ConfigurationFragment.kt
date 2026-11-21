@@ -147,7 +147,43 @@ class ConfigurationFragment @JvmOverloads constructor(
     lateinit var tabLayout: TabLayout
     lateinit var groupPager: ViewPager2
 
-    private var speedTestRunner: SpeedTestQueueRunner<ProxyEntity>? = null
+    /**
+     * Tracks the currently running test (speed, TCPing, or URL test) so forced restarts
+     * and Fragment teardown cancel any active test type without leaking dialogs, jobs,
+     * or notifications.
+     */
+    private class ActiveTestHandle(
+        val token: Int,
+        @Volatile var dialog: AlertDialog? = null,
+        @Volatile var notification: ConnectionTestNotification? = null,
+        @Volatile var isHidden: Boolean = false,
+        private val onCancel: () -> Unit,
+    ) {
+        private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun cancel(dismissDialog: Boolean = true) {
+            if (!cancelled.compareAndSet(false, true)) return
+            runCatching { onCancel() }.onFailure { Logs.w(it) }
+            runCatching { notification?.updateNotification(0, 0, true) }.onFailure { Logs.w(it) }
+            notification = null
+            if (dismissDialog) {
+                runCatching { dialog?.dismiss() }.onFailure { Logs.w(it) }
+            }
+            dialog = null
+            isHidden = false
+        }
+
+        fun restoreIfHidden() {
+            if (!isHidden || cancelled.get()) return
+            isHidden = false
+            runCatching { notification?.updateNotification(0, 0, true) }.onFailure { Logs.w(it) }
+            notification = null
+            runCatching { dialog?.show() }.onFailure { Logs.w(it) }
+        }
+    }
+
+    @Volatile
+    private var activeTestHandle: ActiveTestHandle? = null
 
     // Never trust legacy persisted exitIp: it may have been the physical connection.
     // Keep proven exits only for this screen instance, bound to the tested profile/config.
@@ -156,10 +192,6 @@ class ConfigurationFragment @JvmOverloads constructor(
     private var ipInfoJob: Job? = null
     private var ipInfoDialog: AlertDialog? = null
     private var lastIpDisplayOptions: Pair<Boolean, Boolean>? = null
-    private var speedTestJob: Job? = null
-    private var speedTestDialog: AlertDialog? = null
-    private var speedTestHidden = false
-    private var speedTestNotification: ConnectionTestNotification? = null
 
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
 
@@ -292,24 +324,19 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     override fun onDestroyView() {
-        ipInfoDialog?.dismiss()
+        runCatching { ipInfoDialog?.dismiss() }.onFailure { Logs.w(it) }
         ipInfoDialog = null
+        // Dismiss active test dialog to prevent WindowLeaked when view detaches.
+        activeTestHandle?.let { handle ->
+            runCatching { handle.dialog?.dismiss() }.onFailure { Logs.w(it) }
+            handle.dialog = null
+        }
         verifiedExits.clear()
         super.onDestroyView()
     }
 
     override fun onDestroy() {
-        if (speedTestJob != null) {
-            speedTestRunner?.cancel()
-            speedTestJob?.cancel()
-            speedTestNotification?.updateNotification(0, 0, true)
-            speedTestNotification = null
-            speedTestDialog?.dismiss()
-            speedTestDialog = null
-            speedTestHidden = false
-            speedTestRunner = null
-            speedTestJob = null
-        }
+        cancelAllTests()
         DataStore.profileCacheStore.unregisterChangeListener(this)
 
         if (::adapter.isInitialized) {
@@ -327,12 +354,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             lastIpDisplayOptions = displayOptions
             adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
         }
-        if (speedTestHidden && speedTestJob != null) {
-            speedTestHidden = false
-            speedTestNotification?.updateNotification(0, 0, true)
-            speedTestNotification = null
-            speedTestDialog?.show()
-        }
+        activeTestHandle?.restoreIfHidden()
     }
 
     override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
@@ -713,13 +735,28 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     private fun confirmSpeedTest() {
-        if (DataStore.runningTest) return
+        if (!isAdded) return
+        if (DataStore.runningTest) {
+            showForceTestDialog { speedTest(force = true) }
+            return
+        }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.speed_test_confirm_title)
             .setMessage(R.string.speed_test_confirm_message)
             .setPositiveButton(R.string.speed_test_group) { _, _ -> speedTest() }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun showForceTestDialog(onForce: () -> Unit) {
+        runOnMainDispatcher {
+            if (!isAdded) return@runOnMainDispatcher
+            MaterialAlertDialogBuilder(requireContext())
+                .setMessage(R.string.connection_test_running_force)
+                .setPositiveButton(R.string.connection_test_force) { _, _ -> onForce() }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
     }
 
     private fun supportsCardEntry(entity: ProxyEntity): Boolean = when (entity.type) {
@@ -804,7 +841,12 @@ class ConfigurationFragment @JvmOverloads constructor(
             } catch (_: Exception) {
                 null // No raw resolver path, URL or node name in logs/errors.
             }
-            if (result?.exit != null) verifiedExits[id] = ExitSample(result.profile, result.group, result.exit)
+            if (result?.exit != null) {
+                verifiedExits[id] = ExitSample(result.profile, result.group, result.exit)
+            } else {
+                // Clear stale cached exit if a fresh re-probe could not verify an exit IP.
+                verifiedExits.remove(id)
+            }
             if (result != null) withContext(Dispatchers.IO) { ProfileManager.postUpdate(id) }
             if (isResumed) snackbar(getString(when {
                 result == null -> R.string.card_ip_probe_failed
@@ -818,7 +860,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private suspend fun probeNodeExit(profile: ProxyEntity, group: ProxyGroup, entry: String?): io.nekohasekai.sagernet.ipinfo.IpOwner? {
         val bean = profile.requireBean()
-        if (entry == null || group.frontProxy > 0 || group.landingProxy > 0 || profile.needExternal() ||
+        // Allow exit probing even when entry DNS lookup returned null if the group configures
+        // non-HTTPS resolvers (tls://, quic://, h3://, udp://, tcp://) handled natively by sing-box.
+        val hasNonHttpsGroupDns = group.effectiveNodeDnsList().any { !IpInfoStore.isHttpsResolver(it) }
+        if ((entry == null && !hasNonHttpsGroupDns) || group.frontProxy > 0 || group.landingProxy > 0 || profile.needExternal() ||
             !bean.customConfigJson.isNullOrBlank() || !bean.customOutboundJson.isNullOrBlank()
         ) return null
         return try {
@@ -827,7 +872,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             val port = io.nekohasekai.sagernet.ktx.mkPort()
             val password = IpInfoStore.newProbePassword()
             val config = IpInfoStore.exitProbeConfig(generated.config, port, password) ?: return null
-            val box = libcore.Libcore.newTestSingBoxInstance(config, null)
+            // Pass LocalResolverImpl so domain-based direct/bootstrap DNS (local/dhcp/DoH hostnames)
+            // resolves via Android ConnectivityManager instead of failing on /etc/resolv.conf.
+            val box = libcore.Libcore.newTestSingBoxInstance(config, moe.matsuri.nb4a.net.LocalResolverImpl)
             try {
                 box.start()
                 IpInfoStore.probeExit(port, password)
@@ -841,21 +888,47 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
-    /** Cancel any running URL test, ping test or speed test and free the token. */
-    private fun cancelAllTests() {
-        runCatching { speedTestRunner?.cancel() }
-        speedTestJob?.cancel()
-        speedTestRunner = null
-        runCatching { speedTestDialog?.dismiss() }
-        speedTestDialog = null
-        speedTestHidden = false
-        // The next acquireTestToken must succeed even if a cancelled run never reached
-        // its finally block: invalidate the old token, then hand the slot back.
-        DataStore.releaseTestToken(DataStore.forceTestToken())
+    /**
+     * Cancels whichever group/node test (speedTest, pingTest, or urlTest) is currently
+     * tracked by [activeTestHandle], dismisses its dialog, and clears its notification.
+     *
+     * @param releaseToken When `true`, also invalidates and releases [DataStore]'s test token.
+     * Pass `false` when immediately claiming a replacement token via [DataStore.forceTestToken].
+     */
+    private fun cancelAllTests(releaseToken: Boolean = true) {
+        val previous = activeTestHandle
+        activeTestHandle = null
+        previous?.cancel(dismissDialog = true)
+        if (releaseToken) {
+            // Invalidate any stale token (even if a cancelled run stalled before finally) and release.
+            DataStore.releaseTestToken(DataStore.forceTestToken())
+        }
     }
 
-    private fun retryFailedSpeedTest() {
-        if (DataStore.runningTest) return
+    /**
+     * Acquires an exclusive test token or prompts the user to force-replace a running test.
+     *
+     * When [force] is `true`, cancels the previous active test and atomically swaps to a new
+     * token without momentarily releasing the slot to `0`.
+     */
+    private fun acquireOrPromptTestToken(force: Boolean, onForceConfirm: () -> Unit): Int {
+        if (force) {
+            cancelAllTests(releaseToken = false)
+            return DataStore.forceTestToken()
+        }
+        val token = DataStore.acquireTestToken()
+        if (token == 0) {
+            showForceTestDialog(onForceConfirm)
+        }
+        return token
+    }
+
+    private fun retryFailedSpeedTest(force: Boolean = false) {
+        if (!isAdded) return
+        if (DataStore.runningTest && !force) {
+            showForceTestDialog { retryFailedSpeedTest(force = true) }
+            return
+        }
         val group = DataStore.currentGroup()
         runOnDefaultDispatcher {
             val allProfiles = SagerDatabase.proxyDao.getByGroup(group.id)
@@ -878,7 +951,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 } else {
-                    speedTest(targetProfiles = failedProfiles)
+                    speedTest(targetProfiles = failedProfiles, force = force)
                 }
             }
         }
@@ -890,31 +963,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         force: Boolean = false,
     ) {
         if (!isAdded) return
-        // A forced run must clear the previous one *before* taking the slot, otherwise it
-        // would cancel (and release) the token it just acquired.
-        if (force) cancelAllTests()
-        var testToken = DataStore.acquireTestToken()
-        if (testToken == 0 && force) {
-            // The cancelled run may not have reached its finally block yet; take the slot
-            // unconditionally so a stuck test cannot keep the button dead.
-            testToken = DataStore.forceTestToken()
+        val testToken = acquireOrPromptTestToken(force) {
+            speedTest(targetProfile, targetProfiles, force = true)
         }
-        if (testToken == 0) {
-            // A stalled run can hold the token forever. Offer an explicit override instead
-            // of leaving the button permanently dead.
-            runOnMainDispatcher {
-                if (isAdded) {
-                    MaterialAlertDialogBuilder(requireContext())
-                        .setMessage(R.string.connection_test_running_force)
-                        .setPositiveButton(R.string.connection_test_force) { _, _ ->
-                            speedTest(targetProfile, targetProfiles, force = true)
-                        }
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show()
-                }
-            }
-            return
-        }
+        if (testToken == 0) return
 
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
@@ -929,14 +981,13 @@ class ConfigurationFragment @JvmOverloads constructor(
         binding.progressLinear.isVisible = true
         binding.progressLinear.max = 1
         binding.progressLinear.setProgressCompat(0, false)
-        val builder = MaterialAlertDialogBuilder(requireContext())
+        val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle(titleText)
             .setView(binding.root)
             .setPositiveButton(R.string.minimize, null)
             .setNegativeButton(android.R.string.cancel, null)
             .setCancelable(false)
-        val dialog = builder.show()
-        speedTestDialog = dialog
+            .show()
 
         val runner = SpeedTestQueueRunner(
             sessionFactory = ::AndroidSpeedTestSession,
@@ -951,41 +1002,41 @@ class ConfigurationFragment @JvmOverloads constructor(
                 )
             },
         )
-        speedTestRunner = runner
 
-        fun stop() {
+        var workerJob: Job? = null
+        val handle = ActiveTestHandle(token = testToken, dialog = dialog) {
             runner.cancel()
-            speedTestJob?.cancel()
+            workerJob?.cancel()
         }
+        activeTestHandle = handle
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            speedTestHidden = true
-            speedTestNotification = ConnectionTestNotification(
+            if (!DataStore.isTestTokenActive(testToken)) return@setOnClickListener
+            handle.isHidden = true
+            handle.notification = ConnectionTestNotification(
                 dialog.context,
                 "[$titleText] ${getString(R.string.speed_test_group)}",
             )
             dialog.hide()
         }
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
-            stop()
-            dialog.dismiss()
+            handle.cancel(dismissDialog = true)
         }
 
-        speedTestJob = runOnDefaultDispatcher {
+        workerJob = runOnDefaultDispatcher {
             try {
                 val profiles = targetProfiles ?: if (targetProfile != null) listOf(targetProfile) else SagerDatabase.proxyDao.getByGroup(group.id)
                 if (profiles.isEmpty()) {
-                    onMainDispatcher {
-                        dialog.dismiss()
-                    }
                     return@runOnDefaultDispatcher
                 }
                 onMainDispatcher {
+                    if (!DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
                     binding.progressLinear.max = profiles.size
                     binding.progressLinear.setProgressCompat(0, false)
                     binding.progress.text = "0 / ${profiles.size}"
                 }
                 runner.run(profiles) { index, total, sample ->
+                    if (!DataStore.isTestTokenActive(testToken)) return@run
                     val outcome = SpeedTestOutcome.completedOrNull(
                         mode = sample.mode,
                         stage = sample.stage,
@@ -1003,6 +1054,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         ) > 0
                     ) {
                         runOnMainDispatcher {
+                            if (!DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
                             adapter.groupFragments.values.forEach { fragment ->
                                 fragment.adapter?.updateSpeedTestResult(sample.profileId, outcome)
                             }
@@ -1011,6 +1063,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         // 测速失败时清空过期速度值，若原本已有延迟（status==1）则保留其可用状态
                         SagerDatabase.proxyDao.updateSpeedTestFailure(sample.profileId, sample.error)
                         runOnMainDispatcher {
+                            if (!DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
                             adapter.groupFragments.values.forEach { fragment ->
                                 fragment.adapter?.configurationList?.get(sample.profileId)?.let { p ->
                                     p.speedTestMode = ""
@@ -1027,10 +1080,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
                     runOnMainDispatcher {
-                        if (!isAdded) return@runOnMainDispatcher
+                        if (!isAdded || !DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
                         val detail = formatSpeedTestSnapshot(sample)
-                        speedTestNotification?.updateNotification(index + 1, total, false, detail)
-                        if (!speedTestHidden && isAdded) {
+                        handle.notification?.updateNotification(index + 1, total, false, detail)
+                        if (!handle.isHidden && isAdded) {
                             val completed = completedSpeedTestCount(index, total, sample.done)
                             binding.nowTesting.text = detail
                             binding.progress.text = "$completed / $total"
@@ -1038,20 +1091,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
                 }
-                if (group.order == GroupOrder.BY_DOWNLOAD_SPEED || group.order == GroupOrder.BY_UPLOAD_SPEED) {
+                if (DataStore.isTestTokenActive(testToken) &&
+                    (group.order == GroupOrder.BY_DOWNLOAD_SPEED || group.order == GroupOrder.BY_UPLOAD_SPEED)
+                ) {
                     GroupManager.postReload(group.id)
                 }
                 delay(800)
             } catch (_: kotlinx.coroutines.CancellationException) {
                 runOnMainDispatcher {
-                    if (!speedTestHidden && isAdded) {
+                    if (!handle.isHidden && isAdded && DataStore.isTestTokenActive(testToken)) {
                         binding.nowTesting.text = getString(R.string.speed_test_stage_cancelled)
                     }
                 }
             } catch (e: Exception) {
                 Logs.w(e)
                 runOnMainDispatcher {
-                    if (isAdded) {
+                    if (isAdded && DataStore.isTestTokenActive(testToken)) {
                         snackbar(e.readableMessage).show()
                     }
                 }
@@ -1060,12 +1115,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (dialog.isShowing) {
                         runCatching { dialog.dismiss() }
                     }
-                    speedTestNotification?.updateNotification(0, 0, true)
-                    speedTestNotification = null
-                    speedTestDialog = null
-                    speedTestHidden = false
-                    speedTestRunner = null
-                    speedTestJob = null
+                    handle.notification?.updateNotification(0, 0, true)
+                    handle.notification = null
+                    handle.dialog = null
+                    handle.isHidden = false
+                    // Only clear the shared active handle if this run still owns it;
+                    // never clobber a newly forced run's state.
+                    if (activeTestHandle === handle) {
+                        activeTestHandle = null
+                    }
                 }
                 DataStore.releaseTestToken(testToken)
             }
@@ -1110,7 +1168,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
-    inner class TestDialog {
+    inner class TestDialog(private val testToken: Int) {
         val binding = LayoutProgressListBinding.inflate(layoutInflater)
         val builder = MaterialAlertDialogBuilder(requireContext()).setView(binding.root)
             .setPositiveButton(R.string.minimize) { _, _ ->
@@ -1125,6 +1183,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         lateinit var minimize: () -> Unit
 
         val dialogStatus = AtomicInteger(0) // 1: hidden 2: cancelled
+        @Volatile
         var notification: ConnectionTestNotification? = null
 
         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
@@ -1132,10 +1191,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         val finishedN = AtomicInteger(0)
 
         fun update(profile: ProxyEntity) {
+            if (!DataStore.isTestTokenActive(testToken)) return
             if (dialogStatus.get() != 2) {
                 results.add(profile)
             }
             runOnMainDispatcher {
+                if (!DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
                 val context = context ?: return@runOnMainDispatcher
                 val progress = finishedN.addAndGet(1)
                 val status = dialogStatus.get()
@@ -1208,244 +1269,272 @@ class ConfigurationFragment @JvmOverloads constructor(
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("EXPERIMENTAL_API_USAGE")
     fun pingTest(icmpPing: Boolean, force: Boolean = false) {
-        if (force) cancelAllTests()
-        var testToken = DataStore.acquireTestToken()
-        if (testToken == 0 && force) testToken = DataStore.forceTestToken()
-        if (testToken == 0) {
-            runOnMainDispatcher {
-                if (isAdded) {
-                    MaterialAlertDialogBuilder(requireContext())
-                        .setMessage(R.string.connection_test_running_force)
-                        .setPositiveButton(R.string.connection_test_force) { _, _ ->
-                            pingTest(icmpPing, force = true)
-                        }
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show()
-                }
-            }
-            return
+        if (!isAdded) return
+        val testToken = acquireOrPromptTestToken(force) {
+            pingTest(icmpPing, force = true)
         }
-        val test = TestDialog()
-        val dialog = test.builder.show()
-        val testJobs = mutableListOf<Job>()
-        val group = DataStore.currentGroup()
+        if (testToken == 0) return
 
-        val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id).filter {
-                if (icmpPing) {
-                    if (it.requireBean().canICMPing()) {
-                        return@filter true
-                    }
-                } else {
-                    if (it.requireBean().canTCPing()) {
-                        return@filter true
+        val test = TestDialog(testToken)
+        val dialog = test.builder.show()
+        val testJobs = java.util.Collections.synchronizedList(mutableListOf<Job>())
+        val group = DataStore.currentGroup()
+        val groupDns = group.effectiveNodeDnsList()
+
+        var mainJob: Job? = null
+        val handle = ActiveTestHandle(token = testToken, dialog = dialog) {
+            test.dialogStatus.set(2)
+            mainJob?.cancel()
+            synchronized(testJobs) { testJobs.toList() }.forEach { it.cancel() }
+        }
+        activeTestHandle = handle
+
+        test.cancel = {
+            handle.cancel(dismissDialog = true)
+        }
+        test.minimize = {
+            if (DataStore.isTestTokenActive(testToken)) {
+                test.dialogStatus.set(1)
+                val notif = ConnectionTestNotification(
+                    dialog.context,
+                    "[${group.displayName()}] ${getString(R.string.connection_test)}"
+                )
+                test.notification = notif
+                handle.notification = notif
+                handle.isHidden = true
+                dialog.hide()
+            }
+        }
+
+        mainJob = runOnDefaultDispatcher {
+            try {
+                val profilesList = SagerDatabase.proxyDao.getByGroup(group.id).filter {
+                    if (icmpPing) {
+                        it.requireBean().canICMPing()
+                    } else {
+                        it.requireBean().canTCPing()
                     }
                 }
-                return@filter false
-            }
-            test.proxyN = profilesList.size
-            val profiles = ConcurrentLinkedQueue(profilesList)
-            repeat(DataStore.connectionTestConcurrent) {
-                testJobs.add(launch(Dispatchers.IO) {
-                    while (isActive) {
-                        val profile = profiles.poll() ?: break
+                test.proxyN = profilesList.size
+                val profiles = ConcurrentLinkedQueue(profilesList)
+                repeat(DataStore.connectionTestConcurrent) {
+                    testJobs.add(launch(Dispatchers.IO) {
+                        while (isActive && DataStore.isTestTokenActive(testToken)) {
+                            val profile = profiles.poll() ?: break
 
-                        profile.status = 0
-                        var address = profile.requireBean().serverAddress
-                        if (!address!!.isIpAddress()) {
+                            profile.status = 0
+                            var address = profile.requireBean().serverAddress.orEmpty()
+                            if (!address.isIpAddress()) {
+                                // Honor group-level DNS when configured; otherwise resolve via
+                                // underlyingNetwork with FakeIP rejection to avoid TUN poisoning.
+                                val resolved = if (groupDns.isNotEmpty() || !group.requiresNodeDnsAdoption()) {
+                                    runCatching { IpInfoStore.resolveEntry(address, groupDns) }.getOrNull()
+                                } else {
+                                    null
+                                }
+                                if (resolved != null) {
+                                    address = resolved
+                                }
+                            }
+                            if (!isActive || !DataStore.isTestTokenActive(testToken)) break
+                            if (!address.isIpAddress()) {
+                                profile.status = 2
+                                profile.error = app.getString(R.string.connection_test_domain_not_found)
+                                test.update(profile)
+                                continue
+                            }
                             try {
-                                val resolved = SagerNet.underlyingNetwork?.getAllByName(address)
-                                    ?: InetAddress.getAllByName(address)
-                                resolved.firstOrNull()?.hostAddress?.let {
-                                    address = it
+                                if (icmpPing) {
+                                    // ICMP ping disabled in favor of TCPing/URLTest.
+                                } else {
+                                    val socket =
+                                        SagerNet.underlyingNetwork?.socketFactory?.createSocket()
+                                            ?: Socket()
+                                    try {
+                                        socket.soTimeout = 3000
+                                        socket.bind(InetSocketAddress(0))
+                                        val start = SystemClock.elapsedRealtime()
+                                        socket.connect(
+                                            InetSocketAddress(
+                                                address, profile.requireBean().serverPort!!
+                                            ), 3000
+                                        )
+                                        if (!isActive || !DataStore.isTestTokenActive(testToken)) break
+                                        profile.status = 1
+                                        profile.ping = (SystemClock.elapsedRealtime() - start).toInt()
+                                        test.update(profile)
+                                    } finally {
+                                        socket.closeQuietly()
+                                    }
                                 }
-                            } catch (ignored: UnknownHostException) {
-                            } catch (ignored: Exception) {
-                            }
-                        }
-                        if (!isActive) break
-                        if (!address!!.isIpAddress()) {
-                            profile.status = 2
-                            profile.error = app.getString(R.string.connection_test_domain_not_found)
-                            test.update(profile)
-                            continue
-                        }
-                        try {
-                            if (icmpPing) {
-                                // removed
-                            } else {
-                                val socket =
-                                    SagerNet.underlyingNetwork?.socketFactory?.createSocket()
-                                        ?: Socket()
-                                try {
-                                    socket.soTimeout = 3000
-                                    socket.bind(InetSocketAddress(0))
-                                    val start = SystemClock.elapsedRealtime()
-                                    socket.connect(
-                                        InetSocketAddress(
-                                            address, profile.requireBean().serverPort!!
-                                        ), 3000
-                                    )
-                                    if (!isActive) break
-                                    profile.status = 1
-                                    profile.ping = (SystemClock.elapsedRealtime() - start).toInt()
-                                    test.update(profile)
-                                } finally {
-                                    socket.closeQuietly()
-                                }
-                            }
-                        } catch (e: Exception) {
-                            if (!isActive) break
-                            val message = e.readableMessage
+                            } catch (e: Exception) {
+                                if (!isActive || !DataStore.isTestTokenActive(testToken)) break
+                                val message = e.readableMessage
 
-                            if (icmpPing) {
-                                profile.status = 2
-                                profile.error = getString(R.string.connection_test_unreachable)
-                            } else {
-                                profile.status = 2
-                                when {
-                                    !message.contains("failed:") -> profile.error =
-                                        getString(R.string.connection_test_timeout)
+                                if (icmpPing) {
+                                    profile.status = 2
+                                    profile.error = getString(R.string.connection_test_unreachable)
+                                } else {
+                                    profile.status = 2
+                                    when {
+                                        !message.contains("failed:") -> profile.error =
+                                            getString(R.string.connection_test_timeout)
 
-                                    else -> when {
-                                        message.contains("ECONNREFUSED") -> {
-                                            profile.error =
-                                                getString(R.string.connection_test_refused)
-                                        }
+                                        else -> when {
+                                            message.contains("ECONNREFUSED") -> {
+                                                profile.error =
+                                                    getString(R.string.connection_test_refused)
+                                            }
 
-                                        message.contains("ENETUNREACH") -> {
-                                            profile.error =
-                                                getString(R.string.connection_test_unreachable)
-                                        }
+                                            message.contains("ENETUNREACH") -> {
+                                                profile.error =
+                                                    getString(R.string.connection_test_unreachable)
+                                            }
 
-                                        else -> {
-                                            profile.status = 3
-                                            profile.error = message
+                                            else -> {
+                                                profile.status = 3
+                                                profile.error = message
+                                            }
                                         }
                                     }
                                 }
+                                test.update(profile)
                             }
-                            test.update(profile)
+                        }
+                    })
+                }
+
+                synchronized(testJobs) { testJobs.toList() }.joinAll()
+            } finally {
+                withContext(NonCancellable) {
+                    // Persist results only if this test token was NOT superseded by a forced newer run.
+                    if (DataStore.isTestTokenActive(testToken)) {
+                        test.results.forEach {
+                            try {
+                                ProfileManager.updateProfile(it)
+                            } catch (e: Exception) {
+                                Logs.w(e)
+                            }
+                        }
+                        GroupManager.postReload(group.id)
+                    }
+                    withContext(Dispatchers.Main.immediate) {
+                        test.dialogStatus.set(2)
+                        runCatching { dialog.dismiss() }
+                        test.notification?.updateNotification(0, 0, true)
+                        test.notification = null
+                        handle.notification = null
+                        handle.dialog = null
+                        handle.isHidden = false
+                        if (activeTestHandle === handle) {
+                            activeTestHandle = null
                         }
                     }
-                })
-            }
-
-            testJobs.joinAll()
-
-            runOnMainDispatcher {
-                test.cancel()
-            }
-        }
-        test.cancel = {
-            test.dialogStatus.set(2)
-            dialog.dismiss()
-            runOnDefaultDispatcher {
-                mainJob.cancel()
-                testJobs.forEach { it.cancel() }
-                test.results.forEach {
-                    try {
-                        ProfileManager.updateProfile(it)
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                    }
+                    DataStore.releaseTestToken(testToken)
                 }
-                GroupManager.postReload(DataStore.currentGroupId())
-                DataStore.releaseTestToken(testToken)
             }
-        }
-        test.minimize = {
-            test.dialogStatus.set(1)
-            test.notification = ConnectionTestNotification(
-                dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}"
-            )
-            dialog.hide()
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
     fun urlTest(force: Boolean = false) {
-        if (force) cancelAllTests()
-        var testToken = DataStore.acquireTestToken()
-        if (testToken == 0 && force) testToken = DataStore.forceTestToken()
-        if (testToken == 0) {
-            runOnMainDispatcher {
-                if (isAdded) {
-                    MaterialAlertDialogBuilder(requireContext())
-                        .setMessage(R.string.connection_test_running_force)
-                        .setPositiveButton(R.string.connection_test_force) { _, _ ->
-                            urlTest(force = true)
-                        }
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show()
-                }
-            }
-            return
+        if (!isAdded) return
+        val testToken = acquireOrPromptTestToken(force) {
+            urlTest(force = true)
         }
-        val test = TestDialog()
+        if (testToken == 0) return
+
+        val test = TestDialog(testToken)
         val dialog = test.builder.show()
-        val testJobs = mutableListOf<Job>()
+        val testJobs = java.util.Collections.synchronizedList(mutableListOf<Job>())
         val group = DataStore.currentGroup()
 
-        val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
-            test.proxyN = profilesList.size
-            val profiles = ConcurrentLinkedQueue(profilesList)
-            repeat(DataStore.connectionTestConcurrent) {
-                testJobs.add(launch(Dispatchers.IO) {
-                    val urlTest = UrlTest() // note: this is NOT in bg process
-                    while (isActive) {
-                        val profile = profiles.poll() ?: break
-                        profile.status = 0
-
-                        try {
-                            val result = urlTest.doTest(profile)
-                            profile.status = 1
-                            profile.ping = result
-                        } catch (e: PluginManager.PluginNotFoundException) {
-                            profile.status = 2
-                            profile.error = e.readableMessage
-                        } catch (e: Exception) {
-                            profile.status = 3
-                            profile.error = e.readableMessage
-                        }
-
-                        test.update(profile)
-                    }
-                })
-            }
-
-            testJobs.joinAll()
-
-            runOnMainDispatcher {
-                test.cancel()
-            }
-        }
-        test.cancel = {
+        var mainJob: Job? = null
+        val handle = ActiveTestHandle(token = testToken, dialog = dialog) {
             test.dialogStatus.set(2)
-            dialog.dismiss()
-            runOnDefaultDispatcher {
-                mainJob.cancel()
-                testJobs.forEach { it.cancel() }
-                test.results.forEach {
-                    try {
-                        ProfileManager.updateProfile(it)
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                    }
-                }
-                GroupManager.postReload(DataStore.currentGroupId())
-                DataStore.releaseTestToken(testToken)
-            }
+            mainJob?.cancel()
+            synchronized(testJobs) { testJobs.toList() }.forEach { it.cancel() }
+        }
+        activeTestHandle = handle
+
+        test.cancel = {
+            handle.cancel(dismissDialog = true)
         }
         test.minimize = {
-            test.dialogStatus.set(1)
-            test.notification = ConnectionTestNotification(
-                dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}"
-            )
-            dialog.hide()
+            if (DataStore.isTestTokenActive(testToken)) {
+                test.dialogStatus.set(1)
+                val notif = ConnectionTestNotification(
+                    dialog.context,
+                    "[${group.displayName()}] ${getString(R.string.connection_test)}"
+                )
+                test.notification = notif
+                handle.notification = notif
+                handle.isHidden = true
+                dialog.hide()
+            }
+        }
+
+        mainJob = runOnDefaultDispatcher {
+            try {
+                val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+                test.proxyN = profilesList.size
+                val profiles = ConcurrentLinkedQueue(profilesList)
+                repeat(DataStore.connectionTestConcurrent) {
+                    testJobs.add(launch(Dispatchers.IO) {
+                        val urlTest = UrlTest() // note: this is NOT in bg process
+                        while (isActive && DataStore.isTestTokenActive(testToken)) {
+                            val profile = profiles.poll() ?: break
+                            profile.status = 0
+
+                            try {
+                                val result = urlTest.doTest(profile)
+                                profile.status = 1
+                                profile.ping = result
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: PluginManager.PluginNotFoundException) {
+                                profile.status = 2
+                                profile.error = e.readableMessage
+                            } catch (e: Exception) {
+                                profile.status = 3
+                                profile.error = e.readableMessage
+                            }
+
+                            test.update(profile)
+                        }
+                    })
+                }
+
+                synchronized(testJobs) { testJobs.toList() }.joinAll()
+            } finally {
+                withContext(NonCancellable) {
+                    // Only write back results when this run still owns the active token;
+                    // superseded runs must never overwrite newer test results in Room.
+                    if (DataStore.isTestTokenActive(testToken)) {
+                        test.results.forEach {
+                            try {
+                                ProfileManager.updateProfile(it)
+                            } catch (e: Exception) {
+                                Logs.w(e)
+                            }
+                        }
+                        GroupManager.postReload(group.id)
+                    }
+                    withContext(Dispatchers.Main.immediate) {
+                        test.dialogStatus.set(2)
+                        runCatching { dialog.dismiss() }
+                        test.notification?.updateNotification(0, 0, true)
+                        test.notification = null
+                        handle.notification = null
+                        handle.dialog = null
+                        handle.isHidden = false
+                        if (activeTestHandle === handle) {
+                            activeTestHandle = null
+                        }
+                    }
+                    DataStore.releaseTestToken(testToken)
+                }
+            }
         }
     }
 
@@ -1544,20 +1633,19 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         override suspend fun groupRemoved(groupId: Long) {
-            val index = groupList.indexOfFirst { it.id == groupId }
-            if (index == -1) return
-
             tabLayout.post {
+                val index = groupList.indexOfFirst { it.id == groupId }
+                if (index < 0) return@post
                 groupList.removeAt(index)
                 notifyItemRemoved(index)
             }
         }
 
         override suspend fun groupUpdated(group: ProxyGroup) {
-            val index = groupList.indexOfFirst { it.id == group.id }
-            if (index == -1) return
-
             tabLayout.post {
+                val index = groupList.indexOfFirst { it.id == group.id }
+                if (index < 0) return@post
+                groupList[index] = group
                 tabLayout.getTabAt(index)?.text = group.displayName()
             }
         }
@@ -1976,9 +2064,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
                 if (profile.groupId != proxyGroup.id) return
-                val index = configurationIdList.indexOf(profile.id)
-                if (index < 0) return
                 configurationListView.post {
+                    val index = configurationIdList.indexOf(profile.id)
+                    if (index < 0) return@post
                     if (::undoManager.isInitialized) {
                         undoManager.flush()
                     }
@@ -2001,14 +2089,14 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun onUpdated(data: TrafficData) {
                 try {
-                    val index = configurationIdList.indexOf(data.id)
-                    if (index != -1) {
+                    onMainDispatcher {
+                        if (!isAdded) return@onMainDispatcher
+                        val index = configurationIdList.indexOf(data.id)
+                        if (index < 0) return@onMainDispatcher
                         val holder = layoutManager.findViewByPosition(index)
-                            ?.let { configurationListView.getChildViewHolder(it) } as ConfigurationHolder?
-                        if (holder != null) {
-                            onMainDispatcher {
-                                holder.bind(holder.entity, data)
-                            }
+                            ?.let { configurationListView.getChildViewHolder(it) } as? ConfigurationHolder
+                        if (holder != null && holder.entity.id == data.id) {
+                            holder.bind(holder.entity, data)
                         }
                     }
                 } catch (e: Exception) {
@@ -2018,10 +2106,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun onRemoved(groupId: Long, profileId: Long) {
                 if (groupId != proxyGroup.id) return
-                val index = configurationIdList.indexOf(profileId)
-                if (index < 0) return
-
                 configurationListView.post {
+                    val index = configurationIdList.indexOf(profileId)
+                    if (index < 0) return@post
                     configurationIdList.removeAt(index)
                     configurationList.remove(profileId)
                     notifyItemRemoved(index)
@@ -2039,7 +2126,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun groupUpdated(groupId: Long) {
                 if (groupId != proxyGroup.id) return
-                proxyGroup = SagerDatabase.groupDao.getById(groupId)!!
+                proxyGroup = SagerDatabase.groupDao.getById(groupId) ?: return
                 reloadProfiles()
             }
 
@@ -2048,7 +2135,6 @@ class ConfigurationFragment @JvmOverloads constructor(
                 when (proxyGroup.order) {
                     GroupOrder.BY_NAME -> {
                         newProfiles = newProfiles.sortedBy { it.displayName() }
-
                     }
 
                     GroupOrder.BY_DELAY -> {
@@ -2067,8 +2153,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
 
-                configurationList.clear()
-                configurationList.putAll(newProfiles.associateBy { it.id })
+                val newProfileMap = newProfiles.associateBy { it.id }
                 val newProfileIds = newProfiles.map { it.id }
 
                 var selectedProfileIndex = -1
@@ -2079,6 +2164,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 configurationListView.post {
+                    configurationList.clear()
+                    configurationList.putAll(newProfileMap)
                     configurationIdList.clear()
                     configurationIdList.addAll(newProfileIds)
                     notifyDataSetChanged()
@@ -2088,7 +2175,6 @@ class ConfigurationFragment @JvmOverloads constructor(
                     } else if (newProfiles.isNotEmpty()) {
                         configurationListView.scrollTo(0, true)
                     }
-
                 }
             }
 
@@ -2155,7 +2241,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 lastSelected = DataStore.selectedProxy
                                 DataStore.selectedProxy = proxyEntity.id
                                 onMainDispatcher {
-                                    selectedView.visibility = View.VISIBLE
+                                    if (entity.id == proxyEntity.id) {
+                                        selectedView.visibility = View.VISIBLE
+                                    }
                                 }
                             }
 
@@ -2253,10 +2341,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 if (proxyEntity.status == 3) {
                     val err = proxyEntity.error ?: "<?>"
+                    val sanitizedErr = Protocols.sanitizeErrorMessage(err)
                     val msg = Protocols.genFriendlyMsg(err)
-                    val baseErr = if (!hideAddress && msg != err) msg else getString(R.string.unavailable)
+                    val baseErr = if (!hideAddress && msg != sanitizedErr) msg else getString(R.string.unavailable)
                     profileStatus.text = if (stText != null) "$baseErr\n$stText" else baseErr
-                    profileStatus.setOnClickListener(if (hideAddress) null else View.OnClickListener { alert(err).tryToShow() })
+                    profileStatus.setOnClickListener(if (hideAddress) null else View.OnClickListener { alert(sanitizedErr).tryToShow() })
                 } else {
                     profileStatus.setOnClickListener(null)
                 }
@@ -2270,10 +2359,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 removeButton.setOnClickListener {
-                    adapter?.let {
-                        val index = it.configurationIdList.indexOf(proxyEntity.id)
-                        it.remove(index)
-                        undoManager.remove(index to proxyEntity)
+                    adapter?.let { listAdapter ->
+                        val index = listAdapter.configurationIdList.indexOf(proxyEntity.id)
+                        if (index >= 0) {
+                            listAdapter.remove(index)
+                            undoManager.remove(index to proxyEntity)
+                        }
                     }
                 }
 
@@ -2286,11 +2377,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                     shareLayout.isGone = true
                 }
 
+                val boundEntityId = proxyEntity.id
                 runOnDefaultDispatcher {
-                    val selected = (selectedItem?.id ?: DataStore.selectedProxy) == proxyEntity.id
+                    val selected = (selectedItem?.id ?: DataStore.selectedProxy) == boundEntityId
                     val started =
-                        selected && DataStore.serviceState.started && DataStore.currentProfile == proxyEntity.id
+                        selected && DataStore.serviceState.started && DataStore.currentProfile == boundEntityId
                     onMainDispatcher {
+                        // Guard against fast-scroll ViewHolder recycling before mutating state.
+                        if (entity.id != boundEntityId) return@onMainDispatcher
                         editButton.isEnabled = !started
                         removeButton.isEnabled = !started
                         selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
@@ -2324,13 +2418,16 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                     if (!(select || proxyEntity.type == ProxyEntity.TYPE_CHAIN)) {
                         onMainDispatcher {
+                            if (entity.id != boundEntityId) return@onMainDispatcher
                             shareLayer.setBackgroundColor(Color.TRANSPARENT)
                             shareButton.setImageResource(R.drawable.ic_social_share)
-                            shareButton.setColorFilter(Color.GRAY)
+                            shareButton.setColorFilter(requireContext().getColour(R.color.card_icon_tint))
                             shareButton.isVisible = true
 
                             shareLayout.setOnClickListener {
-                                showShare(it)
+                                if (entity.id == boundEntityId) {
+                                    showShare(it)
+                                }
                             }
                         }
                     }
@@ -2374,6 +2471,23 @@ class ConfigurationFragment @JvmOverloads constructor(
                     .show()
             }
 
+            /**
+             * Confirms with the user if an exported sing-box JSON still embeds private
+             * `dns-group-*` server URLs (which may contain subscription tokens/paths).
+             */
+            private fun confirmConfigExportIfPrivateDns(configText: String, onProceed: () -> Unit) {
+                if (!configText.contains("\"dns-group-")) {
+                    onProceed()
+                    return
+                }
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.action_export_file)
+                    .setMessage(R.string.export_config_private_dns_warning)
+                    .setPositiveButton(android.R.string.ok) { _, _ -> onProceed() }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+
             override fun onMenuItemClick(item: MenuItem): Boolean {
                 try {
                     when (item.itemId) {
@@ -2388,14 +2502,18 @@ class ConfigurationFragment @JvmOverloads constructor(
                             val universal = item.itemId == R.id.action_universal_clipboard
                             exportWithResolvedIp({ profile, ip -> profile.exportLink(universal, ip) }, ::export)
                         }
-                        R.id.action_config_export_clipboard -> exportWithResolvedIp(ProxyEntity::exportConfig) {
-                            export(it.first)
+                        R.id.action_config_export_clipboard -> exportWithResolvedIp(ProxyEntity::exportConfig) { config ->
+                            confirmConfigExportIfPrivateDns(config.first) {
+                                export(config.first)
+                            }
                         }
                         R.id.action_config_export_file -> exportWithResolvedIp(ProxyEntity::exportConfig) { config ->
-                            DataStore.serverConfig = config.first
-                            startFilesForResult(
-                                (parentFragment as ConfigurationFragment).exportConfig, config.second
-                            )
+                            confirmConfigExportIfPrivateDns(config.first) {
+                                DataStore.serverConfig = config.first
+                                startFilesForResult(
+                                    (parentFragment as ConfigurationFragment).exportConfig, config.second
+                                )
+                            }
                         }
                     }
                 } catch (e: Exception) {

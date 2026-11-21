@@ -42,9 +42,10 @@ data class ProxyGroup(
     /** 返回拨号时使用的解析器列表（每行一个端点）；手填优先，自动采纳仅对订阅组有效。 */
     fun effectiveNodeDnsList(): List<String> = (manualNodeDns()
         ?: subscription?.takeIf { type == GroupType.SUBSCRIPTION }?.effectiveNodeDns())
-        ?.split('\n')
+        ?.lineSequence()
         ?.map { it.trim() }
         ?.filter { it.isNotEmpty() }
+        ?.toList()
         .orEmpty()
 
     /** 兼容旧调用方的单值形式（主端点）。 */
@@ -61,11 +62,13 @@ data class ProxyGroup(
     override fun serializeToBuffer(output: ByteBufferOutput) {
         if (export) {
             // 分享链接会离开本机；不要把可能带凭据的 DNS URL 放进去。
+            val subscriptionDescriptor = requireNotNull(subscription) {
+                "Cannot export non-subscription ProxyGroup as subscription share link"
+            }
             output.writeInt(0)
             output.writeString(name)
             output.writeInt(type)
-            val subscription = subscription!!
-            subscription.serializeForShare(output)
+            subscriptionDescriptor.serializeForShare(output)
         } else {
             output.writeInt(2)
             output.writeLong(id)
@@ -91,6 +94,7 @@ data class ProxyGroup(
         outboundDns = null
         if (export) {
             val version = input.readInt()
+            require(version == 0) { "Unsupported exported ProxyGroup version: $version" }
 
             name = input.readString()
             type = input.readInt()
@@ -100,6 +104,7 @@ data class ProxyGroup(
             subscription.deserializeFromShare(input)
         } else {
             val version = input.readInt()
+            require(version in 0..2) { "Unsupported ProxyGroup serialization version: $version" }
 
             id = input.readLong()
             userOrder = input.readLong()

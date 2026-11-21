@@ -42,6 +42,17 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
             }.start()
         }
 
+        /** Terminates an already-started process immediately if the pool closed mid-start. */
+        fun destroyImmediately() {
+            if (!::process.isInitialized) return
+            runCatching {
+                process.destroy()
+                if (Build.VERSION.SDK_INT >= 26) {
+                    process.destroyForcibly()
+                }
+            }.onFailure { Logs.w(it) }
+        }
+
         @DelicateCoroutinesApi
         suspend fun looper(onRestartCallback: (suspend () -> Unit)?) {
             var running = true
@@ -100,25 +111,48 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
     }
 
     override val coroutineContext = Dispatchers.Main.immediate + Job()
+    private val stateLock = Any()
+    @Volatile
+    private var isClosed = false
+    @Volatile
     var processCount = 0
 
-    @MainThread
+    /**
+     * Spawns and supervises an external plugin process unless this pool has already been
+     * closed or cancelled. Thread-safe against concurrent [close] calls from test cancellation.
+     */
     fun start(
         cmd: List<String>,
         env: MutableMap<String, String> = mutableMapOf(),
         onRestartCallback: (suspend () -> Unit)? = null
     ) {
-        Logs.i("start process: ${Commandline.toString(cmd)}")
-        Guard(cmd, env).apply {
-            start() // if start fails, IOException will be thrown directly
-            launch { looper(onRestartCallback) }
+        synchronized(stateLock) {
+            if (isClosed || !isActive) return
         }
-        processCount += 1
+        Logs.i("start process: ${Commandline.toString(cmd)}")
+        val guard = Guard(cmd, env)
+        guard.start() // if start fails, IOException will be thrown directly
+        val launched = synchronized(stateLock) {
+            if (isClosed || !isActive) {
+                false
+            } else {
+                launch { guard.looper(onRestartCallback) }
+                processCount += 1
+                true
+            }
+        }
+        if (!launched) {
+            // Pool closed concurrently with ProcessBuilder.start(): kill immediately to avoid orphans.
+            guard.destroyImmediately()
+        }
     }
 
-    @MainThread
+    /** Marks the pool closed, cancels all supervisor coroutines, and joins cleanup on [scope]. */
     fun close(scope: CoroutineScope) {
-        cancel()
+        synchronized(stateLock) {
+            isClosed = true
+            cancel()
+        }
         coroutineContext[Job]!!.also { job -> scope.launch { job.cancelAndJoin() } }
     }
 }

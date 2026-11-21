@@ -80,5 +80,16 @@ class AppUpdatePolicyTest {
         assertFalse(AppUpdatePolicy.isAllowedReleaseUrl("http://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.2"))
         assertFalse(AppUpdatePolicy.isAllowedReleaseUrl("https://evil.example/Siu-Leung/NekoPro/releases/tag/v1.2.2"))
         assertFalse(AppUpdatePolicy.isAllowedReleaseUrl("intent://github.com/Siu-Leung/NekoPro/releases/tag/v1.2.2"))
+        assertFalse(AppUpdatePolicy.isAllowedReleaseUrl("https://github.com/Siu-Leung/NekoPro/releases/../../../attacker/evil/releases/tag/v1"))
+        assertFalse(AppUpdatePolicy.isAllowedReleaseUrl("https://github.com/Siu-Leung/NekoPro/releases/%2e%2e/%2e%2e/attacker/evil"))
+    }
+
+    @Test
+    fun allowedAssetDownloadUrlEnforcesHttpsAndTrustedHosts() {
+        assertTrue(AppUpdatePolicy.isAllowedAssetDownloadUrl("https://github.com/SagerNet/sing-geoip/releases/download/2026/geoip.db"))
+        assertTrue(AppUpdatePolicy.isAllowedAssetDownloadUrl("https://objects.githubusercontent.com/github-production-release-asset/1234"))
+        assertFalse(AppUpdatePolicy.isAllowedAssetDownloadUrl("http://github.com/SagerNet/sing-geoip/releases/download/2026/geoip.db"))
+        assertFalse(AppUpdatePolicy.isAllowedAssetDownloadUrl("https://evil.example/geoip.db"))
+        assertFalse(AppUpdatePolicy.isAllowedAssetDownloadUrl("https://github.com/SagerNet/sing-geoip/../../evil/geoip.db"))
     }
 }

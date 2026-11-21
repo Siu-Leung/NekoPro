@@ -41,7 +41,28 @@ abstract class BoxInstance(
     val pluginConfigs = hashMapOf<Int, Pair<Int, String>>()
     val externalInstances = hashMapOf<Int, AbstractInstance>()
     open lateinit var processes: GuardedProcessPool
-    private var cacheFiles = ArrayList<File>()
+    private val cacheFilesLock = Any()
+    private val cacheFiles = ArrayList<File>()
+
+    /** Registers a temporary plugin config or CA file for cleanup on [close]. */
+    protected fun registerCacheFile(file: File) {
+        synchronized(cacheFilesLock) {
+            cacheFiles.add(file)
+        }
+    }
+
+    /** Deletes and clears all registered temporary files in a thread-safe snapshot. */
+    protected fun deleteCacheFiles() {
+        val snapshot = synchronized(cacheFilesLock) {
+            val copy = cacheFiles.toList()
+            cacheFiles.clear()
+            copy
+        }
+        snapshot.forEach { file ->
+            runCatching { file.delete() }
+        }
+    }
+
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -80,7 +101,7 @@ abstract class BoxInstance(
                                 app.cacheDir, uniqueTempName("hysteria", "ca")
                             ).apply {
                                 parentFile?.mkdirs()
-                                cacheFiles.add(this)
+                                registerCacheFile(this)
                             }
                         }
                     }
@@ -112,7 +133,7 @@ abstract class BoxInstance(
                         )
                         configFile.parentFile?.mkdirs()
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
+                        registerCacheFile(configFile)
 
                         val commands = mutableListOf(
                             initPlugin("trojan-go-plugin").path, "-config", configFile.absolutePath
@@ -128,7 +149,7 @@ abstract class BoxInstance(
 
                         configFile.parentFile?.mkdirs()
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
+                        registerCacheFile(configFile)
 
                         val envMap = mutableMapOf<String, String>()
 
@@ -140,7 +161,7 @@ abstract class BoxInstance(
 
                             certFile.parentFile?.mkdirs()
                             certFile.writeText(certificates)
-                            cacheFiles.add(certFile)
+                            registerCacheFile(certFile)
 
                             envMap["SSL_CERT_FILE"] = certFile.absolutePath
                         }
@@ -159,7 +180,7 @@ abstract class BoxInstance(
 
                         configFile.parentFile?.mkdirs()
                         configFile.writeText(config)
-                        cacheFiles.add(configFile)
+                        registerCacheFile(configFile)
 
                         val plugin = initPlugin("hysteria-plugin")
                         val commands = mutableListOf(
@@ -210,7 +231,7 @@ abstract class BoxInstance(
             }
         }
 
-        cacheFiles.removeAll { it.delete(); true }
+        deleteCacheFiles()
 
         if (::processes.isInitialized) processes.close(GlobalScope + Dispatchers.IO)
 

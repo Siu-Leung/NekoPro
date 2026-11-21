@@ -107,6 +107,12 @@ func refreshActiveLocked() {
 	}
 }
 
+func init() {
+	// Enable IPv6 lookup once at package load rather than writing this global
+	// flag concurrently from outbound constructors.
+	resolver.DisableIPv6 = false
+}
+
 // InstallProtectHook registers the sing-box Android VPN socket protect
 // callback and encrypted DNS router bridge of the instance owning ctx for
 // embedded mihomo outbounds. The returned function releases the
@@ -115,7 +121,6 @@ func refreshActiveLocked() {
 // becomes active again.
 func InstallProtectHook(ctx context.Context) (release func()) {
 	release = func() {}
-	resolver.DisableIPv6 = false
 	if ctx == nil {
 		return
 	}
@@ -300,6 +305,162 @@ func NewOutboundResolver(ctx context.Context, dialOptions option.DialerOptions, 
 		}
 	}
 	return nil, nil
+}
+
+// NewTargetResolver creates an instance-scoped mihomo resolver.Resolver for
+// proxied target domains (e.g., MASQUE when RemoteDnsResolve is disabled).
+// Unlike the process-global resolver.DefaultResolver, this resolver stays
+// bound to the owning sing-box instance so temporary test boxes resolve
+// domains via their own DNS router even after the main VPN disconnects, while
+// main VPN instances remain fail-closed against dns-direct/dns-local leaks.
+func NewTargetResolver(ctx context.Context) resolver.Resolver {
+	if ctx == nil {
+		return nil
+	}
+	dnsRouter := service.FromContext[adapter.DNSRouter](ctx)
+	transports := service.FromContext[adapter.DNSTransportManager](ctx)
+	if dnsRouter == nil || transports == nil {
+		return nil
+	}
+	return &instanceTargetResolver{
+		holder: &dnsRouterHolder{
+			router:           dnsRouter,
+			transportManager: transports,
+			test:             isTestInstance(ctx),
+		},
+		inner: &singBoxResolver{
+			transports: []string{"dns-remote"},
+			strict:     true,
+		},
+	}
+}
+
+type instanceTargetResolver struct {
+	holder *dnsRouterHolder
+	inner  *singBoxResolver
+}
+
+var _ resolver.Resolver = (*instanceTargetResolver)(nil)
+
+func (r *instanceTargetResolver) lookup(ctx context.Context, host string, strategy boxConstant.DomainStrategy) ([]netip.Addr, error) {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{ip.Unmap()}, nil
+	}
+	if r.holder == nil || r.holder.router == nil {
+		return nil, resolver.ErrIPNotFound
+	}
+	tr, ok := r.inner.defaultTransport(r.holder)
+	if !ok {
+		return nil, resolver.ErrIPNotFound
+	}
+	addrs, err := r.holder.router.Lookup(ctx, host, adapter.DNSQueryOptions{
+		Transport:      tr,
+		Strategy:       strategy,
+		LookupStrategy: strategy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, resolver.ErrIPNotFound
+	}
+	return addrs, nil
+}
+
+func (r *instanceTargetResolver) LookupIP(ctx context.Context, host string) ([]netip.Addr, error) {
+	return r.lookup(ctx, host, boxConstant.DomainStrategyAsIS)
+}
+
+func (r *instanceTargetResolver) LookupIPv4(ctx context.Context, host string) ([]netip.Addr, error) {
+	addrs, err := r.lookup(ctx, host, boxConstant.DomainStrategyIPv4Only)
+	if err != nil {
+		return nil, err
+	}
+	return filterIPv4Addrs(addrs)
+}
+
+func (r *instanceTargetResolver) LookupIPv6(ctx context.Context, host string) ([]netip.Addr, error) {
+	addrs, err := r.lookup(ctx, host, boxConstant.DomainStrategyIPv6Only)
+	if err != nil {
+		return nil, err
+	}
+	return filterIPv6Addrs(addrs)
+}
+
+func (r *instanceTargetResolver) ResolveECH(ctx context.Context, host string) ([]byte, error) {
+	msg := &mDNS.Msg{}
+	msg.SetQuestion(mDNS.Fqdn(host), mDNS.TypeHTTPS)
+	resp, err := r.ExchangeContext(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	return extractECHFromDNS(resp)
+}
+
+func (r *instanceTargetResolver) ExchangeContext(ctx context.Context, m *mDNS.Msg) (*mDNS.Msg, error) {
+	if r.holder == nil || r.holder.router == nil {
+		return nil, resolver.ErrIPNotFound
+	}
+	tr, ok := r.inner.defaultTransport(r.holder)
+	if !ok {
+		return nil, resolver.ErrIPNotFound
+	}
+	return r.holder.router.Exchange(ctx, m, adapter.DNSQueryOptions{
+		Transport: tr,
+	})
+}
+
+func (r *instanceTargetResolver) Invalid() bool { return true }
+
+func (r *instanceTargetResolver) ClearCache() {
+	if r.holder != nil && r.holder.router != nil {
+		r.holder.router.ClearCache()
+	}
+}
+
+func (r *instanceTargetResolver) ResetConnection() {
+	if r.holder != nil && r.holder.router != nil {
+		r.holder.router.ResetNetwork()
+	}
+}
+
+func filterIPv4Addrs(addrs []netip.Addr) ([]netip.Addr, error) {
+	out := make([]netip.Addr, 0, len(addrs))
+	for _, ip := range addrs {
+		if ip.Unmap().Is4() {
+			out = append(out, ip.Unmap())
+		}
+	}
+	if len(out) == 0 {
+		return nil, resolver.ErrIPNotFound
+	}
+	return out, nil
+}
+
+func filterIPv6Addrs(addrs []netip.Addr) ([]netip.Addr, error) {
+	out := make([]netip.Addr, 0, len(addrs))
+	for _, ip := range addrs {
+		if ip.Is6() && !ip.Is4In6() {
+			out = append(out, ip)
+		}
+	}
+	if len(out) == 0 {
+		return nil, resolver.ErrIPNotFound
+	}
+	return out, nil
+}
+
+func extractECHFromDNS(resp *mDNS.Msg) ([]byte, error) {
+	for _, rr := range resp.Answer {
+		if httpsRR, ok := rr.(*mDNS.HTTPS); ok {
+			for _, val := range httpsRR.Value {
+				if echCfg, ok := val.(*mDNS.SVCBECHConfig); ok {
+					return echCfg.ECH, nil
+				}
+			}
+		}
+	}
+	return nil, errors.New("no ECH config found in DNS records")
 }
 
 type outboundSingBoxResolver struct {

@@ -277,7 +277,9 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
     ): List<T> {
         val result = ArrayList<T>(array.length())
         for (i in 0 until array.length()) {
-            val data = Util.b64Decode(array[i] as String)
+            val encodedEntry = array.optString(i, "")
+            require(encodedEntry.isNotEmpty()) { "Backup contains empty entry at index $i" }
+            val data = Util.b64Decode(encodedEntry)
             val parcel = Parcel.obtain()
             try {
                 parcel.unmarshall(data, 0, data.size)
@@ -290,29 +292,80 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         return result
     }
 
+    /**
+     * Strictly decodes a [ProxyEntity] from a backup [Parcel], rejecting truncated or
+     * incompatible Kryo payloads and missing protocol beans before any database reset occurs.
+     *
+     * @param parcel Unmarshalled backup parcel positioned at byte 0.
+     * @return Validated [ProxyEntity] with a non-null protocol bean.
+     * @throws IllegalArgumentException When the payload is empty, has an unsupported version/type, or lacks a bean.
+     * @throws com.esotericsoftware.kryo.KryoException When the outer or inner Kryo stream is corrupted.
+     */
+    private fun decodeProxyEntityStrict(parcel: Parcel): ProxyEntity {
+        val kryoBytes = parcel.createByteArray()
+            ?: throw IllegalArgumentException("Backup profile entry has no Kryo payload")
+        require(kryoBytes.isNotEmpty()) { "Backup profile entry has empty Kryo payload" }
+        val entity = ProxyEntity()
+        entity.deserializeFromBufferStrict(com.esotericsoftware.kryo.io.ByteBufferInput(kryoBytes))
+        entity.initializeDefaultValues()
+        entity.requireBean()
+        return entity
+    }
+
+    /**
+     * Strictly decodes a [ProxyGroup] from a backup [Parcel] without swallowing [com.esotericsoftware.kryo.KryoException].
+     *
+     * @param parcel Unmarshalled backup parcel positioned at byte 0.
+     * @return Validated [ProxyGroup].
+     * @throws IllegalArgumentException When the payload is empty or invalid.
+     * @throws com.esotericsoftware.kryo.KryoException When the Kryo stream is truncated or corrupted.
+     */
+    private fun decodeProxyGroupStrict(parcel: Parcel): ProxyGroup {
+        val kryoBytes = parcel.createByteArray()
+            ?: throw IllegalArgumentException("Backup group entry has no Kryo payload")
+        return io.nekohasekai.sagernet.fmt.KryoConverters.deserializeStrict(ProxyGroup(), kryoBytes)
+    }
+
+    /**
+     * Imports selected sections from a parsed backup JSON object into Room databases atomically.
+     *
+     * All selected sections are strictly decoded and validated in memory before any table is
+     * cleared so a corrupt, truncated, or future-version backup never wipes existing user data.
+     *
+     * @param content Parsed backup JSON payload (`version == 1`).
+     * @param profile Whether to restore profiles and groups.
+     * @param rule Whether to restore routing rules.
+     * @param setting Whether to restore app settings.
+     * @throws IllegalArgumentException When any entry fails strict validation.
+     * @throws com.esotericsoftware.kryo.KryoException When any Kryo payload is corrupted.
+     */
     fun finishImport(
         content: JSONObject, profile: Boolean, rule: Boolean, setting: Boolean
     ) {
-        // Parse all selected sections before mutating any database so a malformed
-        // entry never leaves existing user data wiped.
+        val formatVersion = content.optInt("version", 0)
+        require(formatVersion == 1) { "Unsupported backup format version: $formatVersion" }
+
+        // Parse and strictly validate all selected sections before mutating any database so a
+        // malformed entry never leaves existing user data wiped or in a startup crash loop.
         var profiles: List<ProxyEntity>? = null
         var groups: List<ProxyGroup>? = null
         if (profile && content.has("profiles")) {
-            profiles = decodeParcelArray(content.getJSONArray("profiles")) {
-                ProxyEntity.CREATOR.createFromParcel(it)
+            require(content.has("groups")) { "Backup with profiles is missing required groups section" }
+            profiles = decodeParcelArray(content.getJSONArray("profiles")) { parcel ->
+                decodeProxyEntityStrict(parcel)
             }
-            groups = decodeParcelArray(content.getJSONArray("groups")) {
-                ProxyGroup.CREATOR.createFromParcel(it)
+            groups = decodeParcelArray(content.getJSONArray("groups")) { parcel ->
+                decodeProxyGroupStrict(parcel)
             }
         }
         val rules = if (rule && content.has("rules")) {
-            decodeParcelArray(content.getJSONArray("rules")) {
-                ParcelizeBridge.createRule(it)
+            decodeParcelArray(content.getJSONArray("rules")) { parcel ->
+                ParcelizeBridge.createRule(parcel)
             }
         } else null
         val settings = if (setting && content.has("settings")) {
-            decodeParcelArray(content.getJSONArray("settings")) {
-                KeyValuePair.CREATOR.createFromParcel(it)
+            decodeParcelArray(content.getJSONArray("settings")) { parcel ->
+                KeyValuePair.CREATOR.createFromParcel(parcel)
             }
         } else null
 

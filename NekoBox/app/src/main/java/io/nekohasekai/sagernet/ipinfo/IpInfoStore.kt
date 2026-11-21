@@ -4,6 +4,9 @@ import com.google.common.net.InetAddresses
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.nekohasekai.sagernet.Key
+import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.database.DataStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -21,14 +24,22 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.IOException
 import java.net.IDN
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.UnknownHostException
+import java.security.KeyStore
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 import kotlin.coroutines.resume
 
 /** An owner label is metadata, not evidence about how a request was routed. */
@@ -70,8 +81,96 @@ object IpInfoStore {
         .callTimeout(5, TimeUnit.SECONDS)
         .build()
 
+    @Volatile
+    private var cachedCaSignature: Pair<Long, Long>? = null
+
+    @Volatile
+    private var cachedCustomTrust: Pair<javax.net.ssl.SSLSocketFactory, X509TrustManager>? = null
+
     /** Pure literal check. Never calls a resolver, including on malformed input. */
     fun isIpLiteral(value: String): Boolean = literal(value) != null
+
+    /** Returns `true` when [endpoint] is an HTTPS DoH resolver handled directly by [IpInfoStore]. */
+    fun isHttpsResolver(endpoint: String): Boolean = groupDohUrl(endpoint) != null
+
+    /**
+     * Checks whether [ip] is a usable node entry address, rejecting sinkhole, unspecified,
+     * loopback, link-local, multicast, FakeIP (`198.18.0.0/15`), IPv6 ULA (`fc00::/7`),
+     * IPv4-compatible IPv6, and reserved (`240.0.0.0/4`) ranges.
+     */
+    fun isUsableEntryIp(ip: String): Boolean {
+        val address = literal(ip) ?: return false
+        val parsed = runCatching { InetAddresses.forString(address) }.getOrNull() ?: return false
+        return !isSinkholeOrFakeIp(parsed)
+    }
+
+    /**
+     * Strict public Internet routability check used before disclosing an IP to external
+     * attribution services (`api.ip.sb`). Blocks all private, CGNAT, FakeIP, documentation,
+     * loopback, link-local, multicast, ULA, and reserved ranges.
+     */
+    fun isPublicRoutableIp(ip: String): Boolean {
+        val address = literal(ip) ?: return false
+        val parsed = runCatching { InetAddresses.forString(address) }.getOrNull() ?: return false
+        if (isSinkholeOrFakeIp(parsed)) return false
+        if (parsed.isSiteLocalAddress) return false
+        val raw = extractIpv4OrIpv6Bytes(parsed)
+        if (raw.size == 4) {
+            val b0 = raw[0].toInt() and 0xFF
+            val b1 = raw[1].toInt() and 0xFF
+            val b2 = raw[2].toInt() and 0xFF
+            // CGNAT 100.64.0.0/10, IETF 192.0.0.0/24, TEST-NET-1/2/3.
+            if (b0 == 100 && (b1 and 0xC0) == 0x40) return false
+            if (b0 == 192 && b1 == 0 && (b2 == 0 || b2 == 2)) return false
+            if (b0 == 198 && b1 == 51 && b2 == 100) return false
+            if (b0 == 203 && b1 == 0 && b2 == 113) return false
+            return true
+        }
+        // Block IPv6 documentation prefix 2001:db8::/32.
+        val b0 = raw[0].toInt() and 0xFF
+        val b1 = raw[1].toInt() and 0xFF
+        val b2 = raw[2].toInt() and 0xFF
+        val b3 = raw[3].toInt() and 0xFF
+        if (b0 == 0x20 && b1 == 0x01 && b2 == 0x0D && b3 == 0xB8) return false
+        return true
+    }
+
+    private fun extractIpv4OrIpv6Bytes(parsed: InetAddress): ByteArray {
+        val bytes = parsed.address
+        // Unmap IPv4-mapped IPv6 (::ffff:a.b.c.d) to inspect the underlying IPv4 range.
+        if (bytes.size == 16 &&
+            (0..9).all { bytes[it].toInt() == 0 } &&
+            (bytes[10].toInt() and 0xFF) == 0xFF &&
+            (bytes[11].toInt() and 0xFF) == 0xFF
+        ) {
+            return bytes.copyOfRange(12, 16)
+        }
+        return bytes
+    }
+
+    private fun isSinkholeOrFakeIp(parsed: InetAddress): Boolean {
+        if (parsed.isAnyLocalAddress || parsed.isLoopbackAddress ||
+            parsed.isLinkLocalAddress || parsed.isMulticastAddress
+        ) return true
+        val bytes = parsed.address
+        if (bytes.size == 16) {
+            // Block deprecated IPv4-compatible IPv6 (::a.b.c.d where first 12 bytes are 0).
+            if ((0..11).all { bytes[it].toInt() == 0 }) return true
+        }
+        val raw = extractIpv4OrIpv6Bytes(parsed)
+        if (raw.size == 4) {
+            val b0 = raw[0].toInt() and 0xFF
+            val b1 = raw[1].toInt() and 0xFF
+            // Block 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, FakeIP/RFC2544 198.18.0.0/15, >= 224.0.0.0/3.
+            if (b0 == 0 || b0 == 127 || b0 >= 224) return true
+            if (b0 == 169 && b1 == 254) return true
+            if (b0 == 198 && (b1 == 18 || b1 == 19)) return true
+            return false
+        }
+        // Block IPv6 ULA fc00::/7 using bitmask instead of hex string prefix.
+        val firstByte = raw[0].toInt() and 0xFF
+        return (firstByte and 0xFE) == 0xFC
+    }
 
     private fun literal(value: String): String? {
         val trimmed = value.trim()
@@ -82,30 +181,131 @@ object IpInfoStore {
         return candidate.takeIf { '%' !in it && InetAddresses.isInetAddress(it) }
     }
 
+    /**
+     * Loads the user's custom root CA (`filesDir/ca.pem`) merged with the system trust store,
+     * cached by file modification time and size. Returns `null` when absent or outside Android.
+     */
+    private fun loadCustomTrustPair(): Pair<javax.net.ssl.SSLSocketFactory, X509TrustManager>? {
+        val caFile = runCatching { File(SagerNet.application.filesDir, "ca.pem") }.getOrNull()
+            ?: return null
+        if (!caFile.isFile || caFile.length() <= 0L) {
+            cachedCaSignature = null
+            cachedCustomTrust = null
+            return null
+        }
+        val signature = caFile.lastModified() to caFile.length()
+        if (cachedCaSignature == signature) return cachedCustomTrust
+        return runCatching {
+            val customCerts = CertificateFactory.getInstance("X.509")
+                .generateCertificates(ByteArrayInputStream(caFile.readBytes()))
+                .filterIsInstance<X509Certificate>()
+            if (customCerts.isEmpty()) return@runCatching null
+
+            val systemTmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+                .apply { init(null as KeyStore?) }
+            val systemTm = systemTmf.trustManagers.filterIsInstance<X509TrustManager>().firstOrNull()
+                ?: return@runCatching null
+
+            val customKs = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                load(null, null)
+                customCerts.forEachIndexed { idx, cert -> setCertificateEntry("custom_$idx", cert) }
+            }
+            val customTmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+                .apply { init(customKs) }
+            val customTm = customTmf.trustManagers.filterIsInstance<X509TrustManager>().firstOrNull()
+                ?: return@runCatching null
+
+            val combinedTm = object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+                    systemTm.checkClientTrusted(chain, authType)
+                }
+
+                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+                    try {
+                        systemTm.checkServerTrusted(chain, authType)
+                    } catch (_: Exception) {
+                        customTm.checkServerTrusted(chain, authType)
+                    }
+                }
+
+                override fun getAcceptedIssuers(): Array<X509Certificate> =
+                    systemTm.acceptedIssuers + customTm.acceptedIssuers
+            }
+            val sslContext = SSLContext.getInstance("TLS").apply {
+                init(null, arrayOf(combinedTm), null)
+            }
+            (sslContext.socketFactory to combinedTm).also {
+                cachedCaSignature = signature
+                cachedCustomTrust = it
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Builds an OkHttp client for Group DoH resolution bound to the physical underlying
+     * network (bypassing TUN/VPN exit) and trusting any imported custom root CA (`ca.pem`).
+     */
+    private fun directDohClient(): OkHttpClient {
+        val builder = client.newBuilder()
+        val underlying = runCatching { SagerNet.underlyingNetwork }.getOrNull()
+        if (underlying != null) {
+            builder.socketFactory(underlying.socketFactory)
+            builder.dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    underlying.getAllByName(hostname).toList()
+            })
+        }
+        loadCustomTrustPair()?.let { (factory, trustManager) ->
+            builder.sslSocketFactory(factory, trustManager)
+        }
+        return builder.build()
+    }
+
+    /**
+     * Builds an OkHttp client for external IP owner lookups (`api.ip.sb`).
+     * In connected Proxy-only mode, routes via local `mixedPort` so requests respect
+     * the active proxy instead of leaking the device's physical IP directly.
+     */
+    private fun ownerClient(): OkHttpClient {
+        val useLocalProxy = runCatching {
+            DataStore.serviceMode == Key.MODE_PROXY && DataStore.serviceState.connected
+        }.getOrDefault(false)
+        if (!useLocalProxy) return client
+        val mixedPort = runCatching { DataStore.mixedPort }.getOrDefault(0)
+        if (mixedPort !in 1..65535) return client
+        return client.newBuilder()
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", mixedPort)))
+            .build()
+    }
+
     /** Called ONLY after the user confirms disclosure of this IP to api.ip.sb. */
     suspend fun owner(ip: String): IpOwner? {
         val address = literal(ip) ?: return null
-        val parsed = InetAddresses.forString(address)
-        if (parsed.isAnyLocalAddress || parsed.isLoopbackAddress || parsed.isLinkLocalAddress ||
-            parsed.isSiteLocalAddress || parsed.isMulticastAddress ||
-            address.startsWith("fc", true) || address.startsWith("fd", true) ||
-            parsed.address.let { it.size == 4 && it[0].toInt() == 100 && (it[1].toInt() and 0xC0) == 0x40 }
-        ) return null
+        if (!isPublicRoutableIp(address)) return null
         val url = OWNER_URL.toHttpUrlOrNull()!!.newBuilder().addPathSegment(address).build()
-        return parseOwner(client.read(request(url), MAX_OWNER), expectedIp = address)
+        return parseOwner(ownerClient().read(request(url), MAX_OWNER), expectedIp = address)
     }
 
     /**
      * Configured group DNS is authoritative for this action: unsupported/failed servers never
-     * send the node hostname to system DNS. With no group DNS, use the OS answers as usual.
+     * send the node hostname to system DNS. With no group DNS, prefer [SagerNet.underlyingNetwork]
+     * to bypass TUN FakeDNS poisoning and reject non-usable/FakeIP answers.
      */
     suspend fun resolveEntry(host: String, groupDns: List<String>): String? {
         literal(host)?.let { return it }
         val name = dnsName(host) ?: return null
         if (groupDns.isEmpty()) return withContext(Dispatchers.IO) {
-            // The platform call is blocking; suppress its result on lifecycle cancellation.
-            runCatching { InetAddress.getAllByName(name).firstOrNull()?.hostAddress }.getOrNull()?.let(::literal)
+            // Prefer the physical underlying network so active TUN FakeDNS cannot return 198.18.x.x.
+            val addresses = runCatching {
+                SagerNet.underlyingNetwork?.getAllByName(name)
+            }.getOrNull() ?: runCatching {
+                InetAddress.getAllByName(name)
+            }.getOrNull() ?: return@withContext null
+            addresses.asSequence()
+                .mapNotNull { it.hostAddress?.let(::literal) }
+                .firstOrNull(::isUsableEntryIp)
         }
+        val dohClient = directDohClient()
         return withTimeoutOrNull(12000L) {
             for (endpoint in groupDns.distinct()) {
                 val url = groupDohUrl(endpoint) ?: continue
@@ -114,8 +314,10 @@ object IpInfoStore {
                     val request = Request.Builder().url(url)
                         .post(question.toRequestBody("application/dns-message".toMediaType()))
                         .header("Accept", "application/dns-message").build()
-                    val answer = client.read(request, MAX_DNS) ?: continue
-                    parseAnswer(answer, question)?.let { return@withTimeoutOrNull it }
+                    val answer = dohClient.read(request, MAX_DNS) ?: continue
+                    parseAnswer(answer, question)?.takeIf(::isUsableEntryIp)?.let {
+                        return@withTimeoutOrNull it
+                    }
                 }
             }
             null

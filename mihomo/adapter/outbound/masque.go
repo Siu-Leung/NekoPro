@@ -33,13 +33,14 @@ import (
 
 type Masque struct {
 	*Base
-	tlsConfig   *tls.Config
-	quicConfig  *quic.Config
-	tunDevice   ipStack
-	resolver    resolver.Resolver
-	uri         string
-	h2Transport *http.Transport
-	l4Client    *masque.L4Client
+	tlsConfig      *tls.Config
+	quicConfig     *quic.Config
+	tunDevice      ipStack
+	resolver       resolver.Resolver
+	targetResolver resolver.Resolver
+	uri            string
+	h2Transport    *http.Transport
+	l4Client       *masque.L4Client
 
 	runCtx    context.Context
 	runCancel context.CancelFunc
@@ -76,6 +77,9 @@ type MasqueOption struct {
 
 	RemoteDnsResolve bool     `proxy:"remote-dns-resolve,omitempty"`
 	Dns              []string `proxy:"dns,omitempty"`
+	// TargetResolver optionally resolves proxied target domains when RemoteDnsResolve
+	// is disabled, avoiding process-global resolver.DefaultResolver cross-talk across instances.
+	TargetResolver resolver.Resolver `proxy:"-"`
 }
 
 func (option MasqueOption) Prefixes() ([]netip.Prefix, error) {
@@ -126,7 +130,8 @@ func NewMasque(option MasqueOption) (*Masque, error) {
 			Prefer:       option.IPVersion,
 			Resolver:     option.Resolver,
 		}),
-		runLock: semaphore.NewWeighted(1),
+		targetResolver: option.TargetResolver,
+		runLock:        semaphore.NewWeighted(1),
 	}
 	outbound.dialer = option.NewDialer(outbound.DialOptions())
 
@@ -439,13 +444,23 @@ func (w *Masque) Close() error {
 	return nil
 }
 
+// effectiveTargetResolver selects the resolver for proxied target domains:
+// in-tunnel DNS first (when RemoteDnsResolve is enabled), then the caller's
+// instance-scoped TargetResolver, falling back to mihomo's DefaultResolver.
+func (w *Masque) effectiveTargetResolver() resolver.Resolver {
+	if w.resolver != nil {
+		return w.resolver
+	}
+	if w.targetResolver != nil {
+		return w.targetResolver
+	}
+	return resolver.DefaultResolver
+}
+
 func (w *Masque) dialContextL4(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
 	var conn net.Conn
 	if !metadata.Resolved() || w.resolver != nil {
-		r := resolver.DefaultResolver
-		if w.resolver != nil {
-			r = w.resolver
-		}
+		r := w.effectiveTargetResolver()
 		options := w.DialOptions()
 		options = append(options, dialer.WithResolver(r))
 		options = append(options, dialer.WithNetDialer(w.l4Client))
@@ -471,10 +486,7 @@ func (w *Masque) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Con
 		return nil, err
 	}
 	if !metadata.Resolved() || w.resolver != nil {
-		r := resolver.DefaultResolver
-		if w.resolver != nil {
-			r = w.resolver
-		}
+		r := w.effectiveTargetResolver()
 		options := w.DialOptions()
 		options = append(options, dialer.WithResolver(r))
 		options = append(options, dialer.WithNetDialer(ipStackNetDialer{stack: w.tunDevice}))
@@ -515,10 +527,7 @@ func (w *Masque) ListenPacketContext(ctx context.Context, metadata *C.Metadata) 
 
 func (w *Masque) ResolveUDP(ctx context.Context, metadata *C.Metadata) error {
 	if (!metadata.Resolved() || w.resolver != nil) && metadata.Host != "" {
-		r := resolver.DefaultResolver
-		if w.resolver != nil {
-			r = w.resolver
-		}
+		r := w.effectiveTargetResolver()
 		ip, err := resolveIPWithResolver(ctx, metadata.Host, w.prefer, r)
 		if err != nil {
 			return fmt.Errorf("can't resolve ip: %w", err)

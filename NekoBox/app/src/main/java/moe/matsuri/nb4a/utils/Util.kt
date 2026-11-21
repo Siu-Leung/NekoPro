@@ -204,10 +204,18 @@ object Util {
         return ""
     }
 
+    /**
+     * Decodes an RFC 5987 `filename*` parameter from a `Content-Disposition` header.
+     * Stops at `;` parameter boundaries and returns `""` on malformed percent-escapes
+     * so corrupted headers never abort a successful subscription refresh.
+     */
     fun decodeFilename(headerValue: String): String {
-        val regex = Regex("filename\\*=[^']*''(.+)")
-        val match = regex.find(headerValue)
-        val encoded = match?.groupValues?.get(1) ?: ""
-        return URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+        val regex = Regex("""filename\*=[^']*''([^;\r\n]+)""", RegexOption.IGNORE_CASE)
+        val match = regex.find(headerValue) ?: return ""
+        val encoded = match.groupValues[1].trim().trim('"')
+        if (encoded.isEmpty()) return ""
+        return runCatching {
+            URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+        }.getOrDefault("")
     }
 }

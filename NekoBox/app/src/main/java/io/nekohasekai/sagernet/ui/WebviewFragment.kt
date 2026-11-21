@@ -23,31 +23,156 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.WebViewUtil
+import java.io.ByteArrayInputStream
 import java.net.URI
-import org.json.JSONObject
+import java.net.URLDecoder
 
+private const val LOCAL_DASHBOARD_HOST_IP = "127.0.0.1"
+private const val LOCAL_DASHBOARD_HOST_NAME = "localhost"
+private const val LOCAL_DASHBOARD_PORT = 9090
+private const val LOCAL_DASHBOARD_BASE_URL = "http://$LOCAL_DASHBOARD_HOST_IP:$LOCAL_DASHBOARD_PORT"
+private const val LOCAL_DASHBOARD_UI_URL = "$LOCAL_DASHBOARD_BASE_URL/ui/"
+
+/**
+ * Encodes [value] as a safely quoted JavaScript string literal without relying on
+ * Android's stubbed `org.json.JSONObject.quote` so it works cleanly in JVM tests.
+ */
+private fun escapeJsStringLiteral(value: String): String = buildString(value.length + 2) {
+    append('"')
+    for (ch in value) {
+        when (ch) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            '<' -> append("\\u003c")
+            '>' -> append("\\u003e")
+            '\u2028' -> append("\\u2028")
+            '\u2029' -> append("\\u2029")
+            else -> if (ch.code < 0x20) {
+                append("\\u%04x".format(ch.code))
+            } else {
+                append(ch)
+            }
+        }
+    }
+    append('"')
+}
+
+/**
+ * Checks whether [targetUrl] points to the local Clash API origin
+ * (`http://127.0.0.1:9090` or `http://localhost:9090`, case-insensitive).
+ *
+ * @param targetUrl Raw URL string to inspect.
+ * @return `true` when [targetUrl] uses HTTP on loopback port 9090.
+ */
+internal fun isSameLocalDashboardOrigin(targetUrl: String): Boolean {
+    val parsed = runCatching { URI(targetUrl.trim()) }.getOrNull() ?: return false
+    val scheme = parsed.scheme?.lowercase() ?: return false
+    val host = parsed.host?.lowercase() ?: return false
+    return scheme == "http" &&
+        (host == LOCAL_DASHBOARD_HOST_IP || host == LOCAL_DASHBOARD_HOST_NAME) &&
+        parsed.port == LOCAL_DASHBOARD_PORT
+}
+
+/**
+ * Returns `true` if the configured dashboard URL targets the local embedded Clash UI.
+ * Matches any path on the local Clash API origin (including `/` and `/ui/`).
+ */
+internal fun isLocalDashboardUrl(url: String): Boolean = isSameLocalDashboardOrigin(url)
+
+/**
+ * Detects query parameters that attempt to hijack a local Yacd bootstrap URL
+ * toward a remote Clash backend (e.g. `?hostname=attacker.example&port=443`).
+ *
+ * @param targetUrl Candidate URL targeting the local dashboard origin.
+ * @return `true` if any bootstrap parameter points away from the local controller.
+ */
+internal fun hasDisallowedLocalBootstrapParams(targetUrl: String): Boolean {
+    val parsed = runCatching { URI(targetUrl.trim()) }.getOrNull() ?: return true
+    val rawQuery = parsed.rawQuery ?: return false
+    for (pair in rawQuery.split('&')) {
+        if (pair.isEmpty()) continue
+        val key = runCatching {
+            URLDecoder.decode(pair.substringBefore('='), Charsets.UTF_8.name())
+        }.getOrNull()?.lowercase() ?: continue
+        val rawValue = pair.substringAfter('=', "")
+        val value = runCatching {
+            URLDecoder.decode(rawValue, Charsets.UTF_8.name())
+        }.getOrNull()?.trim() ?: return true
+        when (key) {
+            "hostname", "host" -> {
+                val lowerHost = value.lowercase()
+                if (lowerHost != LOCAL_DASHBOARD_HOST_IP && lowerHost != LOCAL_DASHBOARD_HOST_NAME) {
+                    return true
+                }
+            }
+            "port" -> {
+                if (value != LOCAL_DASHBOARD_PORT.toString()) {
+                    return true
+                }
+            }
+            "baseurl", "url" -> {
+                if (!isSameLocalDashboardOrigin(value)) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+/**
+ * Builds the effective WebView URL for the Clash dashboard.
+ * Local dashboard URLs are canonicalized with explicit loopback bootstrap parameters
+ * and the current [secret]; external dashboard URLs are returned untouched.
+ */
 internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
-    if (!configuredUrl.startsWith("http://127.0.0.1:9090/ui")) return configuredUrl
-    val base = "http://127.0.0.1:9090/ui/"
+    if (!isLocalDashboardUrl(configuredUrl)) return configuredUrl
     // Yacd expects hostname and port as separate bootstrap parameters.
     // Passing a complete URL as hostname makes URL.hostname invalid and the
     // SPA renders a blank dashboard despite a successful HTTP handshake.
-    return "${base}?hostname=127.0.0.1&port=9090&secret=$secret"
+    return "${LOCAL_DASHBOARD_UI_URL}?hostname=$LOCAL_DASHBOARD_HOST_IP&port=$LOCAL_DASHBOARD_PORT&secret=$secret"
 }
 
-internal fun isLocalDashboardUrl(url: String): Boolean {
-    return url.trim().startsWith("http://127.0.0.1:9090/ui")
-}
-
-internal fun isSameLocalDashboardOrigin(targetUrl: String): Boolean {
-    val parsed = runCatching { URI(targetUrl.trim()) }.getOrNull() ?: return false
-    return parsed.scheme?.equals("http", ignoreCase = true) == true &&
-        parsed.host == "127.0.0.1" &&
-        parsed.port == 9090
+/**
+ * Builds the JavaScript snippet that updates cached Yacd backend secrets in
+ * `localStorage`, strictly restricting writes to entries whose normalized
+ * `baseURL` matches the local Clash API origin.
+ */
+internal fun buildLocalSecretSyncScript(expectedSecret: String): String {
+    val quotedSecret = escapeJsStringLiteral(expectedSecret)
+    return """(() => {
+        try {
+            const key = 'yacd.metacubex.one';
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            const state = JSON.parse(raw);
+            const backends = state && state.clashAPIConfigs;
+            if (!Array.isArray(backends)) return;
+            let updated = false;
+            for (const entry of backends) {
+                if (!entry || typeof entry.baseURL !== 'string') continue;
+                const normalized = entry.baseURL.trim().replace(/\/+$/, '').toLowerCase();
+                if (normalized === 'http://127.0.0.1:9090' || normalized === 'http://localhost:9090') {
+                    if (entry.secret !== $quotedSecret) {
+                        entry.secret = $quotedSecret;
+                        updated = true;
+                    }
+                }
+            }
+            if (updated) {
+                localStorage.setItem(key, JSON.stringify(state));
+                location.reload();
+            }
+        } catch (_) {}
+    })()""".trimIndent()
 }
 
 private fun isAllowedDashboardUrl(url: String): Boolean {
-    val scheme = Uri.parse(url.trim()).scheme?.lowercase()
+    val scheme = runCatching { URI(url.trim()).scheme?.lowercase() }.getOrNull()
+        ?: Uri.parse(url.trim()).scheme?.lowercase()
     return scheme == "http" || scheme == "https"
 }
 
@@ -116,16 +241,30 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             }
         }
         mWebView.webViewClient = object : WebViewClient() {
-            private fun handleNavigation(targetUrl: String?): Boolean {
+            private fun handleNavigation(
+                targetUrl: String?,
+                isForMainFrame: Boolean,
+                hasGesture: Boolean,
+            ): Boolean {
                 if (targetUrl.isNullOrBlank() || !isAllowedDashboardUrl(targetUrl)) {
                     Logs.w("Blocked non-HTTP(S) WebView navigation")
                     return true
                 }
-                if (isLocalDashboardUrl(DataStore.yacdURL) && !isSameLocalDashboardOrigin(targetUrl)) {
-                    runCatching {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
-                    }.onFailure { Logs.w(it) }
-                    return true
+                if (isLocalDashboardUrl(DataStore.yacdURL)) {
+                    if (isSameLocalDashboardOrigin(targetUrl) && hasDisallowedLocalBootstrapParams(targetUrl)) {
+                        Logs.w("Blocked local dashboard URL with non-local bootstrap parameters")
+                        return true
+                    }
+                    if (!isSameLocalDashboardOrigin(targetUrl)) {
+                        // Only open external browser on top-level or user-initiated clicks so hidden
+                        // iframes cannot silently launch ACTION_VIEW intents.
+                        if (isForMainFrame || hasGesture) {
+                            runCatching {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
+                            }.onFailure { Logs.w(it) }
+                        }
+                        return true
+                    }
                 }
                 return false
             }
@@ -133,12 +272,43 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             override fun shouldOverrideUrlLoading(
                 view: WebView?, request: WebResourceRequest?
             ): Boolean {
-                return handleNavigation(request?.url?.toString())
+                return handleNavigation(
+                    targetUrl = request?.url?.toString(),
+                    isForMainFrame = request?.isForMainFrame == true,
+                    hasGesture = request?.hasGesture() == true,
+                )
             }
 
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                return handleNavigation(url)
+                return handleNavigation(targetUrl = url, isForMainFrame = true, hasGesture = false)
+            }
+
+            override fun shouldInterceptRequest(
+                view: WebView?, request: WebResourceRequest?
+            ): WebResourceResponse? {
+                if (request == null || !isLocalDashboardUrl(DataStore.yacdURL)) {
+                    return super.shouldInterceptRequest(view, request)
+                }
+                val requestUrl = request.url?.toString().orEmpty()
+                val scheme = request.url?.scheme?.lowercase()
+                // Permit in-memory inline assets (e.g. data: SVG icons) and same-origin requests;
+                // block third-party network scripts/fetches inside the local Clash dashboard.
+                if (scheme == "data" || scheme == "blob" || scheme == "about") {
+                    return super.shouldInterceptRequest(view, request)
+                }
+                if (!isSameLocalDashboardOrigin(requestUrl)) {
+                    Logs.w("Blocked cross-origin subresource in local dashboard")
+                    return WebResourceResponse(
+                        "text/plain",
+                        "utf-8",
+                        403,
+                        "Forbidden",
+                        emptyMap(),
+                        ByteArrayInputStream(ByteArray(0)),
+                    )
+                }
+                return super.shouldInterceptRequest(view, request)
             }
 
             override fun onReceivedError(
@@ -158,31 +328,21 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                if (url?.startsWith("http://127.0.0.1:9090/ui") == true) {
-                    val webView = view ?: return
-                    viewLifecycleOwnerLiveData.value?.lifecycleScope?.launch {
-                        val expectedSecret = cachedSecret ?: withContext(Dispatchers.IO) {
-                            ClashApiSecret.value.also { cachedSecret = it }
-                        }
-                        val quotedSecret = JSONObject.quote(expectedSecret)
-                        webView.evaluateJavascript(
-                            """(() => {
-                                try {
-                                    const key = 'yacd.metacubex.one';
-                                    const raw = localStorage.getItem(key);
-                                    if (!raw) return;
-                                    const state = JSON.parse(raw);
-                                    const backends = state && state.clashAPIConfigs;
-                                    if (Array.isArray(backends) && backends.length > 0 && backends[0].secret !== $quotedSecret) {
-                                        backends[0].secret = $quotedSecret;
-                                        localStorage.setItem(key, JSON.stringify(state));
-                                        location.reload();
-                                    }
-                                } catch (_) {}
-                            })()""".trimIndent(),
-                            null,
-                        )
+                if (url == null || !isSameLocalDashboardOrigin(url) || hasDisallowedLocalBootstrapParams(url)) {
+                    return
+                }
+                val webView = view ?: return
+                viewLifecycleOwnerLiveData.value?.lifecycleScope?.launch {
+                    val expectedSecret = cachedSecret ?: withContext(Dispatchers.IO) {
+                        ClashApiSecret.value.also { cachedSecret = it }
                     }
+                    // Re-verify the active page origin after async secret retrieval to prevent
+                    // injecting local secrets if WebView navigated away in the meantime.
+                    val currentUrl = webView.url ?: return@launch
+                    if (!isSameLocalDashboardOrigin(currentUrl) || hasDisallowedLocalBootstrapParams(currentUrl)) {
+                        return@launch
+                    }
+                    webView.evaluateJavascript(buildLocalSecretSyncScript(expectedSecret), null)
                 }
             }
         }

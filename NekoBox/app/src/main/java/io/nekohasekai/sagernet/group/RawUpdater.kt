@@ -43,6 +43,13 @@ import kotlinx.coroutines.ensureActive
 object RawUpdater : GroupUpdater() {
 
     private const val CLASH_META_USER_AGENT = "clash-meta"
+    private const val MAX_SUBSCRIPTION_BYTES = 8L * 1024 * 1024
+    private const val MAX_YAML_ALIASES = 8
+    private const val MAX_YAML_NESTING_DEPTH = 20
+    private val KNOWN_UNSUPPORTED_CLASH_TYPES = setOf(
+        "ssr", "ssh", "shadowtls", "naive", "direct", "reject", "reject-drop", "pass", "dns",
+    )
+    private val HTML_DOCUMENT_PREFIX = Regex("""(?is)^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b|<script\b)""")
 
     /**
      * Default DNS-inspection clients, most reliable first. FlClash and Clash Verge are
@@ -50,6 +57,14 @@ object RawUpdater : GroupUpdater() {
      * with a nodes-only payload.
      */
     internal val DNS_CANDIDATE_USER_AGENTS = ClashDnsCandidates.CLIENT_USER_AGENTS
+
+    /** Reads a subscription HTTP response body capped at [MAX_SUBSCRIPTION_BYTES] (8 MiB). */
+    private fun readBoundedResponseText(response: libcore.HTTPResponse): String =
+        response.getContentWithLimit(MAX_SUBSCRIPTION_BYTES).decodeToString()
+
+    /** Detects HTML error/maintenance/challenge pages that must not be parsed as subscriptions. */
+    private fun isLikelyHtmlDocument(text: String): Boolean =
+        HTML_DOCUMENT_PREFIX.containsMatchIn(text.take(512))
 
     @SuppressLint("Recycle")
     private fun readSubscriptionFile(link: String): String =
@@ -73,7 +88,10 @@ object RawUpdater : GroupUpdater() {
             if (forceProxy) {
                 client.forceSocks5(DataStore.mixedPort)
             } else {
-                client.trySocks5(DataStore.mixedPort)
+                // Only attempt local mixedPort if NekoPro's service actually owns the port.
+                if (DataStore.serviceState.started) {
+                    client.trySocks5(DataStore.mixedPort)
+                }
                 client.tryH3Direct()
             }
             if (DataStore.appTLSVersion == "1.3") client.restrictedTLS()
@@ -100,30 +118,46 @@ object RawUpdater : GroupUpdater() {
      * turn and keep the first response that actually carries a DNS section; a nodes-only
      * answer from one client must not hide a complete one from the next.
      *
-     * @param userAgents ordered client identifiers; the first usable answer wins
+     * @param link Subscription URL (`http://`, `https://`, or `content://`).
+     * @param userAgents Ordered client identifiers; the first usable answer wins.
+     * @param forceProxy Locked proxy requirement across all UA attempts so mid-loop VPN drops fail closed.
+     * @param customUserAgent Optional group custom UA tried first when non-blank.
+     * @throws Exception if every HTTP attempt failed with a network/TLS/HTTP error.
      */
     internal suspend fun inspectSubscriptionDns(
-        link: String, userAgents: List<String>,
+        link: String,
+        userAgents: List<String>,
+        forceProxy: Boolean = DataStore.serviceState.connected,
+        customUserAgent: String? = null,
     ): ClashDnsCandidates.Profile {
         currentCoroutineContext().ensureActive()
         if (link.startsWith("content://")) {
             return ClashDnsCandidates.parse(readSubscriptionFile(link))
         }
         require(link.startsWith("http://", true) || link.startsWith("https://", true))
+        val effectiveUserAgents = buildList {
+            customUserAgent?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+            addAll(userAgents.ifEmpty { DNS_CANDIDATE_USER_AGENTS })
+        }.distinct()
         var lastProfile: ClashDnsCandidates.Profile? = null
-        for (userAgent in userAgents.ifEmpty { DNS_CANDIDATE_USER_AGENTS }) {
+        var lastError: Exception? = null
+        for (userAgent in effectiveUserAgents) {
             currentCoroutineContext().ensureActive()
             val profile = try {
-                withSubscriptionResponse(link, userAgent, DataStore.serviceState.connected) {
-                    ClashDnsCandidates.parse(Util.getStringBox(it.contentString))
+                withSubscriptionResponse(link, userAgent, forceProxy) { response ->
+                    ClashDnsCandidates.parse(readBoundedResponseText(response))
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                lastError = e
                 continue
             }
             if (profile.hasDns && profile.rows.any { it.selectable != null }) return profile
             if (lastProfile == null || (profile.hasDns && !lastProfile.hasDns)) lastProfile = profile
+        }
+        if (lastProfile == null && lastError != null) {
+            throw lastError
         }
         return lastProfile ?: ClashDnsCandidates.Profile(
             emptyList(), emptyList(), false, false,
@@ -155,8 +189,6 @@ object RawUpdater : GroupUpdater() {
                 parseSubscription(contentText).orEmpty()
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: SubscriptionFoundException) {
-                throw e
             } catch (_: Exception) {
                 error(app.getString(R.string.group_dns_candidates_refresh_failed))
             }
@@ -166,17 +198,16 @@ object RawUpdater : GroupUpdater() {
                 if (adoptedNodeDnsCandidate.isEmpty()) error(app.getString(R.string.group_dns_candidates_auto_missing))
             }
         } else {
-            // Keep both Clash UAs for automatic subscription DNS. Prefer Clash with a manual
-            // group resolver too: a nodes-only Clash response can carry protocol pinning fields.
+            // Align Clash UA fallback order with ClashDnsCandidates (FlClash -> Clash Verge -> clash-meta)
+            // so providers that gate the DNS section or AnyTLS certificate pins behind modern Clash clients succeed.
             val candidateUserAgents = buildList {
                 subscription.customUserAgent?.takeIf { it.isNotBlank() }?.let { add(it) }
                 if (requireAdoptedDns || savedManualDns != null) {
-                    add(CLASH_META_USER_AGENT)
-                    add("FlClash/v0.9.4 clash-verge Platform/android")
+                    addAll(DNS_CANDIDATE_USER_AGENTS)
                 }
                 if (!requireAdoptedDns) {
                     add(USER_AGENT)
-                    add(CLASH_META_USER_AGENT)
+                    addAll(DNS_CANDIDATE_USER_AGENTS)
                     add("v2rayN/7.8.2")
                     add("sing-box/1.14.0")
                 }
@@ -193,7 +224,7 @@ object RawUpdater : GroupUpdater() {
             for (candidate in candidateUserAgents) {
                 try {
                     val accepted = withSubscriptionResponse(link, candidate, forceProxy) { response ->
-                        val responseText = Util.getStringBox(response.contentString)
+                        val responseText = readBoundedResponseText(response)
                         val parsed = parseSubscription(responseText).orEmpty()
                         if (parsed.isEmpty()) return@withSubscriptionResponse false
 
@@ -215,10 +246,9 @@ object RawUpdater : GroupUpdater() {
                     if (accepted) break
                 } catch (e: CancellationException) {
                     throw e
-                } catch (e: SubscriptionFoundException) {
-                    throw e
                 } catch (_: Exception) {
-                    // Network and parse exceptions can include the subscription URL or YAML content.
+                    // Network, SubscriptionFoundException, and parse exceptions must not leak the URL
+                    // or abort remaining candidate User-Agents.
                     Logs.d("Subscription response could not be downloaded or parsed")
                 }
             }
@@ -255,7 +285,7 @@ object RawUpdater : GroupUpdater() {
 
         // A group resolver must see the original node hostname, not a public DNS result.
         if (subscription.forceResolve == true && savedManualDns == null && adoptedNodeDnsCandidate.isEmpty()) {
-            forceResolve(proxies, proxyGroup.id)
+            forceResolve(proxies, proxyGroup.id, proxyGroup.effectiveNodeDnsList())
         }
 
         val exists = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
@@ -411,7 +441,8 @@ object RawUpdater : GroupUpdater() {
     private val clashProxiesKey = Regex("""(?m)^[\t ]*(?:\{[\t ]*)?(?:proxies|"proxies"|'proxies')[\t ]*:""")
 
     @Suppress("UNCHECKED_CAST")
-    private suspend fun parseRaw(text: String, fileName: String, forSubscription: Boolean): List<AbstractBean>? {
+    private suspend fun parseRaw(rawText: String, fileName: String, forSubscription: Boolean): List<AbstractBean>? {
+        val text = rawText.removePrefix("\uFEFF")
         val proxies = mutableListOf<AbstractBean>()
         val hasClashDeclaration = forSubscription && clashProxiesKey.containsMatchIn(text)
 
@@ -423,9 +454,15 @@ object RawUpdater : GroupUpdater() {
 
                 val loaderOptions = LoaderOptions().apply {
                     codePointLimit = 8 * 1024 * 1024 // 8 MiB YAML bomb guard
+                    isAllowRecursiveKeys = false
+                    maxAliasesForCollections = MAX_YAML_ALIASES
+                    nestingDepthLimit = MAX_YAML_NESTING_DEPTH
                 }
-                val yaml = Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<*, *>
-                    ?: throw YAMLException("Clash YAML root must be a mapping")
+                val yaml = try {
+                    Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<*, *>
+                } catch (_: StackOverflowError) {
+                    throw YAMLException("Clash YAML exceeded safe nesting depth")
+                } ?: throw YAMLException("Clash YAML root must be a mapping")
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""
 
@@ -441,11 +478,13 @@ object RawUpdater : GroupUpdater() {
                     else -> v?.toString()?.let { it.equals("true", ignoreCase = true) || it == "1" } == true
                 }
 
+                var skippedKnownUnsupported = 0
                 for (rawEntry in rawProxies) {
                     val proxy = rawEntry as? Map<*, *> ?: continue
                     runCatching {
                         // Note: YAML numbers parsed as "Long"
-                        when (proxy.optStr("type")?.lowercase()) {
+                        val proxyType = proxy.optStr("type")?.lowercase()
+                        when (proxyType) {
                             "socks5" -> {
                                 val server = proxy.optStr("server") ?: return@runCatching
                                 val port = proxy.optInt("port") ?: return@runCatching
@@ -730,19 +769,23 @@ object RawUpdater : GroupUpdater() {
                                         "server" -> bean.serverAddress = rawVal.toString().trim().removeSurrounding("[", "]")
                                         "port" -> bean.serverPort = rawVal.toString().toIntOrNull() ?: 443
                                         "psk" -> bean.psk = rawVal.toString()
-                                        "userkey" -> bean.userkey = rawVal.toString()
+                                        "userkey", "user-key" -> bean.userkey = rawVal.toString()
                                         "version" -> bean.version = rawVal.toString().toIntOrNull() ?: 4
-                                        "mode" -> bean.mode = rawVal.toString()
+                                        "mode" -> bean.mode = rawVal.toString().trim().lowercase()
                                         "obfs-opts" -> {
                                             (rawVal as? Map<*, *>)?.let { obfs ->
-                                                bean.obfsMode = obfs["mode"]?.toString() ?: "none"
-                                                bean.obfsHost = obfs["host"]?.toString() ?: ""
+                                                bean.obfsMode = obfs["mode"]?.toString()?.trim()?.lowercase() ?: "none"
+                                                bean.obfsHost = obfs["host"]?.toString()?.trim() ?: ""
                                             }
                                         }
                                     }
                                 }
                                 if (bean.serverAddress.isNullOrBlank()) return@runCatching
-                                if (bean.version != null && bean.version !in 4..6) return@runCatching
+                                if (bean.version != null && bean.version !in 4..6) {
+                                    // Snell v1-v3 are intentionally unsupported; count as skipped rather than malformed.
+                                    skippedKnownUnsupported++
+                                    return@runCatching
+                                }
                                 proxies.add(bean)
                             }
 
@@ -754,13 +797,13 @@ object RawUpdater : GroupUpdater() {
                                         "name" -> bean.name = rawVal.toString()
                                         "server" -> bean.serverAddress = rawVal.toString().trim().removeSurrounding("[", "]")
                                         "port" -> bean.serverPort = rawVal.toString().toIntOrNull() ?: 0
-                                        "port-range" -> bean.portRange = rawVal.toString().trim()
+                                        "port-range" -> bean.portRange = rawVal.toString().trim().replace(':', '-')
                                         "transport" -> bean.protocol = rawVal.toString().trim().uppercase()
                                         "username" -> bean.username = rawVal.toString()
                                         "password" -> bean.password = rawVal.toString()
                                         "mtu" -> bean.mtu = rawVal.toString().toIntOrNull() ?: 1400
-                                        "multiplexing" -> bean.multiplexing = rawVal.toString().trim()
-                                        "handshake-mode" -> bean.handshakeMode = rawVal.toString().trim()
+                                        "multiplexing" -> bean.multiplexing = rawVal.toString().trim().uppercase()
+                                        "handshake-mode" -> bean.handshakeMode = rawVal.toString().trim().uppercase()
                                     }
                                 }
                                 if (bean.serverAddress.isNullOrBlank()) return@runCatching
@@ -996,6 +1039,55 @@ object RawUpdater : GroupUpdater() {
                                 if (bean.serverAddress.isNullOrBlank()) return@runCatching
                                 proxies.add(bean)
                             }
+
+                            "wireguard" -> {
+                                val server = proxy.optStr("server")?.trim()?.removeSurrounding("[", "]")
+                                    ?.takeIf { it.isNotEmpty() } ?: return@runCatching
+                                val port = proxy.optInt("port")?.takeIf { it in 1..65535 } ?: return@runCatching
+                                val privateKey = proxy.optStr("private-key")?.trim()
+                                    ?.takeIf { it.isNotEmpty() } ?: return@runCatching
+                                val publicKey = proxy.optStr("public-key")?.trim()
+                                    ?.takeIf { it.isNotEmpty() } ?: return@runCatching
+                                val addresses = buildList {
+                                    proxy.optStr("ip")?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+                                    proxy.optStr("ipv6")?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+                                }
+                                if (addresses.isEmpty()) return@runCatching
+                                val reservedStr = when (val rawReserved = proxy["reserved"]) {
+                                    is List<*> -> rawReserved.mapNotNull { it?.toString()?.trim()?.toIntOrNull() }
+                                        .takeIf { it.size == 3 }?.joinToString(",")
+                                    is String -> rawReserved.trim().takeIf { it.isNotEmpty() }
+                                    else -> null
+                                }
+                                val allowedIpsStr = when (val rawAllowed = proxy["allowed-ips"]) {
+                                    is List<*> -> rawAllowed.mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+                                        .joinToString(",")
+                                    is String -> rawAllowed.trim()
+                                    else -> ""
+                                }
+                                proxies.add(WireGuardBean().apply {
+                                    name = proxy.optStr("name")
+                                    serverAddress = server
+                                    serverPort = port
+                                    this.privateKey = privateKey
+                                    peerPublicKey = publicKey
+                                    peerPreSharedKey = proxy.optStr("pre-shared-key")
+                                        ?: proxy.optStr("preshared-key")
+                                    localAddress = addresses.joinToString("\n")
+                                    if (!reservedStr.isNullOrBlank()) reserved = reservedStr
+                                    if (allowedIpsStr.isNotBlank()) allowedIps = allowedIpsStr
+                                    proxy.optInt("mtu")?.takeIf { it in 576..65535 }?.let { mtu = it }
+                                    proxy.optInt("persistent-keepalive")?.takeIf { it in 1..65535 }?.let {
+                                        persistentKeepalive = it
+                                    }
+                                })
+                            }
+
+                            else -> {
+                                if (proxyType != null && proxyType in KNOWN_UNSUPPORTED_CLASH_TYPES) {
+                                    skippedKnownUnsupported++
+                                }
+                            }
                         }
                     }.onFailure { err ->
                         if (err is CancellationException || forSubscription) throw err
@@ -1003,8 +1095,10 @@ object RawUpdater : GroupUpdater() {
                     }
                 }
 
-                if (forSubscription && proxies.size != rawProxies.size) {
-                    error("Incomplete Clash subscription: parsed ${proxies.size} of ${rawProxies.size} entries")
+                if (forSubscription && (proxies.size + skippedKnownUnsupported != rawProxies.size ||
+                        (rawProxies.isNotEmpty() && proxies.isEmpty()))
+                ) {
+                    error("Incomplete Clash subscription: parsed ${proxies.size} (skipped $skippedKnownUnsupported unsupported) of ${rawProxies.size} entries")
                 }
 
                 // Fix ent
@@ -1041,6 +1135,9 @@ object RawUpdater : GroupUpdater() {
         }
 
         val trimmed = text.trim()
+        if (forSubscription && isLikelyHtmlDocument(trimmed)) {
+            error("HTML response cannot be imported as a subscription")
+        }
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
             try {
                 val json = JSONTokener(trimmed).nextValue()
@@ -1053,29 +1150,32 @@ object RawUpdater : GroupUpdater() {
                 }
             }
         }
-        val isExplicitPlainText = trimmed.startsWith("snell://") ||
-                trimmed.startsWith("vmess://") ||
-                trimmed.startsWith("vless://") ||
-                trimmed.startsWith("ss://") ||
-                trimmed.startsWith("ssr://") ||
-                trimmed.startsWith("trojan://") ||
-                trimmed.startsWith("trojan-go://") ||
-                trimmed.startsWith("hysteria://") ||
-                trimmed.startsWith("hysteria2://") ||
-                trimmed.startsWith("hy2://") ||
-                trimmed.startsWith("tuic://") ||
-                trimmed.startsWith("juicity://") ||
-                trimmed.startsWith("masque://") ||
-                trimmed.startsWith("anytls://") ||
-                trimmed.startsWith("socks://") ||
-                trimmed.startsWith("socks5://") ||
-                trimmed.startsWith("http://") ||
-                trimmed.startsWith("https://") ||
-                trimmed.startsWith("sn://")
+        val trimmedLower = trimmed.lowercase()
+        val isExplicitPlainText = trimmedLower.startsWith("snell://") ||
+                trimmedLower.startsWith("mieru://") ||
+                trimmedLower.startsWith("vmess://") ||
+                trimmedLower.startsWith("vless://") ||
+                trimmedLower.startsWith("ss://") ||
+                trimmedLower.startsWith("ssr://") ||
+                trimmedLower.startsWith("trojan://") ||
+                trimmedLower.startsWith("trojan-go://") ||
+                trimmedLower.startsWith("hysteria://") ||
+                trimmedLower.startsWith("hysteria2://") ||
+                trimmedLower.startsWith("hy2://") ||
+                trimmedLower.startsWith("tuic://") ||
+                trimmedLower.startsWith("juicity://") ||
+                trimmedLower.startsWith("masque://") ||
+                trimmedLower.startsWith("anytls://") ||
+                trimmedLower.startsWith("socks://") ||
+                trimmedLower.startsWith("socks5://") ||
+                trimmedLower.startsWith("http://") ||
+                trimmedLower.startsWith("https://") ||
+                trimmedLower.startsWith("sn://")
 
         if (isExplicitPlainText) {
             try {
-                return parseProxies(text).takeIf { it.isNotEmpty() } ?: error("Not found")
+                return parseProxies(text, forSubscription = forSubscription)
+                    .takeIf { it.isNotEmpty() } ?: error("Not found")
             } catch (e: SubscriptionFoundException) {
                 throw e
             } catch (ignored: Exception) {
@@ -1083,7 +1183,12 @@ object RawUpdater : GroupUpdater() {
         }
 
         try {
-            return parseProxies(text.decodeBase64UrlSafe()).takeIf { it.isNotEmpty() }
+            val decoded = text.decodeBase64UrlSafe()
+            if (forSubscription && isLikelyHtmlDocument(decoded)) {
+                error("HTML response cannot be imported as a subscription")
+            }
+            return parseProxies(decoded, forSubscription = forSubscription)
+                .takeIf { it.isNotEmpty() }
                 ?: error("Not found")
         } catch (e: SubscriptionFoundException) {
             throw e
@@ -1092,7 +1197,8 @@ object RawUpdater : GroupUpdater() {
         }
 
         try {
-            return parseProxies(text).takeIf { it.isNotEmpty() } ?: error("Not found")
+            return parseProxies(text, forSubscription = forSubscription)
+                .takeIf { it.isNotEmpty() } ?: error("Not found")
         } catch (e: SubscriptionFoundException) {
             throw e
         } catch (ignored: Exception) {
@@ -1131,8 +1237,16 @@ object RawUpdater : GroupUpdater() {
             peerBean.serverPort = endpoint.substringAfterLast(":").trim().toIntOrNull() ?: continue
             peerBean.peerPublicKey = peer["PublicKey"] ?: continue
             peerBean.peerPreSharedKey = peer["PresharedKey"]
-            peer["AllowedIPs"]?.trim()?.takeIf { it.isNotEmpty() }?.let { peerBean.allowedIps = it }
-            peer["PersistentKeepalive"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let {
+            // Collect all AllowedIPs entries across repeated INI lines (matches Address handling).
+            val allowedIpsEntries = peer.getAll("AllowedIPs")
+                ?.flatMap { it.split(",") }
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
+            if (allowedIpsEntries.isNotEmpty()) {
+                peerBean.allowedIps = allowedIpsEntries.joinToString(",")
+            }
+            peer["PersistentKeepalive"]?.trim()?.toIntOrNull()?.takeIf { it in 1..65535 }?.let {
                 peerBean.persistentKeepalive = it
             }
             beans.add(peerBean.applyDefaultValues())
@@ -1216,13 +1330,17 @@ object RawUpdater : GroupUpdater() {
                     })
                 }
             }
-        } else {
-            json as JSONArray
-            json.forEach { _, it ->
-                if (isJsonObjectValid(it)) {
-                    proxies.addAll(parseJSON(it))
+        } else if (json is JSONArray) {
+            for (index in 0 until json.length()) {
+                val item = json.opt(index)
+                if (item != null && isJsonObjectValid(item)) {
+                    proxies.addAll(parseJSON(item, forSubscription = forSubscription))
+                } else if (forSubscription) {
+                    error("Malformed JSON array subscription entry at index $index")
                 }
             }
+        } else if (forSubscription) {
+            error("Unsupported JSON subscription root type")
         }
 
         proxies.forEach { it.initializeDefaultValues() }

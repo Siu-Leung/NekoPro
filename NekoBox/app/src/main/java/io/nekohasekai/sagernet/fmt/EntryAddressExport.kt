@@ -23,7 +23,7 @@ import moe.matsuri.nb4a.proxy.snell.SnellBean
 internal fun AbstractBean.copyForEntryAddress(answer: String?): AbstractBean? {
     val originalHost = serverAddress?.trim()?.takeUnless { it.isBlank() || IpInfoStore.isIpLiteral(it) }
         ?: return null
-    val ip = answer?.trim()?.takeIf(IpInfoStore::isIpLiteral)?.removeSurrounding("[", "]")
+    val ip = answer?.trim()?.takeIf(IpInfoStore::isUsableEntryIp)?.removeSurrounding("[", "]")
         ?: return null
     if (!canExportEntryAddress()) return null
     return clone().apply {
@@ -33,9 +33,9 @@ internal fun AbstractBean.copyForEntryAddress(answer: String?): AbstractBean? {
     }
 }
 
-/** Exclude raw config, third-party plugins and transports whose authority cannot be written back. */
+/** Exclude raw configs, third-party plugins and transports whose authority cannot be written back. */
 internal fun AbstractBean.canExportEntryAddress(): Boolean {
-    if (!customOutboundJson.isNullOrBlank()) return false
+    if (!customConfigJson.isNullOrBlank() || !customOutboundJson.isNullOrBlank()) return false
     return when (this) {
         is ShadowsocksBean -> plugin.isNullOrBlank()
         is TrojanGoBean -> plugin.isNullOrBlank()
@@ -53,7 +53,15 @@ private fun AbstractBean.keepOriginalConnectionIdentity(hostname: String) {
         is AnyTLSBean -> if (sni.isNullOrBlank()) sni = hostname
         is HysteriaBean -> if (sni.isNullOrBlank()) sni = hostname
         is JuicityBean -> if (sni.isNullOrBlank()) sni = hostname
-        is MASQUEBean -> if (sni.isNullOrBlank()) sni = hostname
+        // Deliberately leave MASQUEBean.sni empty when blank so Cloudflare WARP keeps its
+        // default consumer-masque.cloudflareclient.com TLS SNI.
+        is MASQUEBean -> Unit
+        is SnellBean -> {
+            val mode = obfsMode?.trim()?.lowercase().orEmpty()
+            if (mode.isNotEmpty() && mode != "none" && obfsHost.isNullOrBlank()) {
+                obfsHost = hostname
+            }
+        }
         is TuicBean -> if (sni.isNullOrBlank()) sni = hostname
         is TrojanGoBean -> {
             if (sni.isNullOrBlank()) sni = hostname
@@ -63,7 +71,14 @@ private fun AbstractBean.keepOriginalConnectionIdentity(hostname: String) {
             if (security == "tls" && sni.isNullOrBlank()) sni = hostname
             if (host.isNullOrBlank()) {
                 host = when (type) {
-                    "ws", "httpupgrade" -> hostWithPort
+                    "ws" -> hostWithPort
+                    // sing-box httpupgrade over TLS defaults Host to TLS ServerName (without :port),
+                    // whereas plaintext httpupgrade uses host:port.
+                    "httpupgrade" -> if (security == "tls") {
+                        sni?.takeIf { it.isNotBlank() } ?: hostname
+                    } else {
+                        hostWithPort
+                    }
                     "http", "xhttp", "splithttp" -> hostname
                     else -> host
                 }

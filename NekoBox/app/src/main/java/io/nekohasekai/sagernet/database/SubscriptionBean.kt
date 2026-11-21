@@ -75,12 +75,12 @@ class SubscriptionBean : Serializable() {
         deduplication = input.readBoolean()
         updateWhenConnectedOnly = input.readBoolean()
         customUserAgent = input.readString()
-        if (version >= 1 || input.limit() - input.position() > 0) {
+        // Gate optional fields strictly by version so embedded deserialization inside
+        // ProxyGroup never over-reads subsequent ProxyGroup fields across record boundaries.
+        if (version >= 1) {
             autoUpdate = input.readBoolean()
             autoUpdateDelay = input.readInt()
             lastUpdated = input.readInt()
-        }
-        if (version >= 1) {
             subscriptionUserinfo = input.readString()
         }
         if (version >= 2) {
@@ -119,6 +119,51 @@ class SubscriptionBean : Serializable() {
         if (nodeDns == null) nodeDns = ""
         if (autoAdoptNodeDns == null) autoAdoptNodeDns = false
         if (adoptedNodeDns == null) adoptedNodeDns = ""
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is SubscriptionBean) return false
+        return type == other.type &&
+            link == other.link &&
+            token == other.token &&
+            forceResolve == other.forceResolve &&
+            deduplication == other.deduplication &&
+            updateWhenConnectedOnly == other.updateWhenConnectedOnly &&
+            customUserAgent == other.customUserAgent &&
+            autoUpdate == other.autoUpdate &&
+            autoUpdateDelay == other.autoUpdateDelay &&
+            lastUpdated == other.lastUpdated &&
+            bytesUsed == other.bytesUsed &&
+            bytesRemaining == other.bytesRemaining &&
+            username == other.username &&
+            expiryDate == other.expiryDate &&
+            protocols == other.protocols &&
+            nodeDns == other.nodeDns &&
+            autoAdoptNodeDns == other.autoAdoptNodeDns &&
+            adoptedNodeDns == other.adoptedNodeDns
+    }
+
+    override fun hashCode(): Int {
+        var result = type?.hashCode() ?: 0
+        result = 31 * result + (link?.hashCode() ?: 0)
+        result = 31 * result + (token?.hashCode() ?: 0)
+        result = 31 * result + (forceResolve?.hashCode() ?: 0)
+        result = 31 * result + (deduplication?.hashCode() ?: 0)
+        result = 31 * result + (updateWhenConnectedOnly?.hashCode() ?: 0)
+        result = 31 * result + (customUserAgent?.hashCode() ?: 0)
+        result = 31 * result + (autoUpdate?.hashCode() ?: 0)
+        result = 31 * result + (autoUpdateDelay?.hashCode() ?: 0)
+        result = 31 * result + (lastUpdated?.hashCode() ?: 0)
+        result = 31 * result + (bytesUsed?.hashCode() ?: 0)
+        result = 31 * result + (bytesRemaining?.hashCode() ?: 0)
+        result = 31 * result + (username?.hashCode() ?: 0)
+        result = 31 * result + (expiryDate?.hashCode() ?: 0)
+        result = 31 * result + (protocols?.hashCode() ?: 0)
+        result = 31 * result + (nodeDns?.hashCode() ?: 0)
+        result = 31 * result + (autoAdoptNodeDns?.hashCode() ?: 0)
+        result = 31 * result + (adoptedNodeDns?.hashCode() ?: 0)
+        return result
     }
 
     companion object {

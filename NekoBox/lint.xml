@@ -34,4 +34,7 @@
 
     <issue id="InvalidPackage" severity="ignore" />
     <issue id="TrustAllX509TrustManager" severity="ignore" />
+
+    <!-- Enforce minSdk=21 API safety inside lintVitalRelease so API 26+ calls (e.g. java.util.Base64) fail CI. -->
+    <issue id="NewApi" severity="fatal" />
 </lint>

@@ -46,7 +46,9 @@ internal object ClashDnsCandidates {
 
     const val MAX_ROWS = 128
     private const val MAX_ENDPOINT_LENGTH = 2048
-    private val portableSchemes = setOf("udp", "tcp", "tls", "https", "quic")
+    private const val MAX_YAML_ALIASES = 8
+    private const val MAX_YAML_NESTING_DEPTH = 20
+    private val portableSchemes = setOf("udp", "tcp", "tls", "https", "quic", "h3")
     private val uuidSegment = Regex("[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
     private val ambiguousNumericHost = Regex("(?i)(?:0x[0-9a-f]+|[0-9]+)(?:\\.(?:0x[0-9a-f]+|[0-9]+))*")
     private val ambiguousPathEscape = Regex("(?i)%(?:00|0[ad]|2f|5c)")
@@ -55,17 +57,30 @@ internal object ClashDnsCandidates {
     private val absent = Profile(emptyList(), emptyList(), false, false)
     private val malformed = Profile(emptyList(), emptyList(), false, false, malformed = true)
 
+    /**
+     * Parses Clash/Mihomo YAML or JSON profile text strictly for DNS candidates without
+     * performing network requests or hostname resolution.
+     *
+     * Tightens SnakeYAML alias and nesting limits to mitigate collection-key alias DAG
+     * CPU exhaustion (H-06) and strips any leading UTF-8 BOM before detection (M-05).
+     */
     fun parse(text: String): Profile {
-        val looksLikeProfile = profileKey.containsMatchIn(text)
-        if (!looksLikeProfile && !text.trimStart().startsWith('{')) return absent
+        val cleaned = text.removePrefix("\uFEFF")
+        val looksLikeProfile = profileKey.containsMatchIn(cleaned)
+        if (!looksLikeProfile && !cleaned.trimStart().startsWith('{')) return absent
         val options = LoaderOptions().apply {
             codePointLimit = 8 * 1024 * 1024
             isAllowDuplicateKeys = false
+            isAllowRecursiveKeys = false
+            maxAliasesForCollections = MAX_YAML_ALIASES
+            nestingDepthLimit = MAX_YAML_NESTING_DEPTH
         }
         val root = try {
             val dumper = DumperOptions()
-            Yaml(SafeConstructor(options), Representer(dumper), dumper, options).load<Any?>(text) as? Map<*, *>
+            Yaml(SafeConstructor(options), Representer(dumper), dumper, options).load<Any?>(cleaned) as? Map<*, *>
         } catch (_: RuntimeException) {
+            null
+        } catch (_: StackOverflowError) {
             null
         } ?: return if (looksLikeProfile) malformed else absent
         if (root["proxies"] !is List<*> && root["proxy-providers"] !is Map<*, *>) return absent
@@ -120,7 +135,7 @@ internal object ClashDnsCandidates {
                 val mirrors = strictList(dns[Category.DEFAULT.key])
                 val path = mirrors.firstOrNull()?.path
                 if (path != null && path.split('/').any(uuidSegment::matches) && mirrors.all {
-                        it.status == Status.SELECTABLE && it.scheme == "https" && it.path == path
+                        it.status == Status.SELECTABLE && (it.scheme == "https" || it.scheme == "h3") && it.path == path
                     }) mirrors.mapNotNull { it.label }.distinct() else emptyList()
             }
             else -> emptyList()
@@ -164,7 +179,7 @@ internal object ClashDnsCandidates {
         }
         // An empty URI path means '/' in Mihomo, but '/dns-query' in sing-box.
         // Don't silently change the request path; require a path in the candidate.
-        if (options.type == "https" && options.path == null) return Endpoint(Status.UNSUPPORTED, input)
+        if (options.type in setOf("https", "h3") && options.path == null) return Endpoint(Status.UNSUPPORTED, input)
         return Endpoint(Status.SELECTABLE, input, options.type, options.path, explicit || ip != null)
     }
 

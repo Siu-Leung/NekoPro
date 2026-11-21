@@ -53,6 +53,19 @@ object Protocols {
 
     // Test
 
+    private val SENSITIVE_URL_REGEX = Regex("""(?i)\b(https?|h3|tls|quic)://[^\s"'<>]+""")
+
+    /**
+     * Strips credentials, paths, and queries from URLs inside runtime error messages
+     * so single-endpoint private DoH/DoH3 URLs are never echoed into user-facing dialogs.
+     */
+    fun sanitizeErrorMessage(msg: String): String {
+        return SENSITIVE_URL_REGEX.replace(msg) { match ->
+            val scheme = match.groupValues[1]
+            "$scheme://[REDACTED]"
+        }
+    }
+
     fun genFriendlyMsg(msg: String): String {
         val msgL = msg.lowercase()
         return when {
@@ -64,7 +77,7 @@ object Protocols {
                 app.getString(R.string.connection_test_refused)
             }
 
-            else -> msg
+            else -> sanitizeErrorMessage(msg)
         }
     }
 

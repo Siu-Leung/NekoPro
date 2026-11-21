@@ -1,5 +1,6 @@
 package moe.matsuri.nb4a
 
+import com.google.common.net.InetAddresses
 import java.net.URI
 
 /**
@@ -44,7 +45,9 @@ object SingBoxDnsServerParser {
         require(trimmed.isNotEmpty()) { "Empty DNS server address for $tag" }
 
         val lower = trimmed.lowercase()
-        if (lower == "local" || lower == "system" || lower.startsWith("dhcp://")) {
+        val isLocalToken = lower == "local" || lower == "system" ||
+            (if (strict) lower == "dhcp://auto" else lower.startsWith("dhcp://"))
+        if (isLocalToken) {
             return SingBoxOptions.DNSServerOptions().apply {
                 this.type = "local"
                 this.tag = tag
@@ -144,21 +147,21 @@ object SingBoxDnsServerParser {
         return URI("$scheme://$normalizedAuthority$suffix")
     }
 
+    /**
+     * Strictly validates IPv4/IPv6 literals using Guava [InetAddresses.isInetAddress],
+     * matching Go's `netip.ParseAddr` (rejecting leading zeros such as `010.0.0.1`
+     * and malformed colon sequences such as `a:b` or `:::`).
+     */
     internal fun isIpLiteral(host: String): Boolean {
         val clean = host.trim().removeSurrounding("[", "]")
         if (clean.isEmpty()) return false
-        if (clean.contains(':')) {
-            // IPv6 literal: hex digits, colons, optional embedded IPv4 dots, optional zone
-            val addrPart = clean.substringBefore('%')
-            return addrPart.isNotEmpty() && addrPart.all {
-                it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.'
-            }
+        val addrPart = clean.substringBefore('%')
+        if (addrPart.isEmpty()) return false
+        // Reject leading-zero IPv4 octets (e.g. "010.0.0.1") which Go netip rejects.
+        if ('.' in addrPart && ':' !in addrPart) {
+            val parts = addrPart.split('.')
+            if (parts.any { it.length > 1 && it.startsWith('0') }) return false
         }
-        val parts = clean.split('.')
-        if (parts.size != 4) return false
-        return parts.all { part ->
-            part.isNotEmpty() && part.length <= 3 && part.all { it in '0'..'9' } &&
-                (part.toIntOrNull()?.let { it in 0..255 } == true)
-        }
+        return InetAddresses.isInetAddress(addrPart)
     }
 }

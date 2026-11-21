@@ -290,4 +290,12 @@
 
     <color name="preference_simple_menu_background">#FAFAFA</color>
 
+    <!-- Restrained light-mode surface tokens for cards, badges, action pills, and secondary icons -->
+    <color name="card_stroke">#18000000</color>
+    <color name="card_badge_bg">#0D000000</color>
+    <color name="card_action_bg">#0A000000</color>
+    <color name="card_action_stroke">#1F000000</color>
+    <color name="card_icon_tint">#73000000</color>
+    <color name="stats_bar_divider">#14000000</color>
+
 </resources>

@@ -200,4 +200,27 @@ class GroupNodeDnsRegressionTest {
         assertEquals(2, group.effectiveNodeDnsList().size)
         assertEquals("https://a.example/dns-query/t", group.effectiveNodeDns())
     }
+
+    @Test
+    fun exportModeDowngradesMultiEndpointFallbackToStandardPrimaryServer() {
+        val plan = GroupNodeDnsPlan()
+        val tag = plan.bind(41, listOf(first, second), "entry.example", forExport = true)
+        assertEquals("dns-group-41", tag)
+        val server = plan.servers.single()
+        assertEquals("https", server.type)
+        assertEquals(tag, server.tag)
+        assertEquals("resolver-a.example", server.server)
+        assertNull(server.servers)
+    }
+
+    @Test
+    fun defaultGroupDomainCollidingWithPrivateGroupEmitsRejectRule() {
+        val plan = GroupNodeDnsPlan()
+        plan.registerDefaultDomain("shared.example.")
+        plan.bind(12, listOf(first), "SHARED.example")
+        val rule = plan.domainRules().single()
+        assertEquals(listOf("shared.example"), rule.domain)
+        assertEquals("reject", rule.action)
+        assertNull(rule.server)
+    }
 }

@@ -340,10 +340,57 @@
                 android:resource="@xml/cache_paths" />
         </provider>
 
+        <!-- Keep InitializationProvider so EmojiCompat/ProcessLifecycle/ProfileInstaller initialize;
+             only disable WorkManager's default initializer because SagerNet provides custom config. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
-            tools:node="remove" />
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!-- Bind WorkManager 2.10 multiprocess components to :bg so background SubscriptionUpdater
+             observes live VPN serviceState in the same process as ProxyService/VpnService. -->
+        <service
+            android:name="androidx.work.multiprocess.RemoteWorkManagerService"
+            android:process=":bg" />
+        <service
+            android:name="androidx.work.impl.background.systemjob.SystemJobService"
+            android:process=":bg" />
+        <service
+            android:name="androidx.work.impl.background.systemalarm.SystemAlarmService"
+            android:process=":bg" />
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryChargingProxy"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryNotLowProxy"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$StorageNotLowProxy"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$NetworkStateProxy"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxyUpdateReceiver"
+            android:process=":bg" />
+        <receiver
+            android:name="androidx.work.impl.diagnostics.DiagnosticsReceiver"
+            android:process=":bg" />
 
         <receiver
             android:name="io.nekohasekai.sagernet.BootReceiver"

@@ -90,9 +90,32 @@ fun buildConfig(
     val trafficMap = HashMap<String, List<ProxyEntity>>()
     val tagMap = HashMap<Long, String>()
     val globalOutbounds = HashMap<Long, String>()
-    val groupNodeDnsPlan = GroupNodeDnsPlan()
+    val groupDirectOutbounds = LinkedHashMap<Long, String>()
+    val groupNodeDnsPlan = GroupNodeDnsPlan(Logs::w)
     val selectorNames = ArrayList<String>()
     val group = SagerDatabase.groupDao.getById(proxy.groupId)
+
+    /**
+     * Safely extracts entry server hostnames from a custom sing-box outbound/endpoint JSON.
+     * Supports both top-level `server` (standard outbounds) and `peers[].address`
+     * (WireGuard 1.13+ endpoint JSON).
+     */
+    fun extractConfigBeanEntryHosts(configJson: String?): List<String> {
+        if (configJson.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val map = gson.fromJson(configJson, Map::class.java) ?: return@runCatching emptyList()
+            val hosts = ArrayList<String>()
+            (map["server"] as? String)?.trim()?.takeIf { it.isNotEmpty() }?.let { hosts.add(it) }
+            val peers = map["peers"] as? List<*>
+            peers?.forEach { peer ->
+                val addr = (peer as? Map<*, *>)?.get("address") as? String
+                addr?.trim()?.takeIf { it.isNotEmpty() }?.let { hosts.add(it) }
+            }
+            hosts.distinct()
+        }.onFailure {
+            Logs.w("Failed to parse custom outbound JSON for entry host extraction: ${it.message}")
+        }.getOrDefault(emptyList())
+    }
 
     fun ProxyEntity.resolveChainInternal(visited: MutableSet<Long> = hashSetOf()): MutableList<ProxyEntity> {
         if (!visited.add(id)) {
@@ -200,7 +223,6 @@ fun buildConfig(
         dns = DNSOptions().apply {
             servers = mutableListOf()
             rules = mutableListOf()
-            independent_cache = true
         }
 
         fun autoDnsDomainStrategy(s: String): String? {
@@ -316,6 +338,7 @@ fun buildConfig(
             var muxApplied = false
 
             val defaultServerDomainStrategy = SingBoxOptionsUtil.domainStrategy("server")
+            val nonDialerCustomTypes = setOf("selector", "urltest", "block", "direct", "dns")
 
             profileList.forEachIndexed { index, proxyEntity ->
                 val bean = proxyEntity.requireBean()
@@ -331,24 +354,23 @@ fun buildConfig(
 
                 val entityGroup = SagerDatabase.groupDao.getById(proxyEntity.groupId)
                 val groupNodeDnsList = entityGroup?.effectiveNodeDnsList().orEmpty()
-                // A custom outbound owns its `server` setting, not the bean's default placeholder.
-                val entryHost = if (bean is ConfigBean) {
-                    (gson.fromJson(bean.config, Map::class.java)?.get("server") as? String).orEmpty()
-                } else bean.serverAddress.orEmpty()
-                val entryIsDomain = entryHost.isNotBlank() && !SingBoxDnsServerParser.isIpLiteral(entryHost)
-                if (entryIsDomain && groupNodeDnsList.isEmpty() && entityGroup?.requiresNodeDnsAdoption() == true) {
-                    // 逻辑修正（2026-11-21）：不再硬性中止构建。自动采纳开启但订阅源从不提供
-                    // dns.proxy-server-nameserver 时（如纯节点订阅），旧行为（≤1.4.1）是回退
-                    // default_domain_resolver=dns-direct 拨号；公网可解析的节点仍可用，私有
-                    // 入口域名会在拨号期报明确的 SERVFAIL。硬抛错会让整组节点连测速都起不来，
-                    // 且用户无从在测速界面补救。此处降级为警告，由 GroupSettings 的状态行和
-                    // 刷新提示引导手填。
-                    Logs.w("Group '${entityGroup.displayName()}' has auto-adopt node DNS enabled but no resolver; falling back to the default resolver for ${bean.displayName()}")
+                // A custom outbound owns its `server` (or WireGuard `peers[].address`) setting.
+                val entryHosts = if (bean is ConfigBean) {
+                    extractConfigBeanEntryHosts(bean.config)
+                } else {
+                    listOfNotNull(bean.serverAddress?.trim()?.takeIf { it.isNotEmpty() })
                 }
-                if (entryIsDomain && groupNodeDnsList.isNotEmpty() && proxyEntity.needExternal()) {
-                    // 组解析器无法绑定到外部插件的本地 SOCKS 占位出站（占位是 127.0.0.1）。
-                    // 与上一条同理改为警告：插件自身仍按其原有方式解析入口域名。
-                    Logs.w("Group resolver cannot bind to external plugin outbound ${bean.displayName()}; skipping explicit domain_resolver")
+                val entryHost = entryHosts.firstOrNull().orEmpty()
+                val entryDomainHosts = entryHosts.filter { !SingBoxDnsServerParser.isIpLiteral(it) }
+                val entryIsDomain = entryDomainHosts.isNotEmpty()
+                if (entryIsDomain && groupNodeDnsList.isEmpty()) {
+                    entryDomainHosts.forEach(groupNodeDnsPlan::registerDefaultDomain)
+                    if (entityGroup?.requiresNodeDnsAdoption() == true) {
+                        // 逻辑修正（2026-11-21）：不再硬性中止构建。自动采纳开启但订阅源从不提供
+                        // dns.proxy-server-nameserver 时（如纯节点订阅），回退 default_domain_resolver=dns-direct
+                        // 拨号，由 GroupSettings 的状态行和刷新提示引导手填。
+                        Logs.w("Group '${entityGroup.displayName()}' has auto-adopt node DNS enabled but no resolver; falling back to the default resolver for ${bean.displayName()}")
+                    }
                 }
 
                 // first profile set as global
@@ -465,6 +487,11 @@ fun buildConfig(
                     }
                 }
 
+                val customBasicMap = (currentOutbound as? CustomSingBoxOption)?.getBasicMap()
+                val customType = (customBasicMap?.get("type") as? String)?.lowercase()
+                val isNonDialerCustom = customType != null && customType in nonDialerCustomTypes
+                val hasExplicitCustomDomainResolver = customBasicMap?.containsKey("domain_resolver") == true
+
                 // internal & external
                 currentOutbound.apply {
                     // udp over tcp (type-safe check, zero reflection)
@@ -472,18 +499,37 @@ fun buildConfig(
                         _hack_config_map["udp_over_tcp"] = true
                     }
 
-                    // domain_strategy
-                    _hack_config_map["domain_strategy"] =
-                        if (forTest) "" else defaultServerDomainStrategy
+                    // Omit domain_strategy on non-dialer custom outbounds (selector/urltest/block/direct/dns)
+                    // and when blank to avoid sing-box 1.14 unknown/deprecated field rejections.
+                    if (!isNonDialerCustom && !forTest && defaultServerDomainStrategy.isNotEmpty()) {
+                        _hack_config_map["domain_strategy"] = defaultServerDomainStrategy
+                    }
 
                     // Use the same group resolver for native, bridged, and test dialers.
                     // A pinned export address no longer needs the resolver or its private URL.
-                    if (groupNodeDnsList.isNotEmpty() && !proxyEntity.needExternal() && (!forExport || entryIsDomain)) {
-                        _hack_config_map["domain_resolver"] = try {
-                            groupNodeDnsPlan.bind(proxyEntity.groupId, groupNodeDnsList, entryHost)
+                    if (groupNodeDnsList.isNotEmpty() && !proxyEntity.needExternal() &&
+                        !isNonDialerCustom && !hasExplicitCustomDomainResolver && (!forExport || entryIsDomain)
+                    ) {
+                        val boundTag = try {
+                            val primaryTag = groupNodeDnsPlan.bind(
+                                proxyEntity.groupId,
+                                groupNodeDnsList,
+                                entryHost,
+                                forExport = forExport,
+                            )
+                            entryDomainHosts.drop(1).forEach { extraHost ->
+                                groupNodeDnsPlan.bind(
+                                    proxyEntity.groupId,
+                                    groupNodeDnsList,
+                                    extraHost,
+                                    forExport = forExport,
+                                )
+                            }
+                            primaryTag
                         } catch (_: IllegalArgumentException) {
                             throw IllegalArgumentException(app.getString(R.string.group_node_dns_invalid))
                         }
+                        _hack_config_map["domain_resolver"] = boundTag
                     }
 
                     _hack_config_map["tag"] = tagOut
@@ -495,6 +541,22 @@ fun buildConfig(
                 // For external proxy software, their traffic must goes to v2ray-core to use protected fd.
                 bean.finalAddress = bean.serverAddress
                 bean.finalPort = bean.serverPort!!
+                val externalGroupResolverTag = if (proxyEntity.needExternal() && groupNodeDnsList.isNotEmpty() && (!forExport || entryIsDomain)) {
+                    try {
+                        // Bind external plugin's entry domain into the group DNS plan so both
+                        // mapped direct outbounds and unmapped TUN lookups use the group resolver.
+                        groupNodeDnsPlan.bind(
+                            proxyEntity.groupId,
+                            groupNodeDnsList,
+                            entryHost,
+                            forExport = forExport,
+                        )
+                    } catch (_: IllegalArgumentException) {
+                        throw IllegalArgumentException(app.getString(R.string.group_node_dns_invalid))
+                    }
+                } else {
+                    null
+                }
                 if (bean.canMapping() && proxyEntity.needExternal()) {
                     // With ss protect, don't use mapping
                     var needExternal = true
@@ -527,17 +589,29 @@ fun buildConfig(
 
                             // no chain rule and not outbound, so need to set to direct
                             if (index == profileList.lastIndex) {
+                                val mappingOutbound = if (externalGroupResolverTag != null) {
+                                    groupDirectOutbounds.getOrPut(proxyEntity.groupId) {
+                                        val directTag = "direct-group-${proxyEntity.groupId}"
+                                        outbounds.add(Outbound().apply {
+                                            this.tag = directTag
+                                            type = "direct"
+                                            _hack_config_map["domain_resolver"] = externalGroupResolverTag
+                                        })
+                                        directTag
+                                    }
+                                } else {
+                                    TAG_DIRECT
+                                }
                                 route.rules.add(Rule_DefaultOptions().apply {
                                     inbound = listOf(tag)
-                                    outbound = TAG_DIRECT
+                                    outbound = mappingOutbound
                                 })
                             }
                         })
                     }
                 }
 
-                val isWireGuardCustom = currentOutbound is CustomSingBoxOption &&
-                    (currentOutbound.getBasicMap()["type"] as? String) == "wireguard"
+                val isWireGuardCustom = currentOutbound is CustomSingBoxOption && customType == "wireguard"
                 if (currentOutbound is Endpoint || isWireGuardCustom) {
                     if (endpoints == null) endpoints = mutableListOf()
                     endpoints.add(currentOutbound)
@@ -727,27 +801,25 @@ fun buildConfig(
         })
 
         // Bypass Lookup for the first profile
-        bypassDNSBeans.forEach {
-            var serverAddr = it.serverAddress
-
-            if (it is ConfigBean) {
-                runCatching {
-                    val config = gson.fromJson(it.config, Map::class.java)
-                    config?.get("server")?.toString()?.takeIf { s -> s.isNotBlank() }?.let { s ->
-                        serverAddr = s
-                    }
-                }
+        bypassDNSBeans.forEach { bean ->
+            val hosts = if (bean is ConfigBean) {
+                extractConfigBeanEntryHosts(bean.config)
+            } else {
+                listOfNotNull(bean.serverAddress?.trim()?.takeIf { it.isNotEmpty() })
             }
-
-            if (!serverAddr.isNullOrBlank() && !serverAddr!!.isIpAddress()) {
-                domainListDNSDirectForce.add("full:${serverAddr}")
+            hosts.forEach { rawHost ->
+                val normalized = rawHost.trim().trimEnd('.')
+                if (normalized.isNotEmpty() && !SingBoxDnsServerParser.isIpLiteral(normalized)) {
+                    domainListDNSDirectForce.add("full:$normalized")
+                }
             }
         }
 
         remoteDns.forEach {
             SingBoxDnsServerParser.extractHost(it)?.let { host ->
-                if (!host.isIpAddress()) {
-                    domainListDNSDirectForce.add("full:$host")
+                val normalized = host.trim().trimEnd('.')
+                if (normalized.isNotEmpty() && !SingBoxDnsServerParser.isIpLiteral(normalized)) {
+                    domainListDNSDirectForce.add("full:$normalized")
                 }
             }
         }
@@ -757,8 +829,9 @@ fun buildConfig(
         val groupNodeDnsRules = groupNodeDnsPlan.domainRules()
         val privateNodeHosts = groupNodeDnsRules.flatMap { it.domain.orEmpty() }.toHashSet()
         groupNodeDnsPlan.servers.forEach { serverOpt ->
-            serverOpt.server?.takeIf { it.isNotBlank() && !it.isIpAddress() }?.let { host ->
-                domainListDNSDirectForce.add("full:$host")
+            val normalized = serverOpt.server?.trim()?.trimEnd('.').orEmpty()
+            if (normalized.isNotEmpty() && !SingBoxDnsServerParser.isIpLiteral(normalized)) {
+                domainListDNSDirectForce.add("full:$normalized")
             }
         }
         domainListDNSDirectForce.removeAll { it.removePrefix("full:").trimEnd('.').lowercase() in privateNodeHosts }

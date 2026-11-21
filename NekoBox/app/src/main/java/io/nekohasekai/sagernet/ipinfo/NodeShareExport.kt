@@ -28,7 +28,7 @@ internal class NodeShareExport(
         }
         val key = host.lowercase(Locale.ROOT).trimEnd('.')
         if (!answers.containsKey(key)) answers[key] = resolve(host, endpoints)
-        return answers[key]?.takeIf(IpInfoStore::isIpLiteral).also {
+        return answers[key]?.takeIf(IpInfoStore::isUsableEntryIp).also {
             if (it == null) unresolvedCount++
         }
     }

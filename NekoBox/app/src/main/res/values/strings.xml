@@ -669,4 +669,5 @@
     <string name="group_node_dns_refresh_missing">The subscription does not provide a supported dns.proxy-server-nameserver. Existing nodes and DNS were kept. Enter Node Domain DNS manually to refresh this group.</string>
     <string name="group_node_dns_required">No node DNS is configured for group %1$s. Refresh the subscription or enter Node Domain DNS manually.</string>
     <string name="group_node_dns_unsupported_outbound">The group resolver cannot be applied to the selected type of node in group %1$s.</string>
+    <string name="export_config_private_dns_warning">This exported sing-box configuration includes your group\'s private node DNS endpoint(s), which may contain subscription credentials or tokens. Only share it with people you trust. Continue?</string>
 </resources>

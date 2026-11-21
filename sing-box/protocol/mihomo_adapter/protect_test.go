@@ -233,3 +233,63 @@ func TestTestInstanceNeverPublishesDNSRouter(t *testing.T) {
 		t.Fatal("released main instance left a stale DNS router")
 	}
 }
+
+func TestNewTargetResolverResolvesForTestInstanceWhenGlobalActiveDNSRouterIsNil(t *testing.T) {
+	prev := activeDNSRouter.Swap(nil)
+	t.Cleanup(func() {
+		activeDNSRouter.Store(prev)
+	})
+
+	directTr := &stubDNSTransport{tag: "dns-direct"}
+	remoteTr := &stubDNSTransport{tag: "dns-remote"}
+	router := &stubDNSRouter{addrs: []netip.Addr{netip.MustParseAddr("198.51.100.42")}}
+
+	// Test instance: only dns-direct exists and global activeDNSRouter is nil.
+	testCtx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.DNSRouter](testCtx, router)
+	service.MustRegister[adapter.DNSTransportManager](testCtx, &stubDNSTransportManager{
+		byTag: map[string]adapter.DNSTransport{"dns-direct": directTr},
+		def:   directTr,
+	})
+	testCtx = ContextWithTestInstance(testCtx)
+
+	testTargetResolver := NewTargetResolver(testCtx)
+	if testTargetResolver == nil {
+		t.Fatal("expected non-nil instance target resolver for test context")
+	}
+	addrs, err := testTargetResolver.LookupIP(context.Background(), "cp.cloudflare.com")
+	if err != nil || len(addrs) != 1 || addrs[0] != netip.MustParseAddr("198.51.100.42") {
+		t.Fatalf("test instance target resolver LookupIP = (%v, %v)", addrs, err)
+	}
+	if router.lastTransportTag != "dns-direct" {
+		t.Fatalf("test instance transport = %q, want dns-direct", router.lastTransportTag)
+	}
+
+	// Main instance without dns-remote must fail closed (never leak via dns-direct).
+	mainNoRemoteCtx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.DNSRouter](mainNoRemoteCtx, router)
+	service.MustRegister[adapter.DNSTransportManager](mainNoRemoteCtx, &stubDNSTransportManager{
+		byTag: map[string]adapter.DNSTransport{"dns-direct": directTr},
+		def:   directTr,
+	})
+	mainNoRemoteResolver := NewTargetResolver(mainNoRemoteCtx)
+	if _, err := mainNoRemoteResolver.LookupIP(context.Background(), "target.example"); !errors.Is(err, resolver.ErrIPNotFound) {
+		t.Fatalf("main instance without dns-remote err = %v, want ErrIPNotFound", err)
+	}
+
+	// Main instance with dns-remote must resolve via dns-remote.
+	mainCtx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.DNSRouter](mainCtx, router)
+	service.MustRegister[adapter.DNSTransportManager](mainCtx, &stubDNSTransportManager{
+		byTag: map[string]adapter.DNSTransport{"dns-direct": directTr, "dns-remote": remoteTr},
+		def:   remoteTr,
+	})
+	mainResolver := NewTargetResolver(mainCtx)
+	addrs, err = mainResolver.LookupIP(context.Background(), "target.example")
+	if err != nil || len(addrs) != 1 {
+		t.Fatalf("main instance with dns-remote LookupIP = (%v, %v)", addrs, err)
+	}
+	if router.lastTransportTag != "dns-remote" {
+		t.Fatalf("main instance transport = %q, want dns-remote", router.lastTransportTag)
+	}
+}

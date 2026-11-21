@@ -2,4 +2,12 @@
 <resources>
     <color name="fab_color_progress">@color/material_light_white</color>
     <color name="preference_simple_menu_background">#303030</color>
+
+    <!-- Restrained dark-mode surface tokens for cards, badges, action pills, and secondary icons -->
+    <color name="card_stroke">#1FFFFFFF</color>
+    <color name="card_badge_bg">#17FFFFFF</color>
+    <color name="card_action_bg">#12FFFFFF</color>
+    <color name="card_action_stroke">#29FFFFFF</color>
+    <color name="card_icon_tint">#99FFFFFF</color>
+    <color name="stats_bar_divider">#1FFFFFFF</color>
 </resources>

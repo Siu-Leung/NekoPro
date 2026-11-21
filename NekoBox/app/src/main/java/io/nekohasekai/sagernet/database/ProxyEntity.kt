@@ -168,8 +168,37 @@ data class ProxyEntity(
         output.writeBoolean(dirty)
     }
 
+    /**
+     * Maximum Kryo binary format version supported by this build of [ProxyEntity].
+     */
+    private val maxSupportedSerializationVersion: Int
+        get() = 2
+
     override fun deserializeFromBuffer(input: ByteBufferInput) {
+        readFromBuffer(input, isStrict = false)
+    }
+
+    /**
+     * Strictly deserializes a [ProxyEntity] from a [ByteBufferInput] for backup import,
+     * rejecting unsupported future versions, corrupted inner bean payloads, and unknown types.
+     *
+     * @param input Kryo input stream containing a serialized [ProxyEntity].
+     * @throws IllegalArgumentException When the version, payload size, or proxy type is unsupported.
+     * @throws com.esotericsoftware.kryo.KryoException When the outer or inner Kryo stream is truncated.
+     */
+    fun deserializeFromBufferStrict(input: ByteBufferInput) {
+        readFromBuffer(input, isStrict = true)
+        // Guarantee the deserialized entity carries a concrete bean before committing to Room.
+        requireBean()
+    }
+
+    private fun readFromBuffer(input: ByteBufferInput, isStrict: Boolean) {
         val version = input.readInt()
+        if (version < 0 || version > maxSupportedSerializationVersion) {
+            throw IllegalArgumentException(
+                "Unsupported ProxyEntity serialization version: $version (max supported: $maxSupportedSerializationVersion)"
+            )
+        }
 
         id = input.readLong()
         groupId = input.readLong()
@@ -193,34 +222,50 @@ data class ProxyEntity(
             exitProvider = input.readString() ?: ""
             ipInfoUpdatedAt = input.readLong()
         }
-        putByteArray(input.readBytes(input.readVarInt(true)))
+        val payloadSize = input.readVarInt(true)
+        if (payloadSize < 0 || (isStrict && payloadSize == 0)) {
+            throw IllegalArgumentException("Invalid ProxyEntity bean payload size: $payloadSize")
+        }
+        putByteArray(input.readBytes(payloadSize), isStrict = isStrict)
 
         dirty = input.readBoolean()
     }
 
+    /**
+     * Deserializes the protocol-specific bean payload matching [type] into this entity.
+     *
+     * @param byteArray Serialized Kryo bytes of the inner protocol bean.
+     * @param isStrict When `true`, propagates [com.esotericsoftware.kryo.KryoException] on truncated/corrupt payloads.
+     * @throws IllegalArgumentException When [type] is not recognized by this build.
+     */
+    @JvmOverloads
+    fun putByteArray(byteArray: ByteArray, isStrict: Boolean = false) {
+        fun <T : AbstractBean> decodeBean(bean: T): T =
+            if (isStrict) KryoConverters.deserializeStrict(bean, byteArray)
+            else KryoConverters.deserialize(bean, byteArray)
 
-    fun putByteArray(byteArray: ByteArray) {
         when (type) {
-            TYPE_SOCKS -> socksBean = KryoConverters.socksDeserialize(byteArray)
-            TYPE_HTTP -> httpBean = KryoConverters.httpDeserialize(byteArray)
-            TYPE_SS -> ssBean = KryoConverters.shadowsocksDeserialize(byteArray)
-            TYPE_VMESS -> vmessBean = KryoConverters.vmessDeserialize(byteArray)
-            TYPE_TROJAN -> trojanBean = KryoConverters.trojanDeserialize(byteArray)
-            TYPE_TROJAN_GO -> trojanGoBean = KryoConverters.trojanGoDeserialize(byteArray)
-            TYPE_MIERU -> mieruBean = KryoConverters.mieruDeserialize(byteArray)
-            TYPE_NAIVE -> naiveBean = KryoConverters.naiveDeserialize(byteArray)
-            TYPE_HYSTERIA -> hysteriaBean = KryoConverters.hysteriaDeserialize(byteArray)
-            TYPE_SSH -> sshBean = KryoConverters.sshDeserialize(byteArray)
-            TYPE_WG -> wgBean = KryoConverters.wireguardDeserialize(byteArray)
-            TYPE_TUIC -> tuicBean = KryoConverters.tuicDeserialize(byteArray)
-            TYPE_SHADOWTLS -> shadowTLSBean = KryoConverters.shadowTLSDeserialize(byteArray)
-            TYPE_ANYTLS -> anyTLSBean = KryoConverters.anyTLSDeserialize(byteArray)
-            TYPE_SNELL -> snellBean = KryoConverters.snellDeserialize(byteArray)
-            TYPE_JUICITY -> juicityBean = KryoConverters.juicityDeserialize(byteArray)
-            TYPE_MASQUE -> masqueBean = KryoConverters.masqueDeserialize(byteArray)
-            TYPE_CHAIN -> chainBean = KryoConverters.chainDeserialize(byteArray)
-            TYPE_NEKO -> nekoBean = KryoConverters.nekoDeserialize(byteArray)
-            TYPE_CONFIG -> configBean = KryoConverters.configDeserialize(byteArray)
+            TYPE_SOCKS -> socksBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(SOCKSBean())
+            TYPE_HTTP -> httpBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(HttpBean())
+            TYPE_SS -> ssBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(ShadowsocksBean())
+            TYPE_VMESS -> vmessBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(VMessBean())
+            TYPE_TROJAN -> trojanBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(TrojanBean())
+            TYPE_TROJAN_GO -> trojanGoBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(TrojanGoBean())
+            TYPE_MIERU -> mieruBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(MieruBean())
+            TYPE_NAIVE -> naiveBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(NaiveBean())
+            TYPE_HYSTERIA -> hysteriaBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(HysteriaBean())
+            TYPE_SSH -> sshBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(SSHBean())
+            TYPE_WG -> wgBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(WireGuardBean())
+            TYPE_TUIC -> tuicBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(TuicBean())
+            TYPE_SHADOWTLS -> shadowTLSBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(ShadowTLSBean())
+            TYPE_ANYTLS -> anyTLSBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(AnyTLSBean())
+            TYPE_SNELL -> snellBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(moe.matsuri.nb4a.proxy.snell.SnellBean())
+            TYPE_JUICITY -> juicityBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(JuicityBean())
+            TYPE_MASQUE -> masqueBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(MASQUEBean())
+            TYPE_CHAIN -> chainBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(ChainBean())
+            TYPE_NEKO -> nekoBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(NekoBean())
+            TYPE_CONFIG -> configBean = if (byteArray.isEmpty() && !isStrict) null else decodeBean(ConfigBean())
+            else -> throw IllegalArgumentException("Unknown proxy entity type: $type")
         }
     }
 

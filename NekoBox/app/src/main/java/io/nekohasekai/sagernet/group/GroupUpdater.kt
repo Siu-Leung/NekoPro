@@ -36,13 +36,18 @@ abstract class GroupUpdater {
         var progress by AtomicInteger()
     }
 
+    /**
+     * Resolves profile hostnames to IP literals using structured concurrency, honoring
+     * [groupDns] when configured and filtering out FakeIP/sinkhole answers.
+     */
     protected suspend fun forceResolve(
-        profiles: List<AbstractBean>, groupId: Long?
+        profiles: List<AbstractBean>,
+        groupId: Long?,
+        groupDns: List<String> = emptyList(),
     ) {
         val ipv6Mode = DataStore.ipv6Mode
         val lookupPool = newFixedThreadPoolContext(5, "DNS Lookup")
         try {
-            val lookupJobs = mutableListOf<Job>()
             val progress = Progress(profiles.size)
             if (groupId != null) {
                 GroupUpdater.progress[groupId] = progress
@@ -50,45 +55,56 @@ abstract class GroupUpdater {
             }
             val ipv6First = ipv6Mode >= IPv6Mode.PREFER
 
-            for (profile in profiles) {
-                when (profile) {
-                    // SNI rewrite unsupported
-                    is NaiveBean -> continue
-                }
+            coroutineScope {
+                val lookupJobs = mutableListOf<Job>()
+                for (profile in profiles) {
+                    when (profile) {
+                        // SNI rewrite unsupported
+                        is NaiveBean -> continue
+                    }
 
-                val serverAddress = profile.serverAddress
-                if (!serverAddress.isNullOrEmpty() && serverAddress.isIpAddress()) continue
+                    val serverAddress = profile.serverAddress
+                    if (serverAddress.isNullOrBlank() || serverAddress.isIpAddress()) continue
 
-                lookupJobs.add(GlobalScope.launch(lookupPool) {
-                    try {
-                        val underlyingNetwork = SagerNet.underlyingNetwork
-                        val results = if (
-                            underlyingNetwork != null &&
-                            DataStore.enableFakeDns &&
-                            DataStore.serviceState.started &&
-                            DataStore.serviceMode == Key.MODE_VPN
-                        ) {
-                            // FakeDNS
-                            underlyingNetwork
-                                .getAllByName(profile.serverAddress)
-                                .filterNotNull()
-                        } else {
-                            // System DNS is enough (when VPN connected, it uses v2ray-core)
-                            InetAddress.getAllByName(profile.serverAddress).filterNotNull()
+                    lookupJobs.add(launch(lookupPool) {
+                        try {
+                            val resolvedAddresses = if (groupDns.isNotEmpty()) {
+                                val resolved = io.nekohasekai.sagernet.ipinfo.IpInfoStore.resolveEntry(
+                                    serverAddress,
+                                    groupDns,
+                                )
+                                listOfNotNull(resolved?.let { InetAddress.getByName(it) })
+                            } else {
+                                val underlyingNetwork = SagerNet.underlyingNetwork
+                                val raw = if (
+                                    underlyingNetwork != null &&
+                                    DataStore.enableFakeDns &&
+                                    DataStore.serviceState.started &&
+                                    DataStore.serviceMode == Key.MODE_VPN
+                                ) {
+                                    underlyingNetwork.getAllByName(serverAddress).filterNotNull()
+                                } else {
+                                    InetAddress.getAllByName(serverAddress).filterNotNull()
+                                }
+                                raw.filter { addr ->
+                                    addr.hostAddress?.let(io.nekohasekai.sagernet.ipinfo.IpInfoStore::isUsableEntryIp) == true
+                                }
+                            }
+                            if (resolvedAddresses.isEmpty()) error("empty response")
+                            rewriteAddress(profile, resolvedAddresses, ipv6First)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Logs.d("Lookup ${profile.serverAddress} failed: ${e.readableMessage}", e)
                         }
-                        if (results.isEmpty()) error("empty response")
-                        rewriteAddress(profile, results, ipv6First)
-                    } catch (e: Exception) {
-                        Logs.d("Lookup ${profile.serverAddress} failed: ${e.readableMessage}", e)
-                    }
-                    if (groupId != null) {
-                        progress.progress++
-                        GroupManager.postReload(groupId)
-                    }
-                })
+                        if (groupId != null) {
+                            progress.progress++
+                            GroupManager.postReload(groupId)
+                        }
+                    })
+                }
+                lookupJobs.joinAll()
             }
-
-            lookupJobs.joinAll()
         } finally {
             lookupPool.close()
         }
@@ -98,41 +114,55 @@ abstract class GroupUpdater {
         bean: AbstractBean, addresses: List<InetAddress>, ipv6First: Boolean
     ) {
         val address = addresses.sortedBy { (it is Inet6Address) xor ipv6First }[0].hostAddress
+        val originalHost = bean.serverAddress.orEmpty()
+        val hostWithPort = "$originalHost:${bean.serverPort}"
 
         with(bean) {
             when (this) {
                 is HttpBean -> {
-                    if (isTLS() && sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (isTLS() && sni.isNullOrBlank()) sni = originalHost
                 }
                 is StandardV2RayBean -> {
-                    when (security) {
-                        "tls" -> if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (security == "tls" && sni.isNullOrBlank()) sni = originalHost
+                    if (host.isNullOrBlank()) {
+                        host = when (type) {
+                            "ws" -> hostWithPort
+                            "httpupgrade" -> if (security == "tls") {
+                                sni?.takeIf { it.isNotBlank() } ?: originalHost
+                            } else {
+                                hostWithPort
+                            }
+                            "http", "xhttp", "splithttp" -> originalHost
+                            else -> host
+                        }
                     }
                 }
                 is TrojanBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (sni.isNullOrBlank()) sni = originalHost
                 }
                 is TrojanGoBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (sni.isNullOrBlank()) sni = originalHost
+                    if (type == "ws" && host.isNullOrBlank()) host = originalHost
                 }
                 is HysteriaBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (sni.isNullOrBlank()) sni = originalHost
                 }
                 is io.nekohasekai.sagernet.fmt.tuic.TuicBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (sni.isNullOrBlank()) sni = originalHost
                 }
                 is io.nekohasekai.sagernet.fmt.juicity.JuicityBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (sni.isNullOrBlank()) sni = originalHost
                 }
                 is io.nekohasekai.sagernet.fmt.masque.MASQUEBean -> {
                     // Preserve empty SNI so Cloudflare WARP/MASQUE uses its default SNI.
                 }
                 is moe.matsuri.nb4a.proxy.anytls.AnyTLSBean -> {
-                    if (sni.isNullOrBlank()) sni = bean.serverAddress
+                    if (sni.isNullOrBlank()) sni = originalHost
                 }
                 is moe.matsuri.nb4a.proxy.snell.SnellBean -> {
-                    if (!obfsMode.isNullOrBlank() && obfsMode != "none" && obfsHost.isNullOrBlank()) {
-                        obfsHost = bean.serverAddress
+                    val mode = obfsMode?.trim()?.lowercase().orEmpty()
+                    if (mode.isNotEmpty() && mode != "none" && obfsHost.isNullOrBlank()) {
+                        obfsHost = originalHost
                     }
                 }
             }
