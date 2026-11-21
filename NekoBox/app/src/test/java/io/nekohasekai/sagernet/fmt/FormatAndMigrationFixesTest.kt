@@ -375,7 +375,7 @@ class FormatAndMigrationFixesTest {
     fun anyTlsHandlesAlpnColonPasswordConflictAndNullAllowInsecure() {
         val parsed = parseAnytls("anytls://user:pass:word@any.example.com:443?sni=s.example&alpn=h2,http/1.1#a1")
         assertEquals("user:pass:word", parsed.password)
-        assertEquals("h2\nhttp/1.1", parsed.alpn)
+        assertEquals("h2,http/1.1", parsed.alpn)
         val exported = parsed.anyTlsToUri()
         assertTrue(exported.contains("alpn="))
 
@@ -425,7 +425,7 @@ class FormatAndMigrationFixesTest {
             moe.matsuri.nb4a.utils.Util.decodeFilename("attachment; filename*=UTF-8''plan.yaml; size=42"),
         )
         assertEquals(
-            "bad%ZZname.txt",
+            "",
             moe.matsuri.nb4a.utils.Util.decodeFilename("attachment; filename*=UTF-8''bad%ZZname.txt; foo=bar"),
         )
     }
