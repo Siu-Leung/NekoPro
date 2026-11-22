@@ -248,15 +248,28 @@ func (s *SpeedTestSession) run() {
 		_ = s.box.Close()
 	}()
 
-	outbound := s.box.Outbound().Default()
-	if outbound == nil {
-		s.finish(nil, errors.New("speed-test box has no default outbound"))
+	// WHY: WireGuard profiles are registered as sing-box endpoints rather than outbounds;
+	// using Outbound().Default() would silently dial `direct`. resolveStrictProxyDialer
+	// resolves both standard "proxy" outbounds and "proxy" endpoints strictly.
+	proxyDialer, err := resolveStrictProxyDialer(s.box.Box)
+	if err != nil {
+		// Fall back to explicit default outbound only when a custom full-config profile uses a non-"proxy" tag.
+		outbound := s.box.Outbound().Default()
+		if outbound == nil || isForbiddenProbeOutboundType(outbound.Type()) {
+			s.finish(nil, fmt.Errorf("resolve speed-test proxy outbound: %w", err))
+			return
+		}
+		detour := dialer.NewDetour(s.box.Outbound(), outbound.Tag(), true)
+		dialerFunc := func(ctx context.Context, network string, address string) (net.Conn, error) {
+			return detour.DialContext(ctx, network, M.ParseSocksaddr(address))
+		}
+		outcome, runErr := executeSpeedTest(s.ctx, s.config, dialerFunc, s.updateProgress)
+		s.finish(outcome, runErr)
 		return
 	}
 
-	detour := dialer.NewDetour(s.box.Outbound(), outbound.Tag(), true)
 	dialerFunc := func(ctx context.Context, network string, address string) (net.Conn, error) {
-		return detour.DialContext(ctx, network, M.ParseSocksaddr(address))
+		return proxyDialer.DialContext(ctx, network, M.ParseSocksaddr(address))
 	}
 	outcome, err := executeSpeedTest(s.ctx, s.config, dialerFunc, s.updateProgress)
 	s.finish(outcome, err)

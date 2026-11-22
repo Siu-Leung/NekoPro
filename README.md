@@ -29,10 +29,22 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc5`）
+`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc6`）
 
 - [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
 - 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
+
+### v1.4.7-rc6 测试版改动日志 (2026-11-22)
+
+- **重塑顶栏为极简三图标布局（彻底消除双 `⋮` 割裂感，回归 `+` 与剪贴板极速导入）**
+  - **精确约束顶栏为 3 个 `showAsAction="always"` 操作位（`[ 👁 ] [ + ] [ ⋮ ]`）**：解决 AndroidX `ActionBarPolicy` 在 360dp–499dp 手机屏宽上限为 3 槽导致 `+` 与搜索被挤进系统二级溢出 `⋮` 进而出现两个 `⋮` 并排的问题；恢复常驻 `+` 按钮并将「从剪贴板导入」置顶为首位；将「搜索节点」移入统一 `⋮` 菜单并弹出 Surge 内联搜索栏（支持跨分组过滤与一键清空）。
+- **单一数据源截图隐私眼睛开关（移除设置页冗余开关）**
+  - 修复 `ConfigurationFragment.onMenuItemClick` 缺失 `action_toggle_privacy_mask` 分支导致点击无响应的问题；从全局设置（`global_preferences.xml`）移除重复的「隐藏地址」开关，统一交由主界面右上角眼睛图标单一管控，开启时高亮着色并立即脱敏节点卡片、顶部状态栏与报错信息。
+- **修复「DoH 管理」与「订阅配置文件」菜单点击无响应并直达检测流程**
+  - 补齐 `action_group_private_dns` 与 `action_edit_subscription_config` 菜单分发分支；将「私人 DNS 管理」更名为「DoH 管理」，订阅分组下点击即自动扫描本地缓存 DoH 并在无生效 DoH 时直达订阅 DNS 候选检测流，普通分组下支持为当前组配置手动 DoH 或一键切换至任意订阅分组检测 DoH；「订阅配置文件」直达当前订阅（或订阅选择器）原文查看/编辑页。
+- **根治测速 / 测拓扑出口 `SERVFAIL` 失败与卡片报错溢出**
+  - **`dns-direct` 自动故障转移至 `dns-local`**：将非导出模式的 `dns-direct` 升级为 `fallback` 传输链（用户直连 DNS → `dns-local` 物理网络解析），消除公共 DoH（如 `223.5.5.5`）对 `.sbs` 等机场域名返回 `SERVFAIL` 导致测速与出口探测直接失败的单点故障；同时修复 `forTest = true` 误清空 `groupNodeDnsRules` 的缺陷。
+  - **加固 UI 进程物理网络识别与 WireGuard 测速拨号**：`LocalResolverImpl.resolvePhysicalNetwork()` 主动过滤 `TRANSPORT_VPN` 避免 `dns-local` 在 VPN 连接态回落至 `networkHandle=0`；`SpeedTestSession` 改用 `resolveStrictProxyDialer` 严格绑定 `"proxy"` 出站/WireGuard Endpoint；修复节点卡片报错行无上限溢出，新增点击诊断弹窗与 DNS 报错一键跳转「DoH 管理」，并顺手去重 `AS401984 AS401984` 归属重复显示。
 
 ### v1.4.7-rc5 测试版改动日志 (2026-11-22)
 

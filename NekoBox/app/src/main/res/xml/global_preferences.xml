@@ -77,10 +77,6 @@
             app:summary="@string/show_node_ip_owner_sum"
             app:title="@string/show_node_ip_owner" />
         <SwitchPreference
-            app:key="hideNodeAddress"
-            app:summary="@string/hide_node_address_sum"
-            app:title="@string/hide_node_address" />
-        <SwitchPreference
             app:icon="@drawable/ic_device_data_usage"
             app:key="meteredNetwork"
             app:summary="@string/metered_summary"

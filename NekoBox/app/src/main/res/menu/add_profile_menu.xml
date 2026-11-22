@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item
-        android:id="@+id/action_search"
-        android:title="@android:string/search_go"
-        app:actionViewClass="androidx.appcompat.widget.SearchView"
-        app:showAsAction="ifRoom" />
 
+    <!-- Exactly 3 top-level items all marked showAsAction="always" guarantees AndroidX
+         ActionBarPolicy (max 3 on 360dp-499dp phones) never spawns a duplicate overflow icon. -->
     <item
         android:id="@+id/action_toggle_privacy_mask"
         android:icon="@drawable/ic_baseline_visibility_24"
@@ -15,16 +12,16 @@
 
     <item
         android:id="@+id/action_add"
-        android:icon="@drawable/ic_action_note_add"
+        android:icon="@drawable/ic_baseline_add_24"
         android:title="@string/add_profile"
-        app:showAsAction="ifRoom">
+        app:showAsAction="always">
         <menu>
-            <item
-                android:id="@+id/action_scan_qr_code"
-                android:title="@string/add_profile_methods_scan_qr_code" />
             <item
                 android:id="@+id/action_import_clipboard"
                 android:title="@string/action_import" />
+            <item
+                android:id="@+id/action_scan_qr_code"
+                android:title="@string/add_profile_methods_scan_qr_code" />
             <item
                 android:id="@+id/action_import_file"
                 android:title="@string/action_import_file" />
@@ -98,9 +95,12 @@
     <item
         android:id="@+id/action_misc"
         android:icon="@drawable/ic_baseline_more_vert_24"
-        android:title=""
+        android:title="@string/more_options"
         app:showAsAction="always">
         <menu>
+            <item
+                android:id="@+id/action_search_nodes"
+                android:title="@string/action_search_nodes" />
             <item
                 android:id="@+id/action_update_subscription"
                 android:title="@string/update_current_subscription" />
@@ -110,12 +110,6 @@
             <item
                 android:id="@+id/action_edit_subscription_config"
                 android:title="@string/subscription_config_view_edit" />
-            <item
-                android:id="@+id/action_clear_traffic_statistics"
-                android:title="@string/clear_traffic_statistics" />
-            <item
-                android:id="@+id/action_remove_duplicate"
-                android:title="@string/remove_duplicate" />
             <item
                 android:id="@+id/action_connection_tcp_ping"
                 android:title="@string/connection_test_tcp_ping" />
@@ -131,12 +125,6 @@
             <item
                 android:id="@+id/action_probe_group_ip_info"
                 android:title="@string/action_probe_group_ip_info" />
-            <item
-                android:id="@+id/action_connection_test_clear_results"
-                android:title="@string/connection_test_clear_results" />
-            <item
-                android:id="@+id/action_connection_test_delete_unavailable"
-                android:title="@string/connection_test_delete_unavailable" />
             <item
                 android:id="@+id/action_order"
                 android:title="@string/sort_and_layout">
@@ -172,6 +160,18 @@
                     </group>
                 </menu>
             </item>
+            <item
+                android:id="@+id/action_clear_traffic_statistics"
+                android:title="@string/clear_traffic_statistics" />
+            <item
+                android:id="@+id/action_remove_duplicate"
+                android:title="@string/remove_duplicate" />
+            <item
+                android:id="@+id/action_connection_test_clear_results"
+                android:title="@string/connection_test_clear_results" />
+            <item
+                android:id="@+id/action_connection_test_delete_unavailable"
+                android:title="@string/connection_test_delete_unavailable" />
         </menu>
     </item>
 

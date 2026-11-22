@@ -50,15 +50,18 @@ object PrivateDnsDialogHelper {
     private const val INPUT_MAX_LINES = 7
 
     /**
-     * Opens the Private DNS management dialog for [groupId] on [activity].
+     * Opens the DoH Manager dialog for [groupId] on [activity].
      *
      * @param activity Host activity providing lifecycle and UI context.
-     * @param groupId Target [ProxyGroup] ID whose Private DNS settings are managed.
+     * @param groupId Target [ProxyGroup] ID whose DoH/DNS settings are managed.
+     * @param autoInspectDns When `true` on a subscription group without active manual/adopted DoH,
+     * immediately opens the subscription DNS candidate detection flow on top of the manager.
      * @param onSaved Optional callback invoked on the main thread after changes are persisted.
      */
     fun showManagerForGroup(
         activity: AppCompatActivity,
         groupId: Long,
+        autoInspectDns: Boolean = false,
         onSaved: (() -> Unit)? = null,
     ) {
         activity.lifecycleScope.launch {
@@ -66,7 +69,7 @@ object PrivateDnsDialogHelper {
                 SagerDatabase.groupDao.getById(groupId)
             }
             if (group == null || activity.isFinishing || activity.isDestroyed) return@launch
-            presentManagerDialog(activity, group, onSaved)
+            presentManagerDialog(activity, group, autoInspectDns, onSaved)
         }
     }
 
@@ -182,6 +185,7 @@ object PrivateDnsDialogHelper {
     private fun presentManagerDialog(
         activity: AppCompatActivity,
         group: ProxyGroup,
+        autoInspectDns: Boolean,
         onSaved: (() -> Unit)?,
     ) {
         val pad = dp2px(DIALOG_PADDING_DP)
@@ -203,9 +207,18 @@ object PrivateDnsDialogHelper {
         val statusSummary = TextView(activity).apply {
             textSize = 12.5f
             setTextColor(activity.getColour(R.color.surge_text_secondary))
-            setPadding(0, 0, 0, dp2px(8))
+            setPadding(0, 0, 0, dp2px(6))
         }
         root.addView(statusSummary)
+
+        val cachedScanBanner = TextView(activity).apply {
+            textSize = 12f
+            setTextColor(activity.getColour(R.color.surge_text_secondary))
+            setPadding(0, 0, 0, dp2px(8))
+        }
+        if (isSubscription) {
+            root.addView(cachedScanBanner)
+        }
 
         val autoAdoptSwitch = SwitchCompat(activity).apply {
             text = activity.getString(R.string.subscription_auto_adopt_node_dns)
@@ -261,6 +274,13 @@ object PrivateDnsDialogHelper {
         autoAdoptSwitch.setOnCheckedChangeListener { _, _ -> refreshStatusLabel() }
         refreshStatusLabel()
 
+        val triggerDetectSubscriptionDns: () -> Unit = {
+            loadAndPickSubscriptionDns(activity, group, manualInput.text.toString()) { chosen ->
+                manualInput.setText(chosen)
+                refreshStatusLabel()
+            }
+        }
+
         if (isSubscription) {
             val actionsRow = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -272,7 +292,7 @@ object PrivateDnsDialogHelper {
                 null,
                 R.attr.materialButtonOutlinedStyle,
             ).apply {
-                text = activity.getString(R.string.subscription_config_extract_dns)
+                text = activity.getString(R.string.doh_manager_detect_now)
                 isAllCaps = false
                 textSize = 12f
             }
@@ -294,12 +314,7 @@ object PrivateDnsDialogHelper {
             actionsRow.addView(viewConfigBtn)
             root.addView(actionsRow)
 
-            extractBtn.setOnClickListener {
-                loadAndPickSubscriptionDns(activity, group, manualInput.text.toString()) { chosen ->
-                    manualInput.setText(chosen)
-                    refreshStatusLabel()
-                }
-            }
+            extractBtn.setOnClickListener { triggerDetectSubscriptionDns() }
             viewConfigBtn.setOnClickListener {
                 activity.startActivity(
                     Intent(activity, SubscriptionConfigActivity::class.java).apply {
@@ -307,6 +322,24 @@ object PrivateDnsDialogHelper {
                         putExtra(SubscriptionConfigActivity.EXTRA_FOCUS_DNS, true)
                     }
                 )
+            }
+
+            // Immediately scan cached subscription config in the background to surface detected DoH count.
+            activity.lifecycleScope.launch {
+                val detectedCount = withContext(Dispatchers.IO) {
+                    val cached = SubscriptionConfigStore.read(group.id)?.content.orEmpty()
+                    if (cached.isBlank()) {
+                        0
+                    } else {
+                        ClashDnsCandidates.parseOrScanInteractive(cached).rows.count { it.selectable != null }
+                    }
+                }
+                if (activity.isFinishing || activity.isDestroyed) return@launch
+                cachedScanBanner.text = if (detectedCount > 0) {
+                    activity.getString(R.string.doh_manager_detect_summary_found, detectedCount)
+                } else {
+                    activity.getString(R.string.doh_manager_detect_summary_empty)
+                }
             }
         }
 
@@ -320,6 +353,12 @@ object PrivateDnsDialogHelper {
 
         dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         dialog.show()
+
+        // When invoked from the main toolbar "DoH Manager" shortcut on a subscription group,
+        // automatically launch the subscription DNS candidate detector if no DoH is active yet.
+        if (isSubscription && autoInspectDns && initialManualDns.isBlank() && adoptedList.isEmpty()) {
+            triggerDetectSubscriptionDns()
+        }
 
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
             manualInput.setText("")

@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -200,6 +201,9 @@ class ConfigurationFragment @JvmOverloads constructor(
     internal var probingProxyId: Long? = null
 
     private var groupTabDivider: View? = null
+    private var surgeSearchBar: View? = null
+    private var surgeSearchInput: android.widget.EditText? = null
+    private var surgeSearchClose: View? = null
     private var surgeStatusCard: View? = null
     private var surgeStatusDot: View? = null
     private var surgeActiveProfile: TextView? = null
@@ -223,6 +227,13 @@ class ConfigurationFragment @JvmOverloads constructor(
         ) {
             if (adapter.groupList.size > position) {
                 DataStore.selectedGroup = adapter.groupList[position].id
+            }
+        }
+
+        override fun onPageSelected(position: Int) {
+            val activeQuery = surgeSearchInput?.text?.toString().orEmpty()
+            if (activeQuery.isNotEmpty()) {
+                getCurrentGroupFragment()?.adapter?.filter(activeQuery)
             }
         }
     }
@@ -280,17 +291,25 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-        val searchView = toolbar.findViewById<SearchView>(R.id.action_search)
-        if (searchView != null) {
-            searchView.setOnQueryTextListener(this)
-            searchView.maxWidth = Int.MAX_VALUE
-
-            searchView.setOnQueryTextFocusChangeListener { _, hasFocus ->
-                if (!hasFocus) {
-                    cancelSearch(searchView)
-                }
+        surgeSearchBar = view.findViewById(R.id.surge_search_bar)
+        surgeSearchInput = view.findViewById(R.id.surge_search_input)
+        surgeSearchClose = view.findViewById(R.id.surge_search_close)
+        surgeSearchInput?.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                getCurrentGroupFragment()?.adapter?.filter(s?.toString().orEmpty())
+            }
+        })
+        surgeSearchClose?.setOnClickListener {
+            if (select && !surgeSearchInput?.text.isNullOrEmpty()) {
+                surgeSearchInput?.setText("")
+            } else {
+                closeInlineNodeSearch()
             }
         }
+        // In profile-picker mode (`select == true`), keep the inline search bar readily available.
+        surgeSearchBar?.isVisible = select
 
         groupPager = view.findViewById(R.id.group_pager)
         tabLayout = view.findViewById(R.id.group_tab)
@@ -473,6 +492,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             handle.dialog = null
         }
         groupTabDivider = null
+        surgeSearchBar = null
+        surgeSearchInput = null
+        surgeSearchClose = null
         surgeStatusCard = null
         surgeStatusDot = null
         surgeActiveProfile = null
@@ -506,16 +528,30 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     /**
-     * Synchronizes the top-right toolbar Eye / Eye-Off icon with [DataStore.hideNodeAddress].
+     * Synchronizes the top-right toolbar Eye / Eye-Off icon and active tint with [DataStore.hideNodeAddress].
      */
     private fun updatePrivacyMaskMenuItem() {
         if (select || !isAdded) return
         val item = toolbar.menu?.findItem(R.id.action_toggle_privacy_mask) ?: return
         val isHidden = DataStore.hideNodeAddress
-        item.setIcon(
-            if (isHidden) R.drawable.ic_baseline_visibility_off_24
-            else R.drawable.ic_baseline_visibility_24
-        )
+        val ctx = context ?: return
+        val iconRes = if (isHidden) {
+            R.drawable.ic_baseline_visibility_off_24
+        } else {
+            R.drawable.ic_baseline_visibility_24
+        }
+        val drawable = androidx.core.content.ContextCompat.getDrawable(ctx, iconRes)?.mutate()
+        if (drawable != null) {
+            val tintColor = if (isHidden) {
+                ctx.getColorAttr(R.attr.selectedColorPrimary)
+            } else {
+                ctx.getColour(R.color.surge_text_primary)
+            }
+            androidx.core.graphics.drawable.DrawableCompat.setTint(drawable, tintColor)
+            item.icon = drawable
+        } else {
+            item.setIcon(iconRes)
+        }
         item.setTitle(
             if (isHidden) R.string.privacy_mask_restore_addresses
             else R.string.hide_node_address
@@ -535,6 +571,34 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (nextHidden) R.string.privacy_mask_enabled_toast
             else R.string.privacy_mask_disabled_toast
         ).show()
+    }
+
+    private fun toggleInlineNodeSearch() {
+        val bar = surgeSearchBar ?: return
+        val input = surgeSearchInput ?: return
+        if (bar.isVisible) {
+            closeInlineNodeSearch()
+            return
+        }
+        bar.isVisible = true
+        input.requestFocus()
+        val imm = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun closeInlineNodeSearch() {
+        val bar = surgeSearchBar ?: return
+        val input = surgeSearchInput
+        input?.setText("")
+        input?.clearFocus()
+        val imm = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        if (input != null) {
+            imm?.hideSoftInputFromWindow(input.windowToken, 0)
+        }
+        if (!select) {
+            bar.isVisible = false
+        }
+        getCurrentGroupFragment()?.adapter?.filter("")
     }
 
     /**
@@ -644,6 +708,14 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.action_toggle_privacy_mask -> {
+                toggleScreenshotPrivacyMask()
+            }
+
+            R.id.action_search_nodes -> {
+                toggleInlineNodeSearch()
+            }
+
             R.id.action_scan_qr_code -> {
                 startActivity(Intent(context, ScannerActivity::class.java))
             }
@@ -765,6 +837,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                         GroupUpdater.startUpdate(group, true)
                     }
                 }
+            }
+
+            R.id.action_group_private_dns -> {
+                openDohManagerFromMainMenu()
+            }
+
+            R.id.action_edit_subscription_config -> {
+                openSubscriptionConfigFromMainMenu()
             }
 
             R.id.action_clear_traffic_statistics -> {
@@ -1777,6 +1857,77 @@ class ConfigurationFragment @JvmOverloads constructor(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Opens the DoH Manager from the top-right toolbar menu.
+     *
+     * When the active tab is a subscription group, launches [PrivateDnsDialogHelper.showManagerForGroup]
+     * directly with `autoInspectDns = true` so users land straight in subscription DoH detection/management.
+     * When on a basic group (e.g. "My group") while subscription groups exist, lets the user either
+     * configure manual DoH for the current group or jump straight into any subscription's DoH detector.
+     */
+    private fun openDohManagerFromMainMenu(targetGroupId: Long? = null) {
+        val hostActivity = activity as? androidx.appcompat.app.AppCompatActivity ?: return
+        if (targetGroupId != null && targetGroupId > 0L) {
+            PrivateDnsDialogHelper.showManagerForGroup(
+                activity = hostActivity,
+                groupId = targetGroupId,
+                autoInspectDns = true,
+            )
+            return
+        }
+        runOnDefaultDispatcher {
+            val currentGroup = DataStore.currentGroup()
+            if (currentGroup.type == GroupType.SUBSCRIPTION) {
+                onMainDispatcher {
+                    if (!isAdded || hostActivity.isFinishing || hostActivity.isDestroyed) return@onMainDispatcher
+                    PrivateDnsDialogHelper.showManagerForGroup(
+                        activity = hostActivity,
+                        groupId = currentGroup.id,
+                        autoInspectDns = true,
+                    )
+                }
+                return@runOnDefaultDispatcher
+            }
+            val subscriptionGroups = SagerDatabase.groupDao.allGroups()
+                .filter { it.type == GroupType.SUBSCRIPTION }
+            onMainDispatcher {
+                if (!isAdded || hostActivity.isFinishing || hostActivity.isDestroyed) return@onMainDispatcher
+                if (subscriptionGroups.isEmpty()) {
+                    PrivateDnsDialogHelper.showManagerForGroup(
+                        activity = hostActivity,
+                        groupId = currentGroup.id,
+                        autoInspectDns = false,
+                    )
+                    return@onMainDispatcher
+                }
+                val targets = ArrayList<ProxyGroup>(subscriptionGroups.size + 1).apply {
+                    add(currentGroup)
+                    addAll(subscriptionGroups)
+                }
+                val labels = Array(targets.size) { index ->
+                    val grp = targets[index]
+                    if (index == 0) {
+                        getString(R.string.doh_manager_current_group_item, grp.displayName())
+                    } else {
+                        getString(R.string.doh_manager_subscription_item, grp.displayName())
+                    }
+                }
+                MaterialAlertDialogBuilder(hostActivity)
+                    .setTitle(R.string.doh_manager_pick_target)
+                    .setItems(labels) { _, which ->
+                        val chosen = targets.getOrNull(which) ?: return@setItems
+                        PrivateDnsDialogHelper.showManagerForGroup(
+                            activity = hostActivity,
+                            groupId = chosen.id,
+                            autoInspectDns = chosen.type == GroupType.SUBSCRIPTION,
+                        )
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
             }
         }
     }
@@ -3097,20 +3248,46 @@ class ConfigurationFragment @JvmOverloads constructor(
                     profileStatus.setTextColor(requireContext().getColour(latencyColorRes))
                 } else {
                     profileStatus.setTextColor(requireContext().getColour(R.color.surge_red))
-                    if (proxyEntity.status == 2) {
-                        profileStatus.text = if (hideAddress) getString(R.string.unavailable)
-                            else if (stText != null) "${proxyEntity.error}\n$stText" else proxyEntity.error
+                    val rawError = proxyEntity.error.orEmpty()
+                    val sanitizedErr = Protocols.sanitizeErrorMessage(rawError.ifBlank { "<?>" })
+                    val isDnsError = rawError.contains("SERVFAIL", ignoreCase = true) ||
+                        rawError.contains("NXDOMAIN", ignoreCase = true) ||
+                        rawError.contains("lookup ", ignoreCase = true) ||
+                        rawError.contains("no such host", ignoreCase = true)
+                    val baseErr = when {
+                        hideAddress -> getString(R.string.unavailable)
+                        isDnsError -> getString(R.string.error_dns_lookup_failed)
+                        proxyEntity.status == 2 && rawError.isNotBlank() && rawError.length <= 42 -> rawError
+                        else -> {
+                            val friendly = Protocols.genFriendlyMsg(rawError)
+                            if (friendly.isNotBlank() && friendly != sanitizedErr && friendly.length <= 48) {
+                                friendly
+                            } else {
+                                getString(R.string.unavailable)
+                            }
+                        }
                     }
-                }
-
-                if (proxyEntity.status == 3) {
-                    val err = proxyEntity.error ?: "<?>"
-                    val sanitizedErr = Protocols.sanitizeErrorMessage(err)
-                    val msg = Protocols.genFriendlyMsg(err)
-                    val baseErr = if (!hideAddress && msg != sanitizedErr) msg else getString(R.string.unavailable)
                     profileStatus.text = if (stText != null) "$baseErr\n$stText" else baseErr
-                    profileStatus.setOnClickListener(if (hideAddress) null else View.OnClickListener { alert(sanitizedErr).tryToShow() })
-                } else {
+                    profileStatus.setOnClickListener(
+                        if (hideAddress || rawError.isBlank()) {
+                            null
+                        } else {
+                            View.OnClickListener {
+                                val builder = MaterialAlertDialogBuilder(requireContext())
+                                    .setTitle(R.string.unavailable)
+                                    .setMessage(sanitizedErr)
+                                    .setPositiveButton(android.R.string.ok, null)
+                                if (isDnsError) {
+                                    builder.setNeutralButton(R.string.error_dialog_open_doh_manager) { _, _ ->
+                                        pf.openDohManagerFromMainMenu(proxyEntity.groupId)
+                                    }
+                                }
+                                builder.show()
+                            }
+                        }
+                    )
+                }
+                if (proxyEntity.status <= 1) {
                     profileStatus.setOnClickListener(null)
                 }
 
@@ -3319,10 +3496,5 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
         }
-
-    private fun cancelSearch(searchView: SearchView) {
-        searchView.onActionViewCollapsed()
-        searchView.clearFocus()
-    }
 
 }

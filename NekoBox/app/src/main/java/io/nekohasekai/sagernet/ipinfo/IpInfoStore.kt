@@ -55,7 +55,15 @@ data class IpOwner(
         val flag = countryFlag(countryCode)
         val place = listOf(flag, countryCode.ifBlank { country }).filter { it.isNotBlank() }.joinToString(" ")
         if (place.isNotBlank()) add(place)
-        val provider = listOf(asn, organization).filter { it.isNotBlank() }.joinToString(" ")
+        val trimmedAsn = asn.trim()
+        val trimmedOrg = organization.trim()
+        val provider = when {
+            trimmedAsn.isBlank() -> trimmedOrg
+            trimmedOrg.isBlank() -> trimmedAsn
+            trimmedOrg.equals(trimmedAsn, ignoreCase = true) -> trimmedAsn
+            trimmedOrg.startsWith("$trimmedAsn ", ignoreCase = true) -> trimmedOrg
+            else -> "$trimmedAsn $trimmedOrg"
+        }
         if (provider.isNotBlank()) add(provider)
     }.joinToString(" · ")
 

@@ -155,20 +155,18 @@
                     android:textSize="11sp"
                     tools:text="VLESS" />
 
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1" />
-
                 <TextView
                     android:id="@+id/profile_status"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:fontFamily="sans-serif-medium"
                     android:fontFeatureSettings="tnum"
                     android:gravity="end"
                     android:lineSpacingExtra="2dp"
+                    android:maxLines="2"
                     android:textColor="@color/surge_text_secondary"
                     android:textSize="12sp"
                     tools:text="42 ms" />
