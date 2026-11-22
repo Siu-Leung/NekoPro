@@ -29,57 +29,27 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc6`）
+`Neko-Pro-1.4.7`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.7)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.7-arm64-v8a.apk`
 
-### v1.4.7-rc6 测试版改动日志 (2026-11-22)
+### v1.4.7 正式版改动日志 (2026-11-22)
 
-- **重塑顶栏为极简三图标布局（彻底消除双 `⋮` 割裂感，回归 `+` 与剪贴板极速导入）**
-  - **精确约束顶栏为 3 个 `showAsAction="always"` 操作位（`[ 👁 ] [ + ] [ ⋮ ]`）**：解决 AndroidX `ActionBarPolicy` 在 360dp–499dp 手机屏宽上限为 3 槽导致 `+` 与搜索被挤进系统二级溢出 `⋮` 进而出现两个 `⋮` 并排的问题；恢复常驻 `+` 按钮并将「从剪贴板导入」置顶为首位；将「搜索节点」移入统一 `⋮` 菜单并弹出 Surge 内联搜索栏（支持跨分组过滤与一键清空）。
-- **单一数据源截图隐私眼睛开关（移除设置页冗余开关）**
-  - 修复 `ConfigurationFragment.onMenuItemClick` 缺失 `action_toggle_privacy_mask` 分支导致点击无响应的问题；从全局设置（`global_preferences.xml`）移除重复的「隐藏地址」开关，统一交由主界面右上角眼睛图标单一管控，开启时高亮着色并立即脱敏节点卡片、顶部状态栏与报错信息。
-- **修复「DoH 管理」与「订阅配置文件」菜单点击无响应并直达检测流程**
-  - 补齐 `action_group_private_dns` 与 `action_edit_subscription_config` 菜单分发分支；将「私人 DNS 管理」更名为「DoH 管理」，订阅分组下点击即自动扫描本地缓存 DoH 并在无生效 DoH 时直达订阅 DNS 候选检测流，普通分组下支持为当前组配置手动 DoH 或一键切换至任意订阅分组检测 DoH；「订阅配置文件」直达当前订阅（或订阅选择器）原文查看/编辑页。
-- **根治测速 / 测拓扑出口 `SERVFAIL` 失败与卡片报错溢出**
-  - **`dns-direct` 自动故障转移至 `dns-local`**：将非导出模式的 `dns-direct` 升级为 `fallback` 传输链（用户直连 DNS → `dns-local` 物理网络解析），消除公共 DoH（如 `223.5.5.5`）对 `.sbs` 等机场域名返回 `SERVFAIL` 导致测速与出口探测直接失败的单点故障；同时修复 `forTest = true` 误清空 `groupNodeDnsRules` 的缺陷。
-  - **加固 UI 进程物理网络识别与 WireGuard 测速拨号**：`LocalResolverImpl.resolvePhysicalNetwork()` 主动过滤 `TRANSPORT_VPN` 避免 `dns-local` 在 VPN 连接态回落至 `networkHandle=0`；`SpeedTestSession` 改用 `resolveStrictProxyDialer` 严格绑定 `"proxy"` 出站/WireGuard Endpoint；修复节点卡片报错行无上限溢出，新增点击诊断弹窗与 DNS 报错一键跳转「DoH 管理」，并顺手去重 `AS401984 AS401984` 归属重复显示。
-
-### v1.4.7-rc5 测试版改动日志 (2026-11-22)
-
-- **订阅配置文件本地持久化管理（FlClash 风格查看/编辑）与多格式私有 DoH 识别升级**
-  - **新增订阅配置文件查看器与编辑器（`SubscriptionConfigStore` + `SubscriptionConfigActivity`）**：所有订阅拉取时默认优先协商 `FlClash` / `Clash Verge` / `clash-meta` 完整配置并将原始 YAML / JSON / Surge `.conf` 以 `0600` 权限持久化于应用私有 `noBackupFilesDir`；在订阅管理页每张订阅卡片（「配置」按钮与 `⋮` 菜单）、订阅设置页及主界面右上角 `⋮` 菜单均可一键打开原文，支持「定位 DNS 段」、「仅看 DNS 原文」、「提取私人 DNS」以及修改原文后「保存并解析节点」。
-  - **大幅增强订阅 DoH / 私有 DNS 识别范围**：兼容 Mihomo 直连后缀（`#DIRECT`、`#h3=true` 自动映射 `h3://`、`#ecs=...`、`#skip-cert-verify=false`）与 `doh://` / `+local://` 协议头，兼容 `proxy-server-nameserver` 附带 `system` / `dhcp://auto` 兜底项自动采纳，并新增 sing-box JSON `dns.servers`、Surge `.conf` `doh-server` 以及交互式注释/自定义字段加密 DNS 扫描。
-- **主界面右上角「截图隐私眼睛开关」与「私人 DNS 快捷管理」**
-  - **顶栏常驻眼睛图标（`action_toggle_privacy_mask`）**：将原本深藏在全局设置内的「隐藏地址（方便截图）」提至主界面右上角工具栏，单击即可实时切换节点域名及拓扑出入口 IP 脱敏并保留地区国旗与运营商信息。
-  - **主界面 `⋮` 菜单直达「私人 DNS 管理」与「查看/编辑订阅配置」**：无需层层进入分组设置，在主界面即可查看当前组生效的私人 DNS、开关「自动采用订阅节点 DNS」、手填多行 DoH/DoT/DoQ 或从订阅配置直接提取应用。
-- **修复内置仪表板提示未登录 / 无数据问题**
-  - **`VpnService` 系统代理排除本地回环（`localhost` / `127.0.0.1` / `::1`）**：防止开启追加 HTTP 代理后 WebView 将 `http://127.0.0.1:9090` 与 `ws://127.0.0.1:9090/{traffic,connections,logs}` 转发至 `mixed-in` 导致 WebSocket 升级失败；同时放行本地 `ws://` 子资源请求。
-  - **自动注入与修复 Yacd `localStorage` 密钥及未连接状态引导**：首次打开或存在历史残留无效后端项时自动写入当前 `ClashApiSecret` 并锁定本地控制器索引；未连接代理或端口未就绪时展示清晰的 Surge 状态引导卡片或自动重载内核。
-- **主界面底部实时速率校准、常驻显示与内置测速联动**
-  - **单调时钟采样 + Selector L3 流统计修复 + 直连分流速率同屏呈现**：`TrafficUpdater` 切换至 `SystemClock.elapsedRealtime()` 消除首帧清零与校时跳变；`TrafficLooper` 同时聚合 `proxy` 与 Selector 子出站 `RoutedFlow` 计数以及 `bypass` + `direct` 直连速率，解决规则分流下国内测速显示 `0 B/s` 的问题；取消列表滚动自动隐藏底部状态坞，并在运行节点/整组带宽测速时将实时 `MB/s (Mbps)` 同步投射至底部速率栏。
-- **修复 AnyTLS / UoT 远端 UDP DNS `UoT read: short buffer` 报错**
-  - 将 `sing-box` `UDPTransport` 默认接收缓冲区由 `2048` 提升至 `4096` 字节，并在 TCP 承载的 `*uot.Conn` 收到非标准/失步帧时立即重置复用流并自动回退标准 RFC 1035 DNS-over-TCP 重试。
-
-### v1.4.7-rc4 测试版改动日志 (2026-11-21)
-
-- **功能重塑为「测拓扑」并根治探测完成后界面无显示的三大真机问题**
-  - **修复设置页 `showNodeIpOwner` 缺失 `defaultValue="true"` 静默隐藏全部拓扑 UI 的缺陷**：此前 `global_preferences.xml` 未声明 `app:defaultValue="true"`，导致用户只要进入过一次设置页，AndroidX `TwoStatePreference` 即向数据库写入 `false`，使卡片按钮、拓扑面板与顶部状态栏全面隐藏（即便后台跑完整组探测也不渲染任何内容）。现已补齐 `defaultValue="true"`、增加升级自动恢复迁移，并将节点卡片「测拓扑」按钮设为常驻可见、手动发起拓扑检测自动开启展示。
-  - **修复 VPN 连接态流量刷新竞态与五源 BGP/ASN 拓扑识别**：新增 `ConfigurationAdapter.updateTopologyResult` 原地同步列表实体并修复 `onUpdated(TrafficData)` 旧 `holder.entity` 覆盖竞态；将归属数据源扩展为 `api.ip.sb` → `api.ipapi.is` → `ipinfo.io` → `freeipapi.com` → `ipwho.is`（外加 `1.1.1.1` / `cloudflare.com` trace 兜底），彻底解决共享机场 IEPL 出口（如阿里 GTM 动态入口 → 香港专线出口）触发单一接口限流的问题，并在拓扑面板直观标注 `[中转]`（琥珀色）与 `[直连]`（翠绿色）。
-- **彻底清除日志页 ANSI 256 色转义乱码与首行截断**
-  - 修复 `sing-box/log/observable.go` 中 `platformFormatter` 未开启 `DisableColors` 导致向 `neko.log` 持续写入 `[38;5;193m` / `[37m` / `[0m` 终端控制码的问题；在 `platform_box.go` 与 `LogcatFragment` 双端剥离 ANSI CSI 序列，修复 `SendLog.getNekoLog` 尾部截取断行残片（如 `E[0m`），并按 `INFO`（翠绿）/ `WARN`（琥珀）/ `ERROR`（珊瑚红）/ `DEBUG`（次级灰）异步高亮渲染日志。
-
-### v1.4.7-rc3 测试版改动日志 (2026-11-21)
-
-- **全量二级菜单、嵌套子菜单与全部子页面 Surge 化重塑**
-  - **全系设置与 19 套协议编辑器升级为 Surge Inset Grouped 圆角卡片列表**：新增 `SurgePreferenceStyler`，将全局设置（`SettingsPreferenceFragment`）、分组设置（`GroupSettingsActivity`）、路由规则编辑（`RouteSettingsActivity`）以及全部 19 个协议配置页（VLESS / VMess / Trojan / AnyTLS / Snell / Hysteria / TUIC / Juicity / Mieru / ShadowTLS / WireGuard / Naive / SSH / SOCKS / HTTP / 自定义配置等）统一渲染为 iOS/Surge 内嵌分组圆角卡片（`14dp` 圆角 + `1dp` 轻描边 + `16dp` 缩进发丝分隔线）。
-  - **全部二级弹出菜单、三级嵌套菜单与下拉框统一为 Surge 浮层**：重塑顶栏 `+`（含「手动输入配置」二级协议子菜单）、顶栏 `⋮`（含「排序与布局」二级子菜单）、节点卡片「分享」（二维码 / 剪贴板 / 导出配置二级子菜单）以及设置项 `SimpleMenuPreference` 下拉弹窗，统一采用 `14dp` 圆角纯净表面 + `1dp` 发丝描边与高对比排版；侧边抽屉菜单项升级为 Surge 圆角胶囊高亮条，全面适配 Android 15+ 状态栏安全边距。
-  - **补齐全部二级工具与子页面 Surge 视觉一致性**：完成分应用代理（`AppManagerActivity` / `AppListActivity`）、代理链编辑（`ChainSettingsActivity`）、配置 JSON 编辑器与扩展键盘栏（`ConfigEditActivity`）、实时日志控制台（`LogcatFragment`）、STUN NAT 检测（`StunActivity`）、关于页（`AboutFragment`）、分组弹窗与测速/探测进度弹窗的 Surge 扁平化改造。
-- **彻底打通「入口 IP + 服务商」与「出口 IP + 服务商」全链路探测与常驻展示**
-  - **修复 Cloudflare WAF `403` 拦截与直连被墙问题**：修复 `IpInfoStore` 默认发送 `okhttp/*` UA 被 `api.ip.sb` 前端 Cloudflare WAF 拦截导致入口/出口归属服务商全部返回空值的问题；新增 `api.ip.sb` → `ipwho.is` → Cloudflare `trace` 多源容灾链路与 6 小时内存归属缓存，并优先复用节点自身隔离代理隧道查询入口与出口归属，即使未开启主 VPN 也不受本地运营商阻断影响。
-  - **内核级 `BoxInstance` 原生严格代理探测与全协议 DNS 支持**：`libcore` 新增 `FetchHttpsJson`（严格限定经由 `"proxy"` 出站或 WireGuard `"proxy"` Endpoint 拨号，绝不回退直连）与 `LookupDomainWithTag`（原生支持 `https`/`h3`/`tls`/`quic`/`udp`/`fallback` 全部组 DNS 协议），彻底解决 WireGuard、代理链、自定义配置、DoT/DoQ/DoH3 组 DNS 及 `autoAdoptNodeDns` 纯节点订阅下无法探测出入口的问题。
-  - **持久化双行徽标展示 + 顶部状态栏遥测 + 批量整组查询**：修复旧版将 `exitIp` / `exitProvider` 强制写空导致切页即丢的问题（升级自动清理历史遗留非严格字段，仅在服务器地址或端口变更时失效）；节点卡片与顶部 Surge 状态卡同步以「`入口`（蓝）+ IP + 国旗/ASN/服务商」与「`出口`（绿）+ IP + 国旗/ASN/服务商」双行呈现；首次授权后一键直查，连接节点或单节点测速后自动补齐，并在顶栏 `⋮` 菜单新增「查询本组出入口 IP / 服务商」并发批量探测。
+- **全新 Surge 风格全量视觉体系与极简三图标顶栏**
+  - **全量页面与二级菜单 Surge 化**：主列表、顶部状态/分流控制条、底部常驻速率坞、全部 19 套协议设置页、全局/分组/路由设置页、二级/三级弹出菜单、日志控制台与侧边抽屉全面统一为 Surge 浅灰分组画布 + 14dp 圆角纯净表面 + 1dp 轻描边风格。
+  - **顶栏三图标重构（`[ 👁 ] [ + ] [ ⋮ ]`）**：彻底消除手机屏宽下双 `⋮` 溢出割裂感；常驻回归 `+` 并将「从剪贴板导入」置顶为首位；「搜索节点」收口至 `⋮` 并展开 Surge 内联搜索栏；「截图隐私脱敏」移除设置页冗余开关，交由顶栏眼睛图标单一管控（开启即高亮并同步遮蔽节点、拓扑与错误中的地址）。
+- **订阅配置文件本地管理（FlClash 风格）与 DoH 管理直达**
+  - **订阅配置文件查看/编辑（`SubscriptionConfigStore` + `SubscriptionConfigActivity`）**：拉取订阅时优先协商 `FlClash` / `Clash Verge` / `clash-meta` 完整配置并以 `0600` 权限持久化于私有 `noBackupFilesDir`，支持一键定位 DNS 段、仅看 DNS 原文、检测提取 DoH 及编辑后保存解析节点。
+  - **多格式私有 DoH 识别增强与主界面「DoH 管理」**：兼容 Mihomo `#DIRECT` / `#h3=true` / `#ecs=...` 后缀、`doh://` / `+local://`、`system` 兜底列表、sing-box JSON `dns.servers` 与 Surge `.conf` `doh-server`；主界面 `⋮` 菜单新增「DoH 管理」与「订阅配置文件」，订阅分组直达 DoH 扫描与候选勾选。
+- **「测拓扑」（入口/出口 IP + 服务商）全链路打通与五源 BGP/ASN 容灾**
+  - **内核级严格代理探测**：`libcore` 新增 `FetchHttpsJson` 与 `LookupDomainWithTag`，支持全协议 DNS 与 WireGuard Endpoint，接入 `api.ip.sb` → `api.ipapi.is` → `ipinfo.io` → `freeipapi.com` → `ipwho.is` + Cloudflare `trace` 五源容灾，持久化双行展示入口/出口 IP、国旗与 ASN/服务商（自动去重如 `AS401984` 并区分 `[中转]` / `[直连]`）。
+- **测速 `SERVFAIL` 根因修复、UoT DNS `short buffer` 修复与实时速率校准**
+  - **`dns-direct` 自动故障转移至 `dns-local`**：非导出模式为直连 DNS 建立 `fallback` 容灾链并保留 `forTest = true` 的组级 `groupNodeDnsRules`，彻底解决 `223.5.5.5` 对 `.sbs` 等机场域名返回 `SERVFAIL` 导致测速与出口探测失败的问题；加固 `LocalResolverImpl` 物理网卡识别、`SpeedTestSession` 严格代理拨号与卡片错误防溢出（DNS 错误弹窗内置一键跳转「DoH 管理」）。
+  - **UoT UDP DNS 与底部速率栏修复**：`sing-box` `UDPTransport` 缓冲提升至 `4096` 字节并对失步 `*uot.Conn` 自动回退 DNS-over-TCP；`TrafficUpdater` / `TrafficLooper` 切换单调时钟并聚合 Selector 子出站与直连速率，测速时实时投射 `MB/s (Mbps)` 至底部速率栏；彻底清除日志页 ANSI 256 色转义乱码。
+- **彻底修复内置与外部仪表板 `secret 被拒绝` / 未登录问题**
+  - **实时 Bearer 认证探测 + 跨进程密钥自动同步**：加载内置仪表板前先直连校验 `GET http://127.0.0.1:9090/version` 的 `Authorization: Bearer <secret>` 返回 `200 OK`；若 `:bg` 进程返回 `401` 或端口未就绪则自动触发 `ClashApiChanged` 重载同步密钥；`ClashApiSecret` 改为按文件签名跨进程实时刷新，并修复设置页开关 Clash API 先重载后落盘的竞态。
+  - **多面板 `localStorage` 自动同步 + PNA 放行 + 一键复制 API 密钥**：开启 `access_control_allow_private_network = true`、`VpnService` 排除本地回环代理、自动同步 Yacd / MetaCubeXD / Zashboard 本地密钥并卸载陈旧 ServiceWorker；仪表板 `⋮` 菜单新增「复制 API 密钥 (Secret)」，使用外部面板连接 `http://127.0.0.1:9090` 时一键复制粘贴即可认证。
 
 ### v1.4.6 改动日志 (2026-11-21)
 

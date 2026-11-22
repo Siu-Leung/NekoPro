@@ -68,7 +68,39 @@ class InstallSecretStore(
 }
 
 object ClashApiSecret {
-    val value: String by lazy {
-        InstallSecretStore(SagerNet.application.noBackupFilesDir).get()
+    private val cacheLock = Any()
+
+    @Volatile
+    private var cachedSignature: Pair<Long, Long>? = null
+
+    @Volatile
+    private var cachedValue: String? = null
+
+    /**
+     * Returns the current installation-scoped Clash API secret, re-reading from disk
+     * whenever the underlying file's modification time or size changes across processes.
+     */
+    val value: String
+        get() = read(forceRefresh = false)
+
+    /** Forces a fresh locked read from disk to synchronize UI and `:bg` processes. */
+    fun refresh(): String = read(forceRefresh = true)
+
+    private fun read(forceRefresh: Boolean): String {
+        val dir = SagerNet.application.noBackupFilesDir
+        val file = File(dir, "clash_api.secret")
+        if (!forceRefresh && file.isFile) {
+            val sig = file.lastModified() to file.length()
+            val existing = cachedValue
+            if (existing != null && cachedSignature == sig) {
+                return existing
+            }
+        }
+        return synchronized(cacheLock) {
+            val fresh = InstallSecretStore(dir).get()
+            cachedSignature = if (file.isFile) file.lastModified() to file.length() else null
+            cachedValue = fresh
+            fresh
+        }
     }
 }

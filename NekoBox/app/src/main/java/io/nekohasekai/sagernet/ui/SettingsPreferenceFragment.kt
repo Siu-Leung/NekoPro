@@ -207,9 +207,12 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         val enableClashAPI = findPreference<SwitchPreference>(Key.ENABLE_CLASH_API)!!
         enableClashAPI.setOnPreferenceChangeListener { _, newValue ->
             val enabled = newValue as Boolean
+            // WHY: OnPreferenceChangeListener runs before AndroidX Preference writes to Room;
+            // persist immediately so the `:bg` reload reads the updated flag instead of the stale value.
+            DataStore.enableClashAPI = enabled
             (activity as MainActivity?)?.refreshNavMenu(enabled)
             if (DataStore.serviceState.connected) {
-                SagerNet.reloadService()
+                SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.ClashApiChanged)
             } else {
                 needReload()
             }

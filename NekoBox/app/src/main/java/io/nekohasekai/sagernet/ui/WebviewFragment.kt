@@ -30,9 +30,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.WebViewUtil
 import java.io.ByteArrayInputStream
-import java.net.InetSocketAddress
-import java.net.Socket
+import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URI
+import java.net.URL
 import java.net.URLDecoder
 
 internal const val LOCAL_DASHBOARD_HOST_IP = "127.0.0.1"
@@ -153,36 +154,48 @@ internal fun hasDisallowedLocalBootstrapParams(targetUrl: String): Boolean {
 /**
  * Builds the effective WebView URL for the Clash dashboard.
  * Local dashboard URLs are canonicalized with explicit loopback bootstrap parameters
- * and the current [secret]; external dashboard URLs are returned untouched.
+ * (`hostname`, `port`, `secret`, `http=true`) compatible with Yacd, MetaCubeXD, and Zashboard;
+ * external dashboard URLs are returned untouched so secrets are never leaked to remote origins.
  */
 internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
     if (!isLocalDashboardUrl(configuredUrl)) return configuredUrl
-    // WHY: Yacd expects hostname and port as separate bootstrap parameters.
-    // Passing a complete URL as hostname makes URL.hostname invalid and the
-    // SPA renders a blank dashboard despite a successful HTTP handshake.
-    return "${LOCAL_DASHBOARD_UI_URL}?hostname=$LOCAL_DASHBOARD_HOST_IP&port=$LOCAL_DASHBOARD_PORT&secret=$secret"
+    // WHY: Yacd expects hostname and port as separate bootstrap parameters, while MetaCubeXD and
+    // Zashboard also read `http=true` to connect over plain HTTP loopback instead of HTTPS.
+    return "${LOCAL_DASHBOARD_UI_URL}?hostname=$LOCAL_DASHBOARD_HOST_IP&port=$LOCAL_DASHBOARD_PORT&secret=$secret&http=true"
 }
 
 /**
- * Builds the JavaScript snippet that initializes or repairs Yacd's `localStorage`
- * backend configuration (`yacd.metacubex.one`), ensuring the local `127.0.0.1:9090`
- * controller entry carries [expectedSecret] and is actively selected.
+ * Builds the JavaScript snippet that initializes or repairs `localStorage` backend credentials
+ * for Yacd (`yacd.metacubex.one`), MetaCubeXD (`endpointList` / `selectedEndpoint`), and
+ * Zashboard (`setup/api-list` / `setup/active-uuid`), ensuring `http://127.0.0.1:9090` carries
+ * [expectedSecret] and is actively selected.
  *
- * WHY: Previously, when `localStorage` was empty on first launch (or when a user had
- * tapped "Add" on Yacd's `/backend` modal, shifting `selectedClashAPIConfigIndex` to
- * a broken `/ui` or empty-secret entry), Yacd failed `GET /configs` with `401 Unauthorized`
- * and remained stuck on the backend login modal ("提示未登录").
+ * WHY: Stale or empty secrets left in WebView `localStorage` from earlier app versions cause
+ * Clash WebUIs to fail `GET /configs` or `GET /version` with `401 Unauthorized` ("secret 被拒绝")
+ * even when the URL query string contains the right secret. Guarding reloads with `sessionStorage`
+ * ensures at most one reload per secret so the WebView can never enter an infinite reload loop.
  */
 internal fun buildLocalSecretSyncScript(expectedSecret: String): String {
     val quotedSecret = escapeJsStringLiteral(expectedSecret)
     return """(() => {
         try {
-            const key = 'yacd.metacubex.one';
             const canonicalUrl = 'http://127.0.0.1:9090';
             const secret = $quotedSecret;
-            const raw = localStorage.getItem(key);
-            if (!raw) {
-                const initial = {
+            const isLocalBase = (rawUrl) => {
+                if (typeof rawUrl !== 'string') return false;
+                const normalized = rawUrl.trim().replace(/\/+$/, '').toLowerCase();
+                return normalized === 'http://127.0.0.1:9090' ||
+                    normalized === 'http://localhost:9090' ||
+                    normalized === 'http://127.0.0.1:9090/ui' ||
+                    normalized === 'http://localhost:9090/ui';
+            };
+            let anyUpdated = false;
+
+            // 1. Yacd-meta (`yacd.metacubex.one`)
+            const yacdKey = 'yacd.metacubex.one';
+            const rawYacd = localStorage.getItem(yacdKey);
+            if (!rawYacd) {
+                localStorage.setItem(yacdKey, JSON.stringify({
                     selectedClashAPIConfigIndex: 0,
                     clashAPIConfigs: [{ baseURL: canonicalUrl, secret: secret, addedAt: Date.now() }],
                     latencyTestUrl: 'https://www.gstatic.com/generate_204',
@@ -193,56 +206,146 @@ internal fun buildLocalSecretSyncScript(expectedSecret: String): String {
                     hideUnavailableProxies: false,
                     autoCloseOldConns: false,
                     logStreamingPaused: false
-                };
-                localStorage.setItem(key, JSON.stringify(initial));
-                if (document.querySelector('input[name="secret"]')) {
-                    location.reload();
-                }
-                return;
-            }
-            const state = JSON.parse(raw);
-            if (!state || typeof state !== 'object') return;
-            const backends = Array.isArray(state.clashAPIConfigs) ? state.clashAPIConfigs : [];
-            let localIndex = -1;
-            let updated = !Array.isArray(state.clashAPIConfigs);
-            for (let i = 0; i < backends.length; i++) {
-                const entry = backends[i];
-                if (!entry || typeof entry.baseURL !== 'string') continue;
-                const normalized = entry.baseURL.trim().replace(/\/+$/, '').toLowerCase();
-                if (normalized === 'http://127.0.0.1:9090' ||
-                    normalized === 'http://localhost:9090' ||
-                    normalized === 'http://127.0.0.1:9090/ui' ||
-                    normalized === 'http://localhost:9090/ui') {
-                    if (localIndex === -1) localIndex = i;
-                    if (entry.baseURL !== canonicalUrl) {
-                        entry.baseURL = canonicalUrl;
+                }));
+                anyUpdated = true;
+            } else {
+                const state = JSON.parse(rawYacd);
+                if (state && typeof state === 'object') {
+                    const backends = Array.isArray(state.clashAPIConfigs) ? state.clashAPIConfigs : [];
+                    let localIndex = -1;
+                    let updated = !Array.isArray(state.clashAPIConfigs);
+                    for (let i = 0; i < backends.length; i++) {
+                        const entry = backends[i];
+                        if (!entry || !isLocalBase(entry.baseURL)) continue;
+                        if (localIndex === -1) localIndex = i;
+                        if (entry.baseURL !== canonicalUrl) {
+                            entry.baseURL = canonicalUrl;
+                            updated = true;
+                        }
+                        if (entry.secret !== secret) {
+                            entry.secret = secret;
+                            updated = true;
+                        }
+                    }
+                    if (localIndex === -1) {
+                        backends.unshift({ baseURL: canonicalUrl, secret: secret, addedAt: Date.now() });
+                        localIndex = 0;
                         updated = true;
                     }
-                    if (entry.secret !== secret) {
-                        entry.secret = secret;
+                    state.clashAPIConfigs = backends;
+                    if (state.selectedClashAPIConfigIndex !== localIndex) {
+                        state.selectedClashAPIConfigIndex = localIndex;
                         updated = true;
+                    }
+                    if (updated) {
+                        localStorage.setItem(yacdKey, JSON.stringify(state));
+                        anyUpdated = true;
                     }
                 }
             }
-            if (localIndex === -1) {
-                backends.unshift({ baseURL: canonicalUrl, secret: secret, addedAt: Date.now() });
-                localIndex = 0;
-                updated = true;
+
+            // 2. MetaCubeXD (`endpointList` / `selectedEndpoint`) when present
+            const rawMcxd = localStorage.getItem('endpointList');
+            if (rawMcxd) {
+                try {
+                    const list = JSON.parse(rawMcxd);
+                    if (Array.isArray(list)) {
+                        let mcxdUpdated = false;
+                        let matchedId = null;
+                        for (let i = 0; i < list.length; i++) {
+                            const item = list[i];
+                            if (item && isLocalBase(item.url)) {
+                                if (item.url !== canonicalUrl) { item.url = canonicalUrl; mcxdUpdated = true; }
+                                if (item.secret !== secret) { item.secret = secret; mcxdUpdated = true; }
+                                if (!matchedId && item.id) matchedId = item.id;
+                            }
+                        }
+                        if (mcxdUpdated) {
+                            localStorage.setItem('endpointList', JSON.stringify(list));
+                            if (matchedId) localStorage.setItem('selectedEndpoint', JSON.stringify(matchedId));
+                            anyUpdated = true;
+                        }
+                    }
+                } catch (_) {}
             }
-            state.clashAPIConfigs = backends;
-            if (state.selectedClashAPIConfigIndex !== localIndex) {
-                state.selectedClashAPIConfigIndex = localIndex;
-                updated = true;
+
+            // 3. Zashboard (`setup/api-list` / `setup/active-uuid`) when present
+            const rawZash = localStorage.getItem('setup/api-list');
+            if (rawZash) {
+                try {
+                    const list = JSON.parse(rawZash);
+                    if (Array.isArray(list)) {
+                        let zashUpdated = false;
+                        let matchedUuid = null;
+                        for (let i = 0; i < list.length; i++) {
+                            const item = list[i];
+                            const host = item && typeof item.hostname === 'string' ? item.hostname.toLowerCase() : '';
+                            const port = item && String(item.port || '');
+                            if ((host === '127.0.0.1' || host === 'localhost') && port === '9090') {
+                                if (item.protocol !== 'http:') { item.protocol = 'http:'; zashUpdated = true; }
+                                if (item.secret !== secret) { item.secret = secret; zashUpdated = true; }
+                                if (!matchedUuid && item.uuid) matchedUuid = item.uuid;
+                            }
+                        }
+                        if (zashUpdated) {
+                            localStorage.setItem('setup/api-list', JSON.stringify(list));
+                            if (matchedUuid) localStorage.setItem('setup/active-uuid', matchedUuid);
+                            anyUpdated = true;
+                        }
+                    }
+                } catch (_) {}
             }
-            if (updated) {
-                localStorage.setItem(key, JSON.stringify(state));
-                location.reload();
-            } else if (document.querySelector('input[name="secret"]')) {
+
+            if (anyUpdated && navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+                navigator.serviceWorker.getRegistrations().then((regs) => {
+                    regs.forEach((reg) => { try { reg.unregister(); } catch (_) {} });
+                }).catch(() => {});
+            }
+
+            const hasSecretPrompt = !!document.querySelector('input[name="secret"]');
+            const syncMarkerKey = '__neko_secret_synced__';
+            if ((anyUpdated || hasSecretPrompt) && sessionStorage.getItem(syncMarkerKey) !== secret) {
+                sessionStorage.setItem(syncMarkerKey, secret);
                 location.reload();
             }
         } catch (_) {}
     })()""".trimIndent()
 }
+
+internal enum class ControllerAuthState {
+    READY,
+    UNAUTHORIZED,
+    UNREACHABLE,
+}
+
+/**
+ * Verifies that the local Clash API controller on `127.0.0.1:9090` is both reachable
+ * and accepts [secret] (`GET /version` with `Authorization: Bearer <secret>` returning HTTP 200).
+ */
+internal fun probeLocalControllerAuth(
+    secret: String,
+    host: String = LOCAL_DASHBOARD_HOST_IP,
+    port: Int = LOCAL_DASHBOARD_PORT,
+    timeoutMs: Int = CONTROLLER_CONNECT_TIMEOUT_MS,
+): ControllerAuthState = runCatching {
+    val connection = (URL("http://$host:$port/version")
+        .openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = timeoutMs
+        readTimeout = timeoutMs * 2
+        useCaches = false
+        setRequestProperty("Authorization", "Bearer $secret")
+    }
+    try {
+        when (connection.responseCode) {
+            in 200..299 -> ControllerAuthState.READY
+            401, 403 -> ControllerAuthState.UNAUTHORIZED
+            else -> ControllerAuthState.UNREACHABLE
+        }
+    } finally {
+        connection.disconnect()
+    }
+}.getOrDefault(ControllerAuthState.UNREACHABLE)
 
 private fun isAllowedDashboardUrl(url: String): Boolean {
     val scheme = runCatching { URI(url.trim()).scheme?.lowercase() }.getOrNull()
@@ -251,8 +354,8 @@ private fun isAllowedDashboardUrl(url: String): Boolean {
 }
 
 /**
- * Embedded Clash API / Yacd dashboard fragment with automatic secret synchronization,
- * loopback WebSocket support, and connection-readiness guarding.
+ * Embedded Clash API / Yacd dashboard fragment with live Bearer secret verification,
+ * multi-UI `localStorage` synchronization, loopback WebSocket support, and connection-readiness guarding.
  */
 class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenuItemClickListener {
 
@@ -273,16 +376,6 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             loadDashboardUrl(DataStore.yacdURL)
         }
     }
-
-    private fun probeLocalControllerReachable(): Boolean = runCatching {
-        Socket().use { socket ->
-            socket.connect(
-                InetSocketAddress(LOCAL_DASHBOARD_HOST_IP, LOCAL_DASHBOARD_PORT),
-                CONTROLLER_CONNECT_TIMEOUT_MS,
-            )
-            true
-        }
-    }.getOrDefault(false)
 
     private fun showStatusOverlay(
         titleRes: Int,
@@ -314,6 +407,9 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
         val lifecycleOwner = viewLifecycleOwnerLiveData.value ?: return
         loadJob?.cancel()
         loadJob = lifecycleOwner.lifecycleScope.launch {
+            var secret = withContext(Dispatchers.IO) {
+                ClashApiSecret.refresh().also { cachedSecret = it }
+            }
             if (isLocalDashboardUrl(trimmed)) {
                 if (!DataStore.enableClashAPI) {
                     DataStore.enableClashAPI = true
@@ -330,20 +426,27 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                     return@launch
                 }
 
-                var isControllerReady = withContext(Dispatchers.IO) { probeLocalControllerReachable() }
-                if (!isControllerReady) {
-                    // WHY: If Clash API was enabled while the VPN was already running without a reload,
-                    // reload the core automatically and poll loopback 9090 before opening WebView.
-                    SagerNet.reloadService()
+                var authState = withContext(Dispatchers.IO) { probeLocalControllerAuth(secret) }
+                if (authState != ControllerAuthState.READY) {
+                    // WHY: If Clash API was not yet started OR the running `:bg` instance rejected our
+                    // Bearer secret with HTTP 401 (e.g. stale secret before reload), trigger a ClashApiChanged
+                    // reload and poll until `GET /version` returns HTTP 200 with the active secret.
+                    if (authState == ControllerAuthState.UNAUTHORIZED) {
+                        Logs.w("Local Clash API returned 401 for current secret; reloading core to resync secret")
+                    }
+                    SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.ClashApiChanged)
                     repeat(CONTROLLER_STARTUP_MAX_ATTEMPTS) {
                         delay(CONTROLLER_STARTUP_POLL_STEP_MS)
-                        if (withContext(Dispatchers.IO) { probeLocalControllerReachable() }) {
-                            isControllerReady = true
+                        secret = withContext(Dispatchers.IO) {
+                            ClashApiSecret.refresh().also { cachedSecret = it }
+                        }
+                        authState = withContext(Dispatchers.IO) { probeLocalControllerAuth(secret) }
+                        if (authState == ControllerAuthState.READY) {
                             return@repeat
                         }
                     }
                 }
-                if (!isControllerReady) {
+                if (authState != ControllerAuthState.READY) {
                     showStatusOverlay(
                         titleRes = R.string.dashboard_controller_unavailable_title,
                         messageRes = R.string.dashboard_controller_unavailable_message,
@@ -355,9 +458,6 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 }
             }
 
-            val secret = withContext(Dispatchers.IO) {
-                ClashApiSecret.value.also { cachedSecret = it }
-            }
             hideStatusOverlay()
             if (::mWebView.isInitialized) {
                 mWebView.loadUrl(buildDashboardUrl(trimmed, secret))
@@ -371,7 +471,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
         }
         viewLifecycleOwnerLiveData.value?.lifecycleScope?.launch {
             val expectedSecret = cachedSecret ?: withContext(Dispatchers.IO) {
-                ClashApiSecret.value.also { cachedSecret = it }
+                ClashApiSecret.refresh().also { cachedSecret = it }
             }
             val currentUrl = webView.url ?: url
             if (!isSameLocalDashboardOrigin(currentUrl) || hasDisallowedLocalBootstrapParams(currentUrl)) {
@@ -523,6 +623,20 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 cachedSecret = null
                 loadDashboardUrl(DataStore.yacdURL)
             }
+            R.id.action_copy_api_secret -> {
+                viewLifecycleOwnerLiveData.value?.lifecycleScope?.launch {
+                    val secret = withContext(Dispatchers.IO) {
+                        ClashApiSecret.refresh().also { cachedSecret = it }
+                    }
+                    if (!isAdded) return@launch
+                    val copied = SagerNet.trySetPrimaryClip(secret)
+                    Toast.makeText(
+                        requireContext(),
+                        if (copied) R.string.dashboard_api_secret_copied else R.string.copy_failed,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
             R.id.action_reset_default_url -> {
                 DataStore.yacdURL = LOCAL_DASHBOARD_UI_URL
                 cachedSecret = null
@@ -546,6 +660,13 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                             return@setPositiveButton
                         }
                         DataStore.yacdURL = newUrl
+                        if (!isLocalDashboardUrl(newUrl)) {
+                            Toast.makeText(
+                                requireContext(),
+                                R.string.dashboard_custom_url_secret_hint,
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
                         loadDashboardUrl(newUrl)
                     }
                     .setNegativeButton(android.R.string.cancel, null)

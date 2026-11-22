@@ -202,6 +202,7 @@ fun buildConfig(
                 external_controller = "127.0.0.1:9090"
                 secret = ClashApiSecret.value
                 external_ui = java.io.File(SagerNet.application.filesDir, "yacd").absolutePath
+                access_control_allow_private_network = true
             }
             if (DataStore.enableCacheFile) cache_file = CacheFile().apply {
                 enabled = true

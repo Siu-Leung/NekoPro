@@ -151,6 +151,8 @@ public class SingBoxOptions {
 
         public String default_mode;
 
+        public Boolean access_control_allow_private_network;
+
         // Generate note: option type:  public List<String> ModeList;
 
     }

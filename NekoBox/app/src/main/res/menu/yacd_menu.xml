@@ -7,6 +7,10 @@
         android:title="@string/dashboard_reload"
         app:showAsAction="always" />
     <item
+        android:id="@+id/action_copy_api_secret"
+        android:title="@string/dashboard_copy_api_secret"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_set_url"
         android:title="@string/set_panel_url"
         app:showAsAction="never" />

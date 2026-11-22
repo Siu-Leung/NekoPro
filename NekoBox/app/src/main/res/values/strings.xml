@@ -609,7 +609,7 @@
     <string name="app_list_permission_denied">Unable to read installed apps.\nThis is usually because the system has restricted app read permissions.\nPlease grant permissions in the system settings.</string>
     <string name="open_app_settings">Open System Settings</string>
     <string name="branch_info">Neko Pro Build Info</string>
-    <string name="branch_desc" translatable="false">Neko-Pro-1.4.7-rc6</string>
+    <string name="branch_desc" translatable="false">Neko-Pro-1.4.7</string>
     <string name="branch_desc_detail">Customized from MatsuriDayo/NekoBoxForAndroid. Powered by hardened sing-box 1.14.4 core with native Snell/AnyTLS, plus built-in mihomo 1.19.34 and sing-juicity protocol adapters.</string>
     <string name="supported_protocols">Supported Protocols</string>
     <string name="supported_protocols_detail" translatable="false">AnyTLS / VMess / VLESS / VLESS-XHTTP / REALITY / Trojan / Shadowsocks / ShadowTLS / Hysteria / Hysteria2 / TUIC / Juicity / MASQUE / Mieru / Snell v4-v6 / Naive / SSH / HTTP / SOCKS / WireGuard / Tor</string>
@@ -675,6 +675,9 @@
     <string name="privacy_mask_disabled_toast">Addresses restored</string>
     <string name="stats_direct_tag">Direct</string>
     <string name="dashboard_reload">Reload dashboard</string>
+    <string name="dashboard_copy_api_secret">Copy API Secret</string>
+    <string name="dashboard_api_secret_copied">Copied local Clash API secret (for 127.0.0.1:9090)</string>
+    <string name="dashboard_custom_url_secret_hint">Tip: tap ⋮ → Copy API Secret and paste it into Secret when connecting to 127.0.0.1:9090</string>
     <string name="dashboard_reset_default_url">Reset to built-in local panel</string>
     <string name="dashboard_not_connected_title">Proxy Service Not Connected</string>
     <string name="dashboard_not_connected_message">Connect a node first so the local Clash API controller can stream live connections, rules, and traffic data.</string>
