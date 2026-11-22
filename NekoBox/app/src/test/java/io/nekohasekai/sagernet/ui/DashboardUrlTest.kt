@@ -76,20 +76,36 @@ class DashboardUrlTest {
     @Test
     fun probeLocalControllerAuthDetectsReadyUnauthorizedAndUnreachable() {
         val expectedSecret = "valid-secret-123"
-        val server = com.sun.net.httpserver.HttpServer.create(
-            java.net.InetSocketAddress("127.0.0.1", 0),
-            0,
-        )
-        server.createContext("/version") { exchange ->
-            val auth = exchange.requestHeaders.getFirst("Authorization")
-            val code = if (auth == "Bearer $expectedSecret") 200 else 401
-            val body = if (code == 200) """{"version":"1.14.4"}""" else """{"message":"Unauthorized"}"""
-            val bytes = body.toByteArray(Charsets.UTF_8)
-            exchange.sendResponseHeaders(code, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+        val server = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+        val port = server.localPort
+        val worker = Thread {
+            while (!server.isClosed) {
+                val socket = runCatching { server.accept() }.getOrNull() ?: break
+                socket.use { client ->
+                    val reader = client.getInputStream().bufferedReader(Charsets.US_ASCII)
+                    var authHeader: String? = null
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) break
+                        if (line.startsWith("Authorization:", ignoreCase = true)) {
+                            authHeader = line.substringAfter(':').trim()
+                        }
+                    }
+                    val ok = authHeader == "Bearer $expectedSecret"
+                    val status = if (ok) "200 OK" else "401 Unauthorized"
+                    val body = if (ok) """{"version":"1.14.4"}""" else """{"message":"Unauthorized"}"""
+                    val response = "HTTP/1.1 $status\r\n" +
+                        "Content-Type: application/json\r\n" +
+                        "Content-Length: ${body.length}\r\n" +
+                        "Connection: close\r\n\r\n$body"
+                    client.getOutputStream().write(response.toByteArray(Charsets.US_ASCII))
+                    client.getOutputStream().flush()
+                }
+            }
+        }.apply {
+            isDaemon = true
+            start()
         }
-        server.start()
-        val port = server.address.port
         try {
             assertEquals(
                 ControllerAuthState.READY,
@@ -100,7 +116,8 @@ class DashboardUrlTest {
                 probeLocalControllerAuth("wrong-secret", host = "127.0.0.1", port = port, timeoutMs = 1000),
             )
         } finally {
-            server.stop(0)
+            server.close()
+            worker.join(1000)
         }
         assertEquals(
             ControllerAuthState.UNREACHABLE,
