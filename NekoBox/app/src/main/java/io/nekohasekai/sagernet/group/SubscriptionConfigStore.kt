@@ -1,9 +1,11 @@
 package io.nekohasekai.sagernet.group
 
 import io.nekohasekai.sagernet.SagerNet
-import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.StringReader
+import java.util.Properties
 
 /**
  * Metadata and raw body of a locally persisted subscription configuration snapshot,
@@ -48,12 +50,14 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
         }
         ensureDirectory()
         writeAtomically(configFile(groupId), encoded)
-        val metaJson = JSONObject()
-            .put("userAgent", userAgent)
-            .put("updatedAtMs", updatedAtMs)
-            .toString()
-            .toByteArray(Charsets.UTF_8)
-        writeAtomically(metaFile(groupId), metaJson)
+        val props = Properties().apply {
+            setProperty("userAgent", userAgent)
+            setProperty("updatedAtMs", updatedAtMs.toString())
+        }
+        val metaBytes = ByteArrayOutputStream().also { out ->
+            props.store(out, null)
+        }.toByteArray()
+        writeAtomically(metaFile(groupId), metaBytes)
     }
 
     /**
@@ -64,11 +68,14 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
         val file = configFile(groupId)
         if (!file.isFile || file.length() > MAX_CONFIG_BYTES) return null
         val content = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return null
-        val meta = metaFile(groupId).takeIf { it.isFile }?.let { mf ->
-            runCatching { JSONObject(mf.readText(Charsets.UTF_8)) }.getOrNull()
+        val props = metaFile(groupId).takeIf { it.isFile }?.let { mf ->
+            runCatching {
+                Properties().apply { load(StringReader(mf.readText(Charsets.UTF_8))) }
+            }.getOrNull()
         }
-        val userAgent = meta?.optString("userAgent").orEmpty()
-        val updatedAtMs = meta?.optLong("updatedAtMs")?.takeIf { it > 0L } ?: file.lastModified()
+        val userAgent = props?.getProperty("userAgent").orEmpty()
+        val updatedAtMs = props?.getProperty("updatedAtMs")?.toLongOrNull()?.takeIf { it > 0L }
+            ?: file.lastModified()
         return StoredSubscriptionConfig(
             groupId = groupId,
             content = content,
