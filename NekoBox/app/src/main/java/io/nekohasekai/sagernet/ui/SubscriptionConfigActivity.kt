@@ -60,7 +60,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
     private lateinit var binding: LayoutSubscriptionConfigBinding
     private var groupId: Long = 0L
     private var focusDnsOnLoad: Boolean = false
-    private var isDirty: Boolean = false
+    private var hasUnsavedEdits: Boolean = false
     private var isSuppressingDirtyTracking: Boolean = false
     private var isBusy: Boolean = false
 
@@ -111,7 +111,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
             setHorizontallyScrolling(true)
             addTextChangedListener {
                 if (!isSuppressingDirtyTracking) {
-                    isDirty = true
+                    hasUnsavedEdits = true
                 }
             }
         }
@@ -167,7 +167,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
         isSuppressingDirtyTracking = true
         try {
             binding.editor.setTextContent(content)
-            isDirty = false
+            hasUnsavedEdits = false
         } finally {
             isSuppressingDirtyTracking = false
         }
@@ -379,7 +379,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
                         ?: error("Subscription group no longer exists")
                     RawUpdater.applyEditedSubscriptionConfig(group, editedText, byUser = true)
                 }
-                isDirty = false
+                hasUnsavedEdits = false
                 if (DataStore.serviceState.connected) {
                     SagerNet.reloadService()
                 }
@@ -432,7 +432,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (isDirty) {
+        if (hasUnsavedEdits) {
             UnsavedChangesDialogFragment().apply { key() }.show(supportFragmentManager, null)
         } else {
             super.onBackPressed()
@@ -440,7 +440,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        if (isDirty) {
+        if (hasUnsavedEdits) {
             UnsavedChangesDialogFragment().apply { key() }.show(supportFragmentManager, null)
             return true
         }

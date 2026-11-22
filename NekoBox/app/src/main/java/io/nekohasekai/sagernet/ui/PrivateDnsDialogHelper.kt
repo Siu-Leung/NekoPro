@@ -78,7 +78,7 @@ object PrivateDnsDialogHelper {
      * @param initialEndpoints Previously configured DNS endpoints (newline-separated).
      * @param onSelected Callback receiving the chosen ordered DNS endpoints (newline-separated).
      */
-    fun showCandidatePickerDialog(
+    internal fun showCandidatePickerDialog(
         context: Context,
         profile: ClashDnsCandidates.Profile,
         initialEndpoints: String,
