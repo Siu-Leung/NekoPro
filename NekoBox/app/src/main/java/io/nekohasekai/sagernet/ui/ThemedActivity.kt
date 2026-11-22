@@ -51,6 +51,15 @@ abstract class ThemedActivity : AppCompatActivity {
                 findViewById<AppBarLayout>(R.id.appbar)?.apply {
                     updatePadding(top = top)
                 }
+                val minHeaderTop = (44f * resources.displayMetrics.density).toInt()
+                val extraHeaderTop = (16f * resources.displayMetrics.density).toInt()
+                val headerTop = maxOf(minHeaderTop, top + extraHeaderTop)
+                findViewById<com.google.android.material.navigation.NavigationView>(R.id.nav_view)
+                    ?.getHeaderView(0)
+                    ?.updatePadding(top = headerTop)
+                findViewById<com.google.android.material.navigation.NavigationView>(R.id.nav_view_black)
+                    ?.getHeaderView(0)
+                    ?.updatePadding(top = headerTop)
                 insets
             }
         }

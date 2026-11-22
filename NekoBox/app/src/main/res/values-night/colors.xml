@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="fab_color_progress">@color/material_light_white</color>
-    <color name="preference_simple_menu_background">#303030</color>
+    <color name="preference_simple_menu_background">#16181F</color>
 
     <!-- Surge-inspired dark-mode obsidian canvas, elevated slate surface, and telemetry tokens -->
     <color name="surge_canvas">#0B0D11</color>
@@ -14,6 +14,7 @@
     <color name="surge_amber">#FBBF24</color>
     <color name="surge_red">#F87171</color>
     <color name="surge_status_idle">#6B7280</color>
+    <color name="surge_nav_active_bg">#1EFFFFFF</color>
     <color name="card_stroke">#1CFFFFFF</color>
     <color name="card_badge_bg">#242834</color>
     <color name="card_action_bg">#212530</color>

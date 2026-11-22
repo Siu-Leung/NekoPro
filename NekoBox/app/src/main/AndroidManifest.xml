@@ -214,6 +214,9 @@
             android:name="io.nekohasekai.sagernet.ui.GroupSettingsActivity"
             android:configChanges="uiMode" />
         <activity
+            android:name="io.nekohasekai.sagernet.ui.SubscriptionConfigActivity"
+            android:configChanges="uiMode" />
+        <activity
             android:name="io.nekohasekai.sagernet.ui.RouteSettingsActivity"
             android:configChanges="uiMode" />
         <activity

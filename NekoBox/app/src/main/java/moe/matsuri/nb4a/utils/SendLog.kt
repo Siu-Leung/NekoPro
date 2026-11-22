@@ -95,7 +95,13 @@ object SendLog {
                 }
                 val bytes = stream.readBytes()
                 if (!skipped || bytes.isEmpty()) return@use bytes
-                // Advance past any UTF-8 continuation bytes (10xxxxxx) at the slice boundary
+                // WHY: When tailing the last `max` bytes of a larger ring log, the slice boundary
+                // lands inside an arbitrary line (or mid-UTF8/ANSI sequence). Advance to the next
+                // newline when one exists so the log console always starts cleanly on a whole line.
+                val firstNewline = bytes.indexOf('\n'.code.toByte())
+                if (firstNewline in 0 until bytes.lastIndex) {
+                    return@use bytes.copyOfRange(firstNewline + 1, bytes.size)
+                }
                 var start = 0
                 while (start < bytes.size && start < 3 && (bytes[start].toInt() and 0xC0) == 0x80) {
                     start++

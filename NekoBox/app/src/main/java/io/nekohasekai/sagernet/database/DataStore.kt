@@ -224,6 +224,15 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     /** 在卡片上显示入口/出口 IP 归属（服务商）。 */
     var showNodeIpOwner by configurationStore.boolean(Key.SHOW_NODE_IP_OWNER) { true }
 
+    /** 用户首次确认过出入口 IP / ASN 查询隐私提示后记住授权，后续点击一键直查。 */
+    var ipProbeConsentGranted by configurationStore.boolean("ipProbeConsentGranted") { false }
+
+    /** 标记是否已清理旧版本可能遗留的非严格代理出口 IP 缓存。 */
+    var ipExitStrictMigrationDone by configurationStore.boolean("ipExitStrictMigrationDone") { false }
+
+    /** 修复旧版 global_preferences.xml 缺失 defaultValue="true" 导致进过设置页后默认关闭拓扑展示的问题。 */
+    var topologyDisplayRestoredV1 by configurationStore.boolean("topologyDisplayRestoredV1") { false }
+
     var tunImplementation by configurationStore.stringToInt(Key.TUN_IMPLEMENTATION) { TunImplementation.GVISOR }
     var profileTrafficStatistics by configurationStore.boolean(Key.PROFILE_TRAFFIC_STATISTICS) { true }
 

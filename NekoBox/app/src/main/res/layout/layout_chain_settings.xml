@@ -2,6 +2,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surge_canvas"
     android:orientation="vertical">
 
     <include
@@ -17,24 +18,26 @@
     <LinearLayout
         android:id="@+id/list_cell"
         android:layout_width="match_parent"
-        android:layout_height="0.5dp"
-        android:background="@android:color/darker_gray"
+        android:layout_height="1dp"
+        android:background="@color/surge_divider"
         android:orientation="horizontal" />
 
     <com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView
         android:id="@+id/configuration_list"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="@color/surge_canvas"
         android:clipToPadding="false"
-        android:scrollbarSize="0dp"
-        android:padding="4dp"
         android:overScrollMode="never"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="48dp"
+        android:scrollbarSize="0dp"
         app:fastScrollAutoHide="true"
         app:fastScrollPopupTextColor="?colorPrimary"
         app:fastScrollThumbColor="?colorPrimary"
         app:fastScrollThumbInactiveColor="?colorPrimary"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
-
-    </com.simplecityapps.recyclerview_fastscroll.views.FastScrollRecyclerView>
+        app:layout_behavior="@string/appbar_scrolling_view_behavior" />
 
 </LinearLayout>

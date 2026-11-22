@@ -1,6 +1,8 @@
 package moe.matsuri.nb4a.net
 
 import android.net.DnsResolver
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.CancellationSignal
 import android.system.ErrnoException
@@ -21,13 +23,47 @@ object LocalResolverImpl : LocalDNSTransport {
 
     private const val RCODE_NXDOMAIN = 3
 
+    /**
+     * Returns an active non-VPN physical [Network] for bypassing TUN DNS loops.
+     * Prefers [SagerNet.underlyingNetwork] when non-VPN, otherwise scans active
+     * physical interfaces so ephemeral test boxes in the UI process never fall back
+     * to `networkHandle = 0` (the active VPN TUN) when `DefaultNetworkListener` is
+     * transitioning or in fallback mode.
+     */
+    @Suppress("DEPRECATION")
+    internal fun resolvePhysicalNetwork(): Network? {
+        val connectivity = runCatching { SagerNet.connectivity }.getOrNull() ?: return SagerNet.underlyingNetwork
+        val cached = SagerNet.underlyingNetwork
+        if (cached != null) {
+            val caps = runCatching { connectivity.getNetworkCapabilities(cached) }.getOrNull()
+            if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                return cached
+            }
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return cached
+        var candidate: Network? = null
+        val networks = runCatching { connectivity.allNetworks }.getOrNull().orEmpty()
+        for (net in networks) {
+            val caps = runCatching { connectivity.getNetworkCapabilities(net) }.getOrNull() ?: continue
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            ) {
+                return net
+            }
+            if (candidate == null) candidate = net
+        }
+        return candidate ?: cached
+    }
+
     override fun raw(): Boolean {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
     }
 
     override fun networkHandle(): Long {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return SagerNet.underlyingNetwork?.networkHandle ?: 0
+            return resolvePhysicalNetwork()?.networkHandle ?: 0
         }
         return 0
     }
@@ -54,7 +90,7 @@ object LocalResolverImpl : LocalDNSTransport {
         }
 
         DnsResolver.getInstance().rawQuery(
-            SagerNet.underlyingNetwork,
+            resolvePhysicalNetwork(),
             message,
             DnsResolver.FLAG_NO_RETRY,
             Dispatchers.IO.asExecutor(),
@@ -103,9 +139,10 @@ object LocalResolverImpl : LocalDNSTransport {
                 network.endsWith("6") -> DnsResolver.TYPE_AAAA
                 else -> null
             }
+            val physicalNetwork = resolvePhysicalNetwork()
             if (type != null) {
                 DnsResolver.getInstance().query(
-                    SagerNet.underlyingNetwork,
+                    physicalNetwork,
                     domain,
                     type,
                     DnsResolver.FLAG_NO_RETRY,
@@ -115,7 +152,7 @@ object LocalResolverImpl : LocalDNSTransport {
                 )
             } else {
                 DnsResolver.getInstance().query(
-                    SagerNet.underlyingNetwork,
+                    physicalNetwork,
                     domain,
                     DnsResolver.FLAG_NO_RETRY,
                     Dispatchers.IO.asExecutor(),
@@ -127,9 +164,9 @@ object LocalResolverImpl : LocalDNSTransport {
             runOnIoDispatcher {
                 // 老版本系统，继续用阻塞的 InetAddress
                 try {
-                    val u = SagerNet.underlyingNetwork
-                    val answer = if (u != null) {
-                        u.getAllByName(domain)
+                    val physicalNetwork = resolvePhysicalNetwork()
+                    val answer = if (physicalNetwork != null) {
+                        physicalNetwork.getAllByName(domain)
                     } else {
                         InetAddress.getAllByName(domain)
                     }

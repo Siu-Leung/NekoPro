@@ -15,7 +15,7 @@
         android:background="@color/surge_surface"
         android:theme="?actionBarTheme"
         android:touchscreenBlocksFocus="false"
-        app:popupTheme="@style/ThemeOverlay.AppCompat.DayNight"
+        app:popupTheme="@style/ThemeOverlay.NekoPro.PopupMenu"
         app:title="@string/app_name"
         app:titleTextAppearance="@style/TextAppearance.NekoPro.ToolbarTitle"
         app:titleTextColor="@color/surge_text_primary" />

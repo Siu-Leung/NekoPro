@@ -234,6 +234,23 @@ class GroupSettingsActivity(
             loadDnsCandidates(this)
             true
         }
+        findPreference<Preference>("editSubscriptionConfig")?.setOnPreferenceClickListener {
+            val currentGroupId = DataStore.editingId
+            if (currentGroupId <= 0L) {
+                Toast.makeText(
+                    this@GroupSettingsActivity,
+                    R.string.subscription_config_save_group_first,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } else {
+                startActivity(
+                    Intent(this@GroupSettingsActivity, SubscriptionConfigActivity::class.java).apply {
+                        putExtra(SubscriptionConfigActivity.EXTRA_GROUP_ID, currentGroupId)
+                    }
+                )
+            }
+            true
+        }
         updateNodeDnsStatus(this)
     }
 
@@ -274,6 +291,7 @@ class GroupSettingsActivity(
         updateNodeDnsStatus(fragment)
         val customUserAgent = DataStore.subscriptionUserAgent.trim().takeIf { it.isNotEmpty() }
         val userAgents = dnsCandidateUserAgents ?: RawUpdater.DNS_CANDIDATE_USER_AGENTS
+        val currentGroupId = DataStore.editingId
         lifecycleScope.launch {
             val profile = try {
                 withContext(Dispatchers.IO) {
@@ -282,6 +300,8 @@ class GroupSettingsActivity(
                         userAgents = userAgents,
                         forceProxy = forceProxy,
                         customUserAgent = if (dnsCandidateUserAgents == null) customUserAgent else null,
+                        groupId = currentGroupId,
+                        preferCached = dnsCandidateUserAgents == null && link == savedSubscriptionLink,
                     )
                 }
             } catch (e: CancellationException) {
@@ -631,6 +651,7 @@ class GroupSettingsActivity(
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
             super.onViewCreated(view, savedInstanceState)
 
+            SurgePreferenceStyler.applyTo(this)
             ViewCompat.setOnApplyWindowInsetsListener(listView, ListListener)
         }
 

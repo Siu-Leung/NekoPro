@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surge_canvas"
     android:orientation="vertical"
     tools:context=".ui.ToolsFragment">
 
@@ -11,15 +13,22 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
-    <LinearLayout
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:padding="8dp">
+        android:layout_margin="12dp"
+        app:cardBackgroundColor="@color/surge_surface"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/card_stroke"
+        app:strokeWidth="1dp">
 
         <ScrollView
             android:id="@+id/scroolview"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="12dp">
 
             <TextView
                 android:id="@+id/textview"
@@ -28,11 +37,14 @@
                 android:background="@null"
                 android:ems="10"
                 android:focusable="true"
+                android:fontFamily="monospace"
                 android:gravity="start|top"
+                android:lineSpacingExtra="2dp"
+                android:textColor="@color/surge_text_primary"
                 android:textIsSelectable="true"
+                android:textSize="12sp"
                 tools:ignore="LabelFor" />
         </ScrollView>
-    </LinearLayout>
-
+    </com.google.android.material.card.MaterialCardView>
 
 </LinearLayout>

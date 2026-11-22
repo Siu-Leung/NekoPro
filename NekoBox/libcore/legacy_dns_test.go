@@ -131,3 +131,79 @@ func (testLegacyLocal) Lookup(ctx *ExchangeContext, network, domain string) erro
 func (testLegacyLocal) Exchange(*ExchangeContext, []byte) error {
 	return fmt.Errorf("unexpected raw exchange")
 }
+
+// TestDirectDnsFallbackRecoversFromPrimaryServfail verifies that when the primary
+// direct DoH resolver returns SERVFAIL for a node hostname (e.g. an airport .sbs
+// domain), the ConfigBuilder-style `dns-direct` fallback transport transparently
+// fails over to `dns-local` instead of failing SpeedTest / URLTest / exit probes.
+func TestDirectDnsFallbackRecoversFromPrimaryServfail(t *testing.T) {
+	servfailDoH := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, err := io.ReadAll(r.Body)
+		request := new(mDNS.Msg)
+		if err != nil || request.Unpack(payload) != nil || len(request.Question) != 1 {
+			http.Error(w, "bad query", http.StatusBadRequest)
+			return
+		}
+		response := new(mDNS.Msg).SetReply(request)
+		response.Rcode = mDNS.RcodeServerFailure
+		wire, _ := response.Pack()
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = w.Write(wire)
+	}))
+	defer servfailDoH.Close()
+
+	cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: servfailDoH.Certificate().Raw})
+	port := servfailDoH.Listener.Addr().(*net.TCPAddr).Port
+	cfg := fmt.Sprintf(`{
+		"log":{"disabled":true},
+		"certificate":{"certificate":%q},
+		"dns":{
+			"final":"dns-direct",
+			"strategy":"prefer_ipv4",
+			"servers":[
+				{"type":"local","tag":"dns-local"},
+				{"type":"https","tag":"dns-direct-1","server":"127.0.0.1","server_port":%d,"path":"/dns-query"},
+				{"type":"fallback","tag":"dns-direct","servers":["dns-direct-1","dns-local"]}
+			],
+			"rules":[]
+		},
+		"outbounds":[{"type":"direct","tag":"direct"}],
+		"route":{"final":"direct","default_domain_resolver":"dns-direct"}
+	}`, cert, port)
+
+	instance, err := NewTestSingBoxInstance(cfg, testNodeLocal{answerIPv4: "77.67.126.132"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close()
+	if err := instance.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := instance.LookupDomainWithTag("node.airport.sbs", "dns-direct", 3000)
+	if err != nil {
+		t.Fatalf("expected fallback to dns-local after primary SERVFAIL, got error: %v", err)
+	}
+	if resolved != "77.67.126.132" {
+		t.Fatalf("expected 77.67.126.132 from dns-local fallback, got %q", resolved)
+	}
+}
+
+type testNodeLocal struct {
+	answerIPv4 string
+}
+
+func (testNodeLocal) Raw() bool            { return false }
+func (testNodeLocal) NetworkHandle() int64 { return 0 }
+func (l testNodeLocal) Lookup(ctx *ExchangeContext, network, _ string) error {
+	if network == "ip4" {
+		ctx.Success(l.answerIPv4)
+		return nil
+	}
+	ctx.Success("")
+	return nil
+}
+func (testNodeLocal) Exchange(*ExchangeContext, []byte) error {
+	return fmt.Errorf("unexpected raw exchange")
+}
+

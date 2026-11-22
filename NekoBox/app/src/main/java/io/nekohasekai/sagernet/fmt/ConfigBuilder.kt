@@ -202,6 +202,7 @@ fun buildConfig(
                 external_controller = "127.0.0.1:9090"
                 secret = ClashApiSecret.value
                 external_ui = java.io.File(SagerNet.application.filesDir, "yacd").absolutePath
+                access_control_allow_private_network = true
             }
             if (DataStore.enableCacheFile) cache_file = CacheFile().apply {
                 enabled = true
@@ -842,16 +843,60 @@ fun buildConfig(
             tag = "dns-local"
         })
 
-        val directDnsAddr = directDNS.firstOrNull()
-            ?: throw Exception("No direct DNS, check your settings!")
-        dns.servers.add(
-            SingBoxDnsServerParser.parse(
-                rawAddress = directDnsAddr,
-                tag = "dns-direct",
-                defaultDetour = null,
-                domainResolver = "dns-local",
+        if (directDNS.isEmpty()) {
+            throw Exception("No direct DNS, check your settings!")
+        }
+        if (forExport) {
+            // Upstream sing-box 1.14 does not implement NekoPro's private `type: "fallback"` transport.
+            dns.servers.add(
+                SingBoxDnsServerParser.parse(
+                    rawAddress = directDNS.first(),
+                    tag = "dns-direct",
+                    defaultDetour = null,
+                    domainResolver = "dns-local",
+                )
             )
-        )
+        } else {
+            val directMemberTags = ArrayList<String>()
+            val directSubServers = ArrayList<DNSServerOptions>()
+            var hasLocalFallback = false
+            directDNS.distinct().forEach { addr ->
+                val parsed = SingBoxDnsServerParser.parse(
+                    rawAddress = addr,
+                    tag = "dns-direct-${directSubServers.size + 1}",
+                    defaultDetour = null,
+                    domainResolver = "dns-local",
+                )
+                if (parsed.type == "local") {
+                    if (!hasLocalFallback) {
+                        directMemberTags.add("dns-local")
+                        hasLocalFallback = true
+                    }
+                } else {
+                    directSubServers.add(parsed)
+                    directMemberTags.add(parsed.tag)
+                }
+            }
+            // WHY: Public direct resolvers (e.g., AliDNS 223.5.5.5) periodically return SERVFAIL for
+            // private/newer airport TLDs (e.g., .sbs/.top) that carrier/Wi-Fi DNS (`dns-local`) resolves cleanly.
+            // Automatic failover to `dns-local` preserves primary speed while eliminating single-resolver SERVFAIL.
+            if (!hasLocalFallback) {
+                directMemberTags.add("dns-local")
+            }
+            if (directSubServers.isEmpty()) {
+                dns.servers.add(DNSServerOptions().apply {
+                    type = "local"
+                    tag = "dns-direct"
+                })
+            } else {
+                dns.servers.addAll(directSubServers)
+                dns.servers.add(DNSServerOptions().apply {
+                    type = "fallback"
+                    tag = "dns-direct"
+                    servers = directMemberTags
+                })
+            }
+        }
 
         if (!forTest) {
             val remoteDnsAddr = remoteDns.firstOrNull()
@@ -881,7 +926,16 @@ fun buildConfig(
         }
 
         if (forTest) {
-            dns.rules = listOf()
+            // WHY: Ephemeral test instances (SpeedTest, URLTest, topology exit probe) must still honor
+            // per-group Private DoH rules and bootstrap direct rules instead of clearing all DNS rules.
+            dns.rules = mutableListOf()
+            if (domainListDNSDirectForce.isNotEmpty()) {
+                dns.rules.add(0, DNSRule_DefaultOptions().apply {
+                    makeSingBoxRule(domainListDNSDirectForce.toHashSet().toList())
+                    server = "dns-direct"
+                })
+            }
+            dns.rules.addAll(0, groupNodeDnsRules)
         } else {
             // built-in DNS rules (insert after sniff so protocol=["dns"] can match sniffed DNS)
             val hijackInsertIndex = if (needSniff) 1 else 0

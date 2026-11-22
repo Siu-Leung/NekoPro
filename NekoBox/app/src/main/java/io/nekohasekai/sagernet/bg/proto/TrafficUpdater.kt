@@ -1,62 +1,96 @@
 package io.nekohasekai.sagernet.bg.proto
 
+import android.os.SystemClock
+
+/**
+ * Periodically samples atomic byte deltas from `libcore.BoxInstance.queryStats` using a
+ * monotonic clock (`SystemClock.elapsedRealtime`) so NTP wall-clock jumps never skew rates.
+ */
 class TrafficUpdater(
     private val box: libcore.BoxInstance,
-    val items: List<TrafficLooperData>, // contain "bypass"
+    val items: List<TrafficLooperData>,
 ) {
 
+    /**
+     * Mutable traffic accumulator for one logical outbound bucket.
+     *
+     * @property tag Primary sing-box outbound tag queried on each tick.
+     * @property secondaryTags Additional tags belonging to the same logical bucket (for example,
+     * the selected child tag under a `selector` group for L3 `RoutedFlow` counters, or `direct`
+     * paired with `bypass`).
+     */
     class TrafficLooperData(
-        // Don't associate proxyEntity
         var tag: String,
-        var tx: Long = 0,
-        var rx: Long = 0,
-        var txBase: Long = 0,
-        var rxBase: Long = 0,
-        var txRate: Long = 0,
-        var rxRate: Long = 0,
-        var lastUpdate: Long = 0,
+        var secondaryTags: List<String> = emptyList(),
+        var tx: Long = 0L,
+        var rx: Long = 0L,
+        var txBase: Long = 0L,
+        var rxBase: Long = 0L,
+        var txRate: Long = 0L,
+        var rxRate: Long = 0L,
+        var lastUpdate: Long = SystemClock.elapsedRealtime(),
         var ignore: Boolean = false,
     )
 
+    private fun queryTagPair(tag: String): Pair<Long, Long> {
+        val uplinkBytes = box.queryStats(tag, "uplink")
+        val downlinkBytes = box.queryStats(tag, "downlink")
+        return uplinkBytes to downlinkBytes
+    }
+
     private fun updateOne(item: TrafficLooperData): TrafficLooperData {
-        // last update
-        val now = System.currentTimeMillis()
-        val interval = now - item.lastUpdate
+        val now = SystemClock.elapsedRealtime()
+        val intervalMs = now - item.lastUpdate
         item.lastUpdate = now
-        if (interval <= 0) return item.apply {
-            rxRate = 0
-            txRate = 0
+        if (intervalMs <= 0L) {
+            return item.apply {
+                rxRate = 0L
+                txRate = 0L
+            }
         }
 
-        // query
-        val tx = box.queryStats(item.tag, "uplink")
-        val rx = box.queryStats(item.tag, "downlink")
+        var (deltaTx, deltaRx) = queryTagPair(item.tag)
+        for (extraTag in item.secondaryTags) {
+            if (extraTag.isNotEmpty() && extraTag != item.tag) {
+                val (extraTx, extraRx) = queryTagPair(extraTag)
+                deltaTx += extraTx
+                deltaRx += extraRx
+            }
+        }
 
-        // add diff
-        item.rx += rx
-        item.tx += tx
-        item.rxRate = rx * 1000 / interval
-        item.txRate = tx * 1000 / interval
+        item.rx += deltaRx
+        item.tx += deltaTx
+        item.rxRate = deltaRx * 1000L / intervalMs
+        item.txRate = deltaTx * 1000L / intervalMs
 
-        // return diff
         return TrafficLooperData(
             tag = item.tag,
-            rx = rx,
-            tx = tx,
+            rx = deltaRx,
+            tx = deltaTx,
             rxRate = item.rxRate,
             txRate = item.txRate,
         )
     }
 
     suspend fun updateAll() {
-        val updated = mutableMapOf<String, TrafficLooperData>() // diffs
+        val updated = mutableMapOf<String, TrafficLooperData>()
         items.forEach { item ->
             if (item.ignore) return@forEach
-            var diff = updated[item.tag]
-            // query a tag only once
+            val cacheKey = if (item.secondaryTags.isEmpty()) {
+                item.tag
+            } else {
+                buildString {
+                    append(item.tag)
+                    item.secondaryTags.forEach {
+                        append('|')
+                        append(it)
+                    }
+                }
+            }
+            var diff = updated[cacheKey]
             if (diff == null) {
                 diff = updateOne(item)
-                updated[item.tag] = diff
+                updated[cacheKey] = diff
             } else {
                 item.rx += diff.rx
                 item.tx += diff.tx
@@ -64,7 +98,5 @@ class TrafficUpdater(
                 item.txRate = diff.txRate
             }
         }
-//        Logs.d(JavaUtil.gson.toJson(items))
-//        Logs.d(JavaUtil.gson.toJson(updated))
     }
 }

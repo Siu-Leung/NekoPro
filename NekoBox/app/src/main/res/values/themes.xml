@@ -38,10 +38,15 @@
 
         <item name="chipStyle">@style/Widget.MaterialComponents.Chip.Choice.SagerNet</item>
 
-        <item name="itemShapeAppearance">
-            @style/ShapeAppearance.MaterialComponents.MediumComponent
-        </item>
-        <item name="itemShapeFillColor">@color/color_ng_black_accent</item>
+        <item name="itemShapeAppearance">@style/ShapeAppearance.NekoPro.NavPill</item>
+        <item name="itemShapeFillColor">@color/surge_nav_active_bg</item>
+
+        <item name="popupMenuStyle">@style/Widget.NekoPro.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.NekoPro.PopupMenu</item>
+        <item name="actionOverflowMenuStyle">@style/Widget.NekoPro.OverflowPopupMenu</item>
+        <item name="listPopupWindowStyle">@style/Widget.NekoPro.ListPopupWindow</item>
+        <item name="android:listPopupWindowStyle">@style/Widget.NekoPro.ListPopupWindow</item>
+        <item name="popupMenuBackground">@drawable/bg_surge_popup_menu</item>
 
         <item name="alertDialogTheme">
             @style/ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet
@@ -88,10 +93,15 @@
 
         <item name="chipStyle">@style/Widget.MaterialComponents.Chip.Choice.SagerNet</item>
 
-        <item name="itemShapeAppearance">
-            @style/ShapeAppearance.MaterialComponents.MediumComponent
-        </item>
-        <item name="itemShapeFillColor">@color/color_ng_black_accent</item>
+        <item name="itemShapeAppearance">@style/ShapeAppearance.NekoPro.NavPill</item>
+        <item name="itemShapeFillColor">@color/surge_nav_active_bg</item>
+
+        <item name="popupMenuStyle">@style/Widget.NekoPro.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.NekoPro.PopupMenu</item>
+        <item name="actionOverflowMenuStyle">@style/Widget.NekoPro.OverflowPopupMenu</item>
+        <item name="listPopupWindowStyle">@style/Widget.NekoPro.ListPopupWindow</item>
+        <item name="android:listPopupWindowStyle">@style/Widget.NekoPro.ListPopupWindow</item>
+        <item name="popupMenuBackground">@drawable/bg_surge_popup_menu</item>
 
         <item name="alertDialogTheme">
             @style/ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet
@@ -124,12 +134,46 @@
         <item name="android:fontFamily">sans-serif-medium</item>
     </style>
 
+    <style name="ShapeAppearance.NekoPro.NavPill" parent="ShapeAppearance.MaterialComponents.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">10dp</item>
+    </style>
+
+    <style name="Widget.NekoPro.PopupMenu" parent="Widget.AppCompat.PopupMenu">
+        <item name="android:popupBackground">@drawable/bg_surge_popup_menu</item>
+        <item name="android:popupElevation">6dp</item>
+    </style>
+
+    <style name="Widget.NekoPro.OverflowPopupMenu" parent="Widget.AppCompat.PopupMenu.Overflow">
+        <item name="android:popupBackground">@drawable/bg_surge_popup_menu</item>
+        <item name="android:popupElevation">6dp</item>
+    </style>
+
+    <style name="Widget.NekoPro.ListPopupWindow" parent="Widget.AppCompat.ListPopupWindow">
+        <item name="android:popupBackground">@drawable/bg_surge_popup_menu</item>
+        <item name="android:popupElevation">6dp</item>
+    </style>
+
+    <style name="ThemeOverlay.NekoPro.PopupMenu" parent="ThemeOverlay.AppCompat.DayNight">
+        <item name="android:colorBackground">@color/surge_surface</item>
+        <item name="colorSurface">@color/surge_surface</item>
+        <item name="android:textColorPrimary">@color/surge_text_primary</item>
+        <item name="android:textColorSecondary">@color/surge_text_secondary</item>
+        <item name="popupMenuStyle">@style/Widget.NekoPro.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.NekoPro.PopupMenu</item>
+        <item name="actionOverflowMenuStyle">@style/Widget.NekoPro.OverflowPopupMenu</item>
+        <item name="listPopupWindowStyle">@style/Widget.NekoPro.ListPopupWindow</item>
+        <item name="android:listPopupWindowStyle">@style/Widget.NekoPro.ListPopupWindow</item>
+        <item name="popupMenuBackground">@drawable/bg_surge_popup_menu</item>
+    </style>
+
     <style name="ShapeAppearance.SagerNet.Dialog" parent="ShapeAppearance.MaterialComponents.MediumComponent">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSize">16dp</item>
     </style>
 
     <style name="ThemeOverlay.MaterialComponents.MaterialAlertDialog.SagerNet">
+        <item name="colorSurface">@color/surge_surface</item>
         <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.SagerNet.Dialog</item>
         <item name="buttonBarPositiveButtonStyle">
             @style/Widget.MaterialComponents.Button.TextButton.Dialog.Primary
@@ -486,7 +530,7 @@
 
         <item name="selectedColorPrimary">@color/color_ng_black_accent</item>
         <item name="fabColorBackground">@color/color_ng_black_accent</item>
-        <item name="itemShapeFillColor">@color/color_ng_black_accent</item>
+        <item name="itemShapeFillColor">@color/surge_nav_active_bg</item>
 
         <item name="accentOrTextSecondary">?android:textColorSecondary</item>
         <item name="accentOrTextPrimary">?android:textColorPrimary</item>
@@ -503,7 +547,7 @@
 
         <item name="selectedColorPrimary">@color/color_ng_black_accent</item>
         <item name="fabColorBackground">@color/color_ng_black_accent</item>
-        <item name="itemShapeFillColor">@color/color_ng_black_accent</item>
+        <item name="itemShapeFillColor">@color/surge_nav_active_bg</item>
 
         <item name="accentOrTextSecondary">?android:textColorSecondary</item>
         <item name="accentOrTextPrimary">?android:textColorPrimary</item>

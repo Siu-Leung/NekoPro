@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"io"
 	"net"
 	"sync/atomic"
 
@@ -18,9 +19,14 @@ import (
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/uot"
 
 	mDNS "github.com/miekg/dns"
 )
+
+const defaultUDPPayloadBufferBytes int32 = 4096
+
+var errMalformedUoTDNSResponse = E.New("malformed UDP-over-TCP DNS response")
 
 var (
 	_ adapter.DNSTransport         = (*UDPTransport)(nil)
@@ -64,7 +70,9 @@ func NewUDPRaw(logger logger.ContextLogger, adapter dns.TransportAdapter, dialer
 		dialer:           dialerInstance,
 		serverAddr:       serverAddr,
 	}
-	t.udpSize.Store(2048)
+	// WHY: Standard EDNS0 responses (DNSSEC / multi-CNAME / PTR) frequently exceed 2048 bytes,
+	// which previously caused `uot.Conn.ReadFrom` to return `io.ErrShortBuffer` (`UoT read: short buffer`).
+	t.udpSize.Store(defaultUDPPayloadBufferBytes)
 	t.multiplexer = newQueryMultiplexer(queryMultiplexerOptions{
 		dial: func(ctx context.Context) (net.Conn, error) {
 			conn, err := t.dialer.DialContext(ctx, N.NetworkUDP, t.serverAddr)
@@ -99,10 +107,18 @@ func (t *UDPTransport) CloseIdleConnections() {
 	t.multiplexer.CloseIdleConnections()
 }
 
+func shouldRetryDNSOverTCP(err error) bool {
+	return err != nil && (E.IsMulti(err, io.ErrShortBuffer, errMalformedUoTDNSResponse))
+}
+
 func (t *UDPTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
 	t.updateUDPSize(message)
 	response, err := t.multiplexer.Exchange(ctx, message)
 	if err != nil {
+		if shouldRetryDNSOverTCP(err) {
+			t.logger.DebugContext(ctx, "UoT UDP DNS failed (", err, "), retrying over TCP")
+			return t.exchangeTCP(ctx, message)
+		}
 		return nil, err
 	}
 	if response.Truncated {
@@ -115,6 +131,13 @@ func (t *UDPTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.M
 func (t *UDPTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
 	t.updateUDPSize(message)
 	t.multiplexer.ExchangeAsync(ctx, message, func(response *mDNS.Msg, err error) {
+		if shouldRetryDNSOverTCP(err) {
+			t.logger.DebugContext(ctx, "UoT UDP DNS failed (", err, "), retrying over TCP")
+			go func() {
+				callback(t.exchangeTCP(ctx, message))
+			}()
+			return
+		}
 		if err == nil && response.Truncated {
 			t.logger.InfoContext(ctx, "response truncated, retrying with TCP")
 			go func() {
@@ -168,6 +191,14 @@ func (t *UDPTransport) readResponse(conn net.Conn) (*mDNS.Msg, error) {
 	err = message.Unpack(buffer.Bytes())
 	if err != nil {
 		t.logger.Debug("discarded malformed UDP response: ", err)
+		// WHY: Unlike stateless OS UDP datagrams, a malformed frame on a TCP-backed UoT stream
+		// (`*uot.Conn`, e.g. when a remote AnyTLS server sends legacy v1 Socksaddr headers or raw TCP)
+		// leaves the underlying stream permanently desynchronized, causing subsequent reads to interpret
+		// payload bytes as uint16 length (`UoT read: short buffer`). Fail the stream so multiplexer resets
+		// and `Exchange` falls back cleanly to standard RFC 1035 DNS-over-TCP.
+		if _, isUoTStream := common.Cast[*uot.Conn](conn); isUoTStream {
+			return nil, E.Cause(errMalformedUoTDNSResponse, err)
+		}
 		return nil, nil
 	}
 	return &message, nil

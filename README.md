@@ -29,10 +29,27 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.6`
+`Neko-Pro-1.4.7`
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
+- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.7)
+- 核心 APK：`NekoBox-Neko-Pro-1.4.7-arm64-v8a.apk`
+
+### v1.4.7 正式版改动日志 (2026-11-22)
+
+- **全新 Surge 风格全量视觉体系与极简三图标顶栏**
+  - **全量页面与二级菜单 Surge 化**：主列表、顶部状态/分流控制条、底部常驻速率坞、全部 19 套协议设置页、全局/分组/路由设置页、二级/三级弹出菜单、日志控制台与侧边抽屉全面统一为 Surge 浅灰分组画布 + 14dp 圆角纯净表面 + 1dp 轻描边风格。
+  - **顶栏三图标重构（`[ 👁 ] [ + ] [ ⋮ ]`）**：彻底消除手机屏宽下双 `⋮` 溢出割裂感；常驻回归 `+` 并将「从剪贴板导入」置顶为首位；「搜索节点」收口至 `⋮` 并展开 Surge 内联搜索栏；「截图隐私脱敏」移除设置页冗余开关，交由顶栏眼睛图标单一管控（开启即高亮并同步遮蔽节点、拓扑与错误中的地址）。
+- **订阅配置文件本地管理（FlClash 风格）与 DoH 管理直达**
+  - **订阅配置文件查看/编辑（`SubscriptionConfigStore` + `SubscriptionConfigActivity`）**：拉取订阅时优先协商 `FlClash` / `Clash Verge` / `clash-meta` 完整配置并以 `0600` 权限持久化于私有 `noBackupFilesDir`，支持一键定位 DNS 段、仅看 DNS 原文、检测提取 DoH 及编辑后保存解析节点。
+  - **多格式私有 DoH 识别增强与主界面「DoH 管理」**：兼容 Mihomo `#DIRECT` / `#h3=true` / `#ecs=...` 后缀、`doh://` / `+local://`、`system` 兜底列表、sing-box JSON `dns.servers` 与 Surge `.conf` `doh-server`；主界面 `⋮` 菜单新增「DoH 管理」与「订阅配置文件」，订阅分组直达 DoH 扫描与候选勾选。
+- **「测拓扑」（入口/出口 IP + 服务商）全链路打通与五源 BGP/ASN 容灾**
+  - **内核级严格代理探测**：`libcore` 新增 `FetchHttpsJson` 与 `LookupDomainWithTag`，支持全协议 DNS 与 WireGuard Endpoint，接入 `api.ip.sb` → `api.ipapi.is` → `ipinfo.io` → `freeipapi.com` → `ipwho.is` + Cloudflare `trace` 五源容灾，持久化双行展示入口/出口 IP、国旗与 ASN/服务商（自动去重如 `AS401984` 并区分 `[中转]` / `[直连]`）。
+- **测速 `SERVFAIL` 根因修复、UoT DNS `short buffer` 修复与实时速率校准**
+  - **`dns-direct` 自动故障转移至 `dns-local`**：非导出模式为直连 DNS 建立 `fallback` 容灾链并保留 `forTest = true` 的组级 `groupNodeDnsRules`，彻底解决 `223.5.5.5` 对 `.sbs` 等机场域名返回 `SERVFAIL` 导致测速与出口探测失败的问题；加固 `LocalResolverImpl` 物理网卡识别、`SpeedTestSession` 严格代理拨号与卡片错误防溢出（DNS 错误弹窗内置一键跳转「DoH 管理」）。
+  - **UoT UDP DNS 与底部速率栏修复**：`sing-box` `UDPTransport` 缓冲提升至 `4096` 字节并对失步 `*uot.Conn` 自动回退 DNS-over-TCP；`TrafficUpdater` / `TrafficLooper` 切换单调时钟并聚合 Selector 子出站与直连速率，测速时实时投射 `MB/s (Mbps)` 至底部速率栏；彻底清除日志页 ANSI 256 色转义乱码。
+- **彻底修复内置与外部仪表板 `secret 被拒绝` / 未登录问题**
+  - **实时 Bearer 认证探测 + 跨进程密钥自动同步**：加载内置仪表板前先直连校验 `GET http://127.0.0.1:9090/version` 的 `Authorization: Bearer <secret>` 返回 `200 OK`；若 `:bg` 进程返回 `401` 或端口未就绪则自动触发 `ClashApiChanged` 重载同步密钥；`ClashApiSecret` 改为按文件签名跨进程实时刷新，并修复设置页开关 Clash API 先重载后落盘的竞态。
+  - **多面板 `localStorage` 自动同步 + PNA 放行 + 一键复制 API 密钥**：开启 `access_control_allow_private_network = true`、`VpnService` 排除本地回环代理、自动同步 Yacd / MetaCubeXD / Zashboard 本地密钥并卸载陈旧 ServiceWorker；仪表板 `⋮` 菜单新增「复制 API 密钥 (Secret)」，使用外部面板连接 `http://127.0.0.1:9090` 时一键复制粘贴即可认证。
 
 ### v1.4.6 改动日志 (2026-11-21)
 

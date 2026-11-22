@@ -44,44 +44,70 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
         reloadSession()
     }
 
-    private fun getColorForLine(line: String): ForegroundColorSpan {
-        var color = ForegroundColorSpan(Color.GRAY)
-        when {
-            line.contains("INFO[") || line.contains(" [Info]") -> {
-                color = ForegroundColorSpan((0xFF86C166).toInt())
-            }
+    companion object {
+        private val ANSI_CSI_REGEX = Regex("\u001B\\[[0-9;?]*[A-Za-z]")
+        private val ORPHAN_LEADING_ANSI_REGEX = Regex("^(?:[A-Z]?\\[[0-9;]+m)+")
 
-            line.contains("ERROR[") || line.contains(" [Error]") -> {
-                color = ForegroundColorSpan(Color.RED)
-            }
-
-            line.contains("WARN[") || line.contains(" [Warning]") -> {
-                color = ForegroundColorSpan(Color.RED)
-            }
+        /**
+         * Strips VT100/ANSI CSI escape codes (including 256-color `ESC[38;5;Nm` sequences)
+         * and any truncated leading CSI fragment from raw log text.
+         */
+        internal fun stripAnsiAndNormalize(raw: String): String {
+            return raw
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace(ANSI_CSI_REGEX, "")
+                .replace(ORPHAN_LEADING_ANSI_REGEX, "")
         }
-        return color
+    }
+
+    private fun resolveLineColor(
+        line: String,
+        infoColor: Int,
+        warnColor: Int,
+        errorColor: Int,
+        mutedColor: Int,
+    ): Int {
+        return when {
+            line.startsWith("ERROR") || line.startsWith("FATAL") || line.startsWith("PANIC") ||
+                line.contains(" ERROR[") || line.contains(" [Error]") -> errorColor
+            line.startsWith("WARN") || line.contains(" WARN[") || line.contains(" [Warning]") -> warnColor
+            line.startsWith("INFO") || line.contains(" INFO[") || line.contains(" [Info]") -> infoColor
+            else -> mutedColor
+        }
     }
 
     private fun reloadSession() {
-        val normalized = String(SendLog.getNekoLog(50 * 1024))
-            .replace("\r\n", "\n")
-            .replace('\r', '\n')
-        val span = SpannableString(normalized)
-        var offset = 0
-        for (line in normalized.split('\n')) {
-            val color = getColorForLine(line)
-            if (line.isNotEmpty() && offset + line.length <= span.length) {
-                span.setSpan(
-                    color, offset, offset + line.length, SPAN_EXCLUSIVE_EXCLUSIVE
-                )
+        val ctx = context ?: return
+        val infoColor = ctx.getColour(R.color.surge_green)
+        val warnColor = ctx.getColour(R.color.surge_amber)
+        val errorColor = ctx.getColour(R.color.surge_red)
+        val mutedColor = ctx.getColour(R.color.surge_text_secondary)
+
+        runOnDefaultDispatcher {
+            val cleaned = stripAnsiAndNormalize(String(SendLog.getNekoLog(64 * 1024)))
+            val span = SpannableString(cleaned)
+            var offset = 0
+            for (line in cleaned.split('\n')) {
+                if (line.isNotEmpty() && offset + line.length <= span.length) {
+                    val lineColor = resolveLineColor(line, infoColor, warnColor, errorColor, mutedColor)
+                    span.setSpan(
+                        ForegroundColorSpan(lineColor),
+                        offset,
+                        offset + line.length,
+                        SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                }
+                offset += line.length + 1
             }
-            offset += line.length + 1
-        }
-        binding.textview.text = span
-        binding.textview.clearFocus()
-        // 等 textview 完成最终 layout 再滚动到底部
-        binding.textview.doOnLayout {
-            binding.scroolview.scrollTo(0, binding.textview.height)
+            onMainDispatcher {
+                if (!isAdded) return@onMainDispatcher
+                binding.textview.text = span
+                binding.textview.clearFocus()
+                binding.textview.doOnLayout {
+                    binding.scroolview.scrollTo(0, binding.textview.height)
+                }
+            }
         }
     }
 

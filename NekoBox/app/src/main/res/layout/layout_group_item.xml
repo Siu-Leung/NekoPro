@@ -133,6 +133,28 @@
             </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/group_config"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginEnd="8dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:paddingStart="11dp"
+                android:paddingEnd="11dp"
+                android:text="@string/subscription_config_card_btn"
+                android:textAllCaps="false"
+                android:textColor="@color/surge_text_primary"
+                android:textSize="12sp"
+                android:visibility="gone"
+                app:backgroundTint="@color/card_action_bg"
+                app:cornerRadius="10dp"
+                app:strokeColor="@color/card_action_stroke"
+                app:strokeWidth="1dp"
+                tools:visibility="visible" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/group_update"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"

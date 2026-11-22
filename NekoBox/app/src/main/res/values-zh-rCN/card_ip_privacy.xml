@@ -1,19 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="card_hidden_title">地址已隐藏</string>
+    <string name="card_entry_badge">入口</string>
+    <string name="card_exit_badge">出口</string>
+    <string name="topology_mode_relay">[中转]</string>
+    <string name="topology_mode_direct">[直连]</string>
     <string name="card_entry_literal">配置入口</string>
     <string name="card_entry_dns">入口 DNS 应答</string>
     <string name="card_exit_sample">实测出口</string>
-    <string name="card_ip_probe">查询 IP / ASN</string>
-    <string name="card_ip_probe_disclosure">入口域名通过组内 HTTPS DNS 查询；未设置组解析器时使用系统 DNS。入口 IP 将发送至 api.ip.sb 查询归属。支持的节点还会通过该节点向 api.ip.sb 发送出口探测请求。隐藏地址仅影响显示。</string>
-    <string name="card_ip_probe_failed">未得到可验证结果，保留上次成功结果。</string>
-    <string name="card_ip_probe_entry_only">已更新入口，未能验证此节点的出口。</string>
-    <string name="card_ip_probe_complete">IP 信息已更新。</string>
+    <string name="card_ip_probe">检测节点链路拓扑</string>
+    <string name="card_ip_probe_disclosure">首次测拓扑说明：节点入口域名优先通过本组 DNS 或直连 DNS 解析，并通过该节点加密通道实测入口与出口 IP、归属地区/ASN 服务商及直连/中转形态。确认后后续点击将直接一键测拓扑；开启“隐藏地址”时仅脱敏显示 IP，保留地区与服务商。</string>
+    <string name="card_ip_probe_failed">拓扑检测失败，请检查节点连通性或网络。</string>
+    <string name="card_ip_probe_entry_only">已识别入口拓扑，该节点出口暂不可达。</string>
+    <string name="card_ip_probe_complete">节点拓扑已更新。</string>
     <string name="card_speed_test">测速</string>
-    <string name="card_ip_probe_short">IP/归属</string>
-    <string name="card_ip_probe_probing">查询中…</string>
-    <string name="card_ip_probe_started">正在查询入口与出口 IP / 服务商…</string>
-    <string name="card_ip_probe_busy">正在查询节点 IP，请稍候…</string>
+    <string name="card_ip_probe_short">测拓扑</string>
+    <string name="card_ip_probe_probing">测拓扑中…</string>
+    <string name="card_ip_tap_isp_hint">点击测拓扑（识别服务商与出口）</string>
+    <string name="card_ip_probe_started">正在检测节点链路拓扑…</string>
+    <string name="card_ip_probe_busy">正在检测节点拓扑，请稍候…</string>
+    <string name="surge_ip_tap_to_probe">点击检测当前节点拓扑（入口 → 出口 / 服务商）</string>
+    <string name="action_probe_group_ip_info">测本组节点拓扑</string>
+    <string name="group_ip_probe_testing">正在测拓扑：%1$s</string>
+    <string name="group_topology_complete">本组拓扑检测完成：已识别 %1$d / %2$d 个节点</string>
     <string name="surge_status_idle_hint">未连接 · 点击右下角按钮启动</string>
     <string name="surge_drawer_subtitle">sing-box · mihomo 双核代理引擎</string>
     <string name="group_dns_multi_hint">每行一个端点：第一行为主端点，后续为依次回退的镜像。</string>

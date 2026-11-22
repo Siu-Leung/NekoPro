@@ -95,9 +95,11 @@ type BoxInstance struct {
 	cancel context.CancelFunc
 	state  int
 
-	statsService *v2rayapi.StatsService
-	selector     *group.Selector
-	pauseManager pause.Manager
+	statsService        *v2rayapi.StatsService
+	selector            *group.Selector
+	pauseManager        pause.Manager
+	dnsRouter           adapter.DNSRouter
+	dnsTransportManager adapter.DNSTransportManager
 }
 
 func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *BoxInstance, err error) {
@@ -133,9 +135,11 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	}
 
 	b = &BoxInstance{
-		Box:          instance,
-		cancel:       cancel,
-		pauseManager: service.FromContext[pause.Manager](ctx),
+		Box:                 instance,
+		cancel:              cancel,
+		pauseManager:        service.FromContext[pause.Manager](ctx),
+		dnsRouter:           service.FromContext[adapter.DNSRouter](ctx),
+		dnsTransportManager: service.FromContext[adapter.DNSTransportManager](ctx),
 	}
 
 	// selector
@@ -181,9 +185,11 @@ func NewTestSingBoxInstance(config string, localTransport LocalDNSTransport) (b 
 	}
 
 	b = &BoxInstance{
-		Box:          instance,
-		cancel:       cancel,
-		pauseManager: service.FromContext[pause.Manager](ctx),
+		Box:                 instance,
+		cancel:              cancel,
+		pauseManager:        service.FromContext[pause.Manager](ctx),
+		dnsRouter:           service.FromContext[adapter.DNSRouter](ctx),
+		dnsTransportManager: service.FromContext[adapter.DNSTransportManager](ctx),
 	}
 
 	if proxy, ok := b.Outbound().Outbound("proxy"); ok {
@@ -340,8 +346,15 @@ func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker,
 				var d net.Dialer
 				return d.DialContext(ctx, network, addr)
 			}
+			destination := M.ParseSocksaddr(addr)
+			if proxyOut, ok := instance.Outbound().Outbound("proxy"); ok {
+				return proxyOut.DialContext(ctx, network, destination)
+			}
+			if proxyEndpoint, ok := instance.Endpoint().Get("proxy"); ok {
+				return proxyEndpoint.DialContext(ctx, network, destination)
+			}
 			detour := dialer.NewDetour(instance.Outbound(), instance.Outbound().Default().Tag(), true)
-			return detour.DialContext(ctx, network, M.ParseSocksaddr(addr))
+			return detour.DialContext(ctx, network, destination)
 		},
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,

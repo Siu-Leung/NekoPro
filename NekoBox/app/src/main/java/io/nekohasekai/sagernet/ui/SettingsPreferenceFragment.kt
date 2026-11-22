@@ -88,6 +88,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         super.onViewCreated(view, savedInstanceState)
 
         listView.layoutManager = FixedLinearLayoutManager(listView)
+        SurgePreferenceStyler.applyTo(this)
     }
 
     private val reloadListener = Preference.OnPreferenceChangeListener { _, _ ->
@@ -205,8 +206,16 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         val acquireWakeLock = findPreference<SwitchPreference>(Key.ACQUIRE_WAKE_LOCK)!!
         val enableClashAPI = findPreference<SwitchPreference>(Key.ENABLE_CLASH_API)!!
         enableClashAPI.setOnPreferenceChangeListener { _, newValue ->
-            (activity as MainActivity?)?.refreshNavMenu(newValue as Boolean)
-            needReload()
+            val enabled = newValue as Boolean
+            // WHY: OnPreferenceChangeListener runs before AndroidX Preference writes to Room;
+            // persist immediately so the `:bg` reload reads the updated flag instead of the stale value.
+            DataStore.enableClashAPI = enabled
+            (activity as MainActivity?)?.refreshNavMenu(enabled)
+            if (DataStore.serviceState.connected) {
+                SagerNet.reloadService(io.nekohasekai.sagernet.bg.ReloadReason.ClashApiChanged)
+            } else {
+                needReload()
+            }
             true
         }
 

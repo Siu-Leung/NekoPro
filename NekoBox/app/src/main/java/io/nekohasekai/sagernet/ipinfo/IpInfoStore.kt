@@ -36,6 +36,7 @@ import java.security.KeyStore
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
@@ -54,7 +55,15 @@ data class IpOwner(
         val flag = countryFlag(countryCode)
         val place = listOf(flag, countryCode.ifBlank { country }).filter { it.isNotBlank() }.joinToString(" ")
         if (place.isNotBlank()) add(place)
-        val provider = listOf(asn, organization).filter { it.isNotBlank() }.joinToString(" ")
+        val trimmedAsn = asn.trim()
+        val trimmedOrg = organization.trim()
+        val provider = when {
+            trimmedAsn.isBlank() -> trimmedOrg
+            trimmedOrg.isBlank() -> trimmedAsn
+            trimmedOrg.equals(trimmedAsn, ignoreCase = true) -> trimmedAsn
+            trimmedOrg.startsWith("$trimmedAsn ", ignoreCase = true) -> trimmedOrg
+            else -> "$trimmedAsn $trimmedOrg"
+        }
         if (provider.isNotBlank()) add(provider)
     }.joinToString(" · ")
 
@@ -71,8 +80,24 @@ data class IpOwner(
 object IpInfoStore {
     private const val OWNER_URL = "https://api.ip.sb/geoip/"
     private const val EXIT_URL = "https://api.ip.sb/geoip"
+    private const val IPAPI_IS_URL = "https://api.ipapi.is/"
+    private const val IPINFO_IO_URL = "https://ipinfo.io/"
+    private const val IPINFO_IO_EXIT_URL = "https://ipinfo.io/json"
+    private const val FREE_IPAPI_URL = "https://freeipapi.com/api/json/"
+    private const val FREE_IPAPI_EXIT_URL = "https://freeipapi.com/api/json"
+    private const val IPWHOIS_URL = "https://ipwho.is/"
+    private const val CF_ONE_TRACE_URL = "https://1.1.1.1/cdn-cgi/trace"
+    private const val CF_TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
+    private const val STEP_PROBE_TIMEOUT_MS = 5_000
+    internal const val PROBE_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     private const val MAX_DNS = 65535L
     private const val MAX_OWNER = 16384L
+    private const val OWNER_CACHE_TTL_MS = 6 * 60 * 60 * 1000L
+    private const val MAX_OWNER_CACHE_SIZE = 512
+
+    private val ownerCache = ConcurrentHashMap<String, Pair<Long, IpOwner>>()
+
     private val client = OkHttpClient.Builder()
         .proxy(Proxy.NO_PROXY)
         .followRedirects(false)
@@ -89,6 +114,16 @@ object IpInfoStore {
 
     /** Pure literal check. Never calls a resolver, including on malformed input. */
     fun isIpLiteral(value: String): Boolean = literal(value) != null
+
+    /**
+     * Compares two IP literals canonically (handling bracketed IPv6 and compressed/expanded forms)
+     * without triggering any DNS resolution.
+     */
+    fun sameIp(first: String, second: String): Boolean {
+        val a = literal(first) ?: return false
+        val b = literal(second) ?: return false
+        return runCatching { InetAddresses.forString(a) == InetAddresses.forString(b) }.getOrDefault(false)
+    }
 
     /** Returns `true` when [endpoint] is an HTTPS DoH resolver handled directly by [IpInfoStore]. */
     fun isHttpsResolver(endpoint: String): Boolean = groupDohUrl(endpoint) != null
@@ -274,30 +309,164 @@ object IpInfoStore {
         return builder.build() to boundUnderlying
     }
 
-    /**
-     * Builds an OkHttp client for external IP owner lookups (`api.ip.sb`).
-     * In connected Proxy-only mode, routes via local `mixedPort` so requests respect
-     * the active proxy instead of leaking the device's physical IP directly.
-     */
-    private fun ownerClient(): OkHttpClient {
-        val builder = client.newBuilder().callTimeout(8, TimeUnit.SECONDS)
-        val useLocalProxy = runCatching {
-            DataStore.serviceMode == Key.MODE_PROXY && DataStore.serviceState.connected
-        }.getOrDefault(false)
-        if (!useLocalProxy) return builder.build()
-        val mixedPort = runCatching { DataStore.mixedPort }.getOrDefault(0)
-        if (mixedPort !in 1..65535) return builder.build()
-        return builder
-            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", mixedPort)))
-            .build()
+    private fun canonicalCacheKey(ip: String): String? =
+        literal(ip)?.let { runCatching { InetAddresses.toAddrString(InetAddresses.forString(it)) }.getOrNull() }
+
+    private fun readCachedOwner(ip: String): IpOwner? {
+        val key = canonicalCacheKey(ip) ?: return null
+        val cached = ownerCache[key] ?: return null
+        if (System.currentTimeMillis() - cached.first > OWNER_CACHE_TTL_MS) {
+            ownerCache.remove(key)
+            return null
+        }
+        return cached.second
     }
 
-    /** Called ONLY after the user confirms disclosure of this IP to api.ip.sb. */
+    private fun storeCachedOwner(owner: IpOwner): IpOwner {
+        val key = canonicalCacheKey(owner.ip) ?: return owner
+        if (ownerCache.size >= MAX_OWNER_CACHE_SIZE) {
+            ownerCache.keys.firstOrNull()?.let(ownerCache::remove)
+        }
+        ownerCache[key] = System.currentTimeMillis() to owner
+        return owner
+    }
+
+    /**
+     * Builds ordered OkHttp clients for external IP owner lookups (`api.ip.sb` / `ipwho.is`).
+     * Whenever the proxy service is connected (in either VPN or Proxy-only mode), tries the
+     * local `mixedPort` first so attribution requests succeed even when direct ISP access to
+     * GeoIP APIs is blocked or throttled, then falls back to `customCaClient`.
+     */
+    private data class GeoProviderSpec(
+        val url: HttpUrl,
+        val parse: (ByteArray?) -> IpOwner?,
+    )
+
+    private fun buildOwnerProviders(address: String): List<GeoProviderSpec> = listOf(
+        GeoProviderSpec(
+            url = OWNER_URL.toHttpUrlOrNull()!!.newBuilder().addPathSegment(address).build(),
+            parse = { parseOwner(it, expectedIp = address) },
+        ),
+        GeoProviderSpec(
+            url = IPAPI_IS_URL.toHttpUrlOrNull()!!.newBuilder().addQueryParameter("q", address).build(),
+            parse = { parseIpApiIsOwner(it, expectedIp = address) },
+        ),
+        GeoProviderSpec(
+            url = IPINFO_IO_URL.toHttpUrlOrNull()!!.newBuilder().addPathSegment(address).addPathSegment("json").build(),
+            parse = { parseIpInfoIoOwner(it, expectedIp = address) },
+        ),
+        GeoProviderSpec(
+            url = FREE_IPAPI_URL.toHttpUrlOrNull()!!.newBuilder().addPathSegment(address).build(),
+            parse = { parseFreeIpApiOwner(it, expectedIp = address) },
+        ),
+        GeoProviderSpec(
+            url = IPWHOIS_URL.toHttpUrlOrNull()!!.newBuilder().addPathSegment(address).build(),
+            parse = { parseIpWhoisOwner(it, expectedIp = address) },
+        ),
+    )
+
+    private fun buildExitProviders(): List<GeoProviderSpec> = listOf(
+        GeoProviderSpec(EXIT_URL.toHttpUrlOrNull()!!) { parseOwner(it) },
+        GeoProviderSpec(IPAPI_IS_URL.toHttpUrlOrNull()!!) { parseIpApiIsOwner(it) },
+        GeoProviderSpec(IPINFO_IO_EXIT_URL.toHttpUrlOrNull()!!) { parseIpInfoIoOwner(it) },
+        GeoProviderSpec(FREE_IPAPI_EXIT_URL.toHttpUrlOrNull()!!) { parseFreeIpApiOwner(it) },
+        GeoProviderSpec(IPWHOIS_URL.toHttpUrlOrNull()!!) { parseIpWhoisOwner(it) },
+    )
+
+    private fun ownerClients(): List<OkHttpClient> {
+        val directClient = customCaClient(timeoutSeconds = 5L)
+        val isConnected = runCatching { DataStore.serviceState.connected }.getOrDefault(false)
+        if (!isConnected) return listOf(directClient)
+        val mixedPort = runCatching { DataStore.mixedPort }.getOrDefault(0)
+        if (mixedPort !in 1..65535) return listOf(directClient)
+        val localProxyClient = customCaClient(timeoutSeconds = 5L).newBuilder()
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", mixedPort)))
+            .build()
+        return listOf(localProxyClient, directClient)
+    }
+
+    /** Called ONLY after the user confirms disclosure of this IP to GeoIP attribution APIs. */
     suspend fun owner(ip: String): IpOwner? {
         val address = literal(ip) ?: return null
         if (!isPublicRoutableIp(address)) return null
-        val url = OWNER_URL.toHttpUrlOrNull()!!.newBuilder().addPathSegment(address).build()
-        return parseOwner(ownerClient().read(request(url), MAX_OWNER), expectedIp = address)
+        readCachedOwner(address)?.let { return it }
+
+        val providers = buildOwnerProviders(address)
+        for (httpClient in ownerClients()) {
+            for (provider in providers) {
+                provider.parse(httpClient.read(request(provider.url), MAX_OWNER))
+                    ?.takeIf { it.label().isNotBlank() }
+                    ?.let { return storeCachedOwner(it) }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Resolves ASN/ISP ownership for [ip] preferentially over the node's own isolated [box]
+     * tunnel (avoiding direct-ISP blocks against GeoIP endpoints when VPN is disconnected),
+     * falling back to [owner] if [box] is null or all providers over [box] fail.
+     */
+    suspend fun ownerViaBox(box: libcore.BoxInstance?, ip: String, timeoutMs: Int = 8000): IpOwner? {
+        val address = literal(ip) ?: return null
+        if (!isPublicRoutableIp(address)) return null
+        readCachedOwner(address)?.let { return it }
+
+        if (box != null) {
+            val perCallTimeout = timeoutMs.coerceAtMost(STEP_PROBE_TIMEOUT_MS)
+            for (provider in buildOwnerProviders(address)) {
+                val raw = withContext(Dispatchers.IO) {
+                    runCatching {
+                        box.fetchHttpsJson(provider.url.toString(), PROBE_USER_AGENT, MAX_OWNER, perCallTimeout)
+                    }.getOrNull()
+                }
+                provider.parse(raw)
+                    ?.takeIf { it.label().isNotBlank() }
+                    ?.let { return storeCachedOwner(it) }
+            }
+        }
+        return owner(address)
+    }
+
+    /**
+     * Probes the real egress IP and ASN/ISP strictly through [box]'s `"proxy"` outbound/endpoint
+     * across 5 GeoIP/ASN providers plus Cloudflare `1.1.1.1` / `www.cloudflare.com` trace fallbacks.
+     */
+    suspend fun probeExitViaBox(box: libcore.BoxInstance, timeoutMs: Int = 10000): IpOwner? {
+        val perCallTimeout = timeoutMs.coerceAtMost(STEP_PROBE_TIMEOUT_MS)
+        var bareExitCandidate: IpOwner? = null
+
+        for (provider in buildExitProviders()) {
+            val raw = withContext(Dispatchers.IO) {
+                runCatching {
+                    box.fetchHttpsJson(provider.url.toString(), PROBE_USER_AGENT, MAX_OWNER, perCallTimeout)
+                }.getOrNull()
+            }
+            val parsed = provider.parse(raw)?.takeIf { isPublicRoutableIp(it.ip) } ?: continue
+            if (parsed.asn.isNotBlank() || parsed.organization.isNotBlank()) {
+                return storeCachedOwner(parsed)
+            }
+            if (bareExitCandidate == null) {
+                bareExitCandidate = parsed
+            }
+        }
+
+        val traceOwner = bareExitCandidate ?: run {
+            for (traceUrl in listOf(CF_ONE_TRACE_URL, CF_TRACE_URL)) {
+                val traceBytes = withContext(Dispatchers.IO) {
+                    runCatching { box.fetchHttpsJson(traceUrl, PROBE_USER_AGENT, MAX_OWNER, perCallTimeout) }.getOrNull()
+                }
+                val candidate = parseCloudflareTrace(traceBytes)?.takeIf { isPublicRoutableIp(it.ip) }
+                if (candidate != null) return@run candidate
+            }
+            null
+        } ?: return null
+
+        val enriched = ownerViaBox(box, traceOwner.ip, perCallTimeout)
+        if (enriched != null && enriched.label().isNotBlank()) {
+            return enriched
+        }
+        return storeCachedOwner(traceOwner)
     }
 
     /**
@@ -330,7 +499,9 @@ object IpInfoStore {
                     val question = buildQuery(name, type)
                     val request = Request.Builder().url(url)
                         .post(question.toRequestBody("application/dns-message".toMediaType()))
-                        .header("Accept", "application/dns-message").build()
+                        .header("Accept", "application/dns-message")
+                        .header("User-Agent", PROBE_USER_AGENT)
+                        .build()
                     val answer = dohClient.read(request, MAX_DNS)
                         ?: (if (boundUnderlying) fallbackDohClient.read(request, MAX_DNS) else null)
                         ?: continue
@@ -352,17 +523,141 @@ object IpInfoStore {
         return if ('/' !in standard.substringAfter("://")) url.newBuilder().encodedPath("/dns-query").build() else url
     }
 
-    private fun request(url: HttpUrl): Request = Request.Builder().url(url).header("Accept", "application/json").build()
+    // WHY: api.ip.sb sits behind Cloudflare WAF which blocks default `okhttp/*` User-Agents with HTTP 403.
+    internal fun request(url: HttpUrl): Request = Request.Builder()
+        .url(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", PROBE_USER_AGENT)
+        .build()
+
+    private fun sanitizeJsonText(raw: String?): String = raw.orEmpty()
+        .take(256)
+        .filterNot { it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }
+        .trim()
+
+    private fun readJsonField(obj: JsonObject?, key: String): String =
+        sanitizeJsonText(obj?.get(key)?.takeIf { it.isJsonPrimitive }?.asString)
 
     internal fun parseOwner(body: ByteArray?, expectedIp: String? = null): IpOwner? = runCatching {
         val json = JsonParser.parseString(body?.decodeToString() ?: return null).asJsonObject
-        fun field(key: String): String = json.get(key)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
-            .take(256).filterNot { it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() }.trim()
-        val ip = literal(field("ip")) ?: return null
+        val ip = literal(readJsonField(json, "ip")) ?: return null
         if (expectedIp != null && InetAddresses.forString(ip) != InetAddresses.forString(expectedIp)) return null
-        val countryCode = field("country_code").takeIf { IpOwner.countryFlag(it).isNotEmpty() }.orEmpty()
-        val asn = field("asn").toLongOrNull()?.takeIf { it in 1..4294967295L }?.let { "AS$it" }.orEmpty()
-        IpOwner(ip, countryCode, field("country"), asn, field("asn_organization").ifBlank { field("organization") })
+        val countryCode = readJsonField(json, "country_code").takeIf { IpOwner.countryFlag(it).isNotEmpty() }.orEmpty()
+        val asn = readJsonField(json, "asn").toLongOrNull()?.takeIf { it in 1..4294967295L }?.let { "AS$it" }.orEmpty()
+        val org = readJsonField(json, "asn_organization").ifBlank { readJsonField(json, "organization") }
+        IpOwner(ip, countryCode, readJsonField(json, "country"), asn, org)
+    }.getOrNull()
+
+    /**
+     * Parses BGP/ASN responses from `https://api.ipapi.is/` (`location`, `asn`, and `company` objects).
+     */
+    internal fun parseIpApiIsOwner(body: ByteArray?, expectedIp: String? = null): IpOwner? = runCatching {
+        val json = JsonParser.parseString(body?.decodeToString() ?: return null).asJsonObject
+        val ip = literal(readJsonField(json, "ip")) ?: return null
+        if (expectedIp != null && InetAddresses.forString(ip) != InetAddresses.forString(expectedIp)) return null
+        val locationObj = json.get("location")?.takeIf { it.isJsonObject }?.asJsonObject
+        val asnObj = json.get("asn")?.takeIf { it.isJsonObject }?.asJsonObject
+        val companyObj = json.get("company")?.takeIf { it.isJsonObject }?.asJsonObject
+        val countryCode = readJsonField(locationObj, "country_code")
+            .uppercase()
+            .takeIf { IpOwner.countryFlag(it).isNotEmpty() }
+            .orEmpty()
+        val asn = readJsonField(asnObj, "asn")
+            .toLongOrNull()
+            ?.takeIf { it in 1..4294967295L }
+            ?.let { "AS$it" }
+            .orEmpty()
+        val org = readJsonField(asnObj, "org")
+            .ifBlank { readJsonField(companyObj, "name") }
+            .ifBlank { readJsonField(asnObj, "descr") }
+        IpOwner(ip, countryCode, readJsonField(locationObj, "country"), asn, org)
+    }.getOrNull()
+
+    /**
+     * Parses GeoIP/ASN responses from `https://ipinfo.io/json` and `https://ipinfo.io/<ip>/json`,
+     * splitting combined `org` fields like `"AS4134 Chinanet"` into structured ASN and ISP name.
+     */
+    internal fun parseIpInfoIoOwner(body: ByteArray?, expectedIp: String? = null): IpOwner? = runCatching {
+        val json = JsonParser.parseString(body?.decodeToString() ?: return null).asJsonObject
+        val ip = literal(readJsonField(json, "ip")) ?: return null
+        if (expectedIp != null && InetAddresses.forString(ip) != InetAddresses.forString(expectedIp)) return null
+        val countryCode = readJsonField(json, "country")
+            .uppercase()
+            .takeIf { IpOwner.countryFlag(it).isNotEmpty() }
+            .orEmpty()
+        val rawOrg = readJsonField(json, "org")
+        var asn = ""
+        var org = rawOrg
+        if (rawOrg.startsWith("AS", ignoreCase = true)) {
+            val firstToken = rawOrg.substringBefore(' ')
+            val num = firstToken.drop(2).toLongOrNull()
+            if (num != null && num in 1..4294967295L) {
+                asn = "AS$num"
+                org = rawOrg.substringAfter(' ', "").trim()
+            }
+        }
+        IpOwner(ip = ip, countryCode = countryCode, asn = asn, organization = org)
+    }.getOrNull()
+
+    /**
+     * Parses GeoIP/ASN responses from `https://freeipapi.com/api/json`.
+     */
+    internal fun parseFreeIpApiOwner(body: ByteArray?, expectedIp: String? = null): IpOwner? = runCatching {
+        val json = JsonParser.parseString(body?.decodeToString() ?: return null).asJsonObject
+        val ip = literal(readJsonField(json, "ipAddress")) ?: return null
+        if (expectedIp != null && InetAddresses.forString(ip) != InetAddresses.forString(expectedIp)) return null
+        val countryCode = readJsonField(json, "countryCode")
+            .uppercase()
+            .takeIf { IpOwner.countryFlag(it).isNotEmpty() }
+            .orEmpty()
+        val asn = readJsonField(json, "asn")
+            .removePrefix("AS")
+            .removePrefix("as")
+            .toLongOrNull()
+            ?.takeIf { it in 1..4294967295L }
+            ?.let { "AS$it" }
+            .orEmpty()
+        val org = readJsonField(json, "asnOrganization")
+        IpOwner(ip, countryCode, readJsonField(json, "countryName"), asn, org)
+    }.getOrNull()
+
+    /**
+     * Parses fallback GeoIP/ASN JSON responses from `https://ipwho.is/` with identical
+     * IP address validation, `expectedIp` matching, and control-character sanitization.
+     */
+    internal fun parseIpWhoisOwner(body: ByteArray?, expectedIp: String? = null): IpOwner? = runCatching {
+        val json = JsonParser.parseString(body?.decodeToString() ?: return null).asJsonObject
+        if (json.get("success")?.takeIf { it.isJsonPrimitive }?.asBoolean == false) return null
+        val ip = literal(readJsonField(json, "ip")) ?: return null
+        if (expectedIp != null && InetAddresses.forString(ip) != InetAddresses.forString(expectedIp)) return null
+        val countryCode = readJsonField(json, "country_code").takeIf { IpOwner.countryFlag(it).isNotEmpty() }.orEmpty()
+        val connection = json.get("connection")?.takeIf { it.isJsonObject }?.asJsonObject
+        val asn = readJsonField(connection, "asn").toLongOrNull()?.takeIf { it in 1..4294967295L }?.let { "AS$it" }.orEmpty()
+        val org = readJsonField(connection, "org").ifBlank { readJsonField(connection, "isp") }
+        IpOwner(ip, countryCode, readJsonField(json, "country"), asn, org)
+    }.getOrNull()
+
+    /**
+     * Parses Cloudflare `cdn-cgi/trace` key-value text (`ip=...` and `loc=...`) as a last-resort
+     * exit verification fallback when JSON GeoIP APIs rate-limit shared proxy egress IPs.
+     */
+    internal fun parseCloudflareTrace(body: ByteArray?): IpOwner? = runCatching {
+        val text = body?.decodeToString() ?: return null
+        var rawIp = ""
+        var rawLoc = ""
+        for (line in text.lineSequence()) {
+            val idx = line.indexOf('=')
+            if (idx <= 0) continue
+            val k = line.substring(0, idx).trim()
+            val v = sanitizeJsonText(line.substring(idx + 1))
+            when (k) {
+                "ip" -> rawIp = v
+                "loc" -> rawLoc = v
+            }
+        }
+        val ip = literal(rawIp) ?: return null
+        val countryCode = rawLoc.uppercase().takeIf { IpOwner.countryFlag(it).isNotEmpty() }.orEmpty()
+        IpOwner(ip = ip, countryCode = countryCode)
     }.getOrNull()
 
     /** Loopback CONNECT with unique credentials; there is no non-proxy route or local DNS fallback. */
@@ -379,7 +674,8 @@ object IpInfoStore {
                 if (response.request.header("Proxy-Authorization") != null) null
                 else response.request.newBuilder().header("Proxy-Authorization", Credentials.basic("probe", password)).build()
             }.build()
-        return parseOwner(proxyClient.read(request(EXIT_URL.toHttpUrlOrNull()!!), MAX_OWNER))
+        parseOwner(proxyClient.read(request(EXIT_URL.toHttpUrlOrNull()!!), MAX_OWNER))?.let { return it }
+        return parseIpWhoisOwner(proxyClient.read(request(IPWHOIS_URL.toHttpUrlOrNull()!!), MAX_OWNER))
     }
 
     /** Accept only a generated concrete single outbound. No selectors, endpoints or arbitrary routing. */

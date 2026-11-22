@@ -288,7 +288,7 @@
     <color name="color_ng_black_accent">#9E9E9E</color>
     <color name="color_ng_black_primary">#2B2B2B</color>
 
-    <color name="preference_simple_menu_background">#FAFAFA</color>
+    <color name="preference_simple_menu_background">#FFFFFF</color>
 
     <!-- Surge-inspired light-mode surface, hairline, typography, and telemetry tokens -->
     <color name="surge_canvas">#F2F2F7</color>
@@ -301,6 +301,7 @@
     <color name="surge_amber">#D97706</color>
     <color name="surge_red">#DC2626</color>
     <color name="surge_status_idle">#9CA3AF</color>
+    <color name="surge_nav_active_bg">#12000000</color>
     <color name="card_stroke">#12000000</color>
     <color name="card_badge_bg">#EFF1F5</color>
     <color name="card_action_bg">#F4F6FA</color>

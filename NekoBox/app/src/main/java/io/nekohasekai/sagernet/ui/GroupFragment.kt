@@ -365,6 +365,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val groupUser = binding.groupUser
         val editButton = binding.edit
         val optionsButton = binding.options
+        val configButton = binding.groupConfig
         val updateButton = binding.groupUpdate
         val subscriptionUpdateProgress = binding.subscriptionUpdateProgress
 
@@ -377,6 +378,18 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
 
             when (item.itemId) {
+                R.id.action_edit_subscription_config -> {
+                    startActivity(
+                        Intent(requireContext(), SubscriptionConfigActivity::class.java).apply {
+                            putExtra(SubscriptionConfigActivity.EXTRA_GROUP_ID, proxyGroup.id)
+                        }
+                    )
+                }
+
+                R.id.action_group_private_dns -> {
+                    PrivateDnsDialogHelper.showManagerForGroup(activity, proxyGroup.id)
+                }
+
                 R.id.action_universal_qr -> {
                     QRCodeDialog(
                         proxyGroup.toUniversalLink(), proxyGroup.displayName()
@@ -428,13 +441,21 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
             itemView.setOnClickListener { }
 
+            val isSubscription = proxyGroup.type == GroupType.SUBSCRIPTION
             editButton.isGone = proxyGroup.ungrouped
-            updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
+            configButton.isVisible = isSubscription
+            updateButton.isInvisible = !isSubscription
             groupName.text = proxyGroup.displayName()
 
             editButton.setOnClickListener {
                 startActivity(Intent(it.context, GroupSettingsActivity::class.java).apply {
                     putExtra(GroupSettingsActivity.EXTRA_GROUP_ID, group.id)
+                })
+            }
+
+            configButton.setOnClickListener {
+                startActivity(Intent(it.context, SubscriptionConfigActivity::class.java).apply {
+                    putExtra(SubscriptionConfigActivity.EXTRA_GROUP_ID, group.id)
                 })
             }
 
@@ -446,8 +467,9 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 val popup = PopupMenu(requireContext(), it)
                 popup.menuInflater.inflate(R.menu.group_action_menu, popup.menu)
 
-                if (proxyGroup.type != GroupType.SUBSCRIPTION) {
+                if (!isSubscription) {
                     popup.menu.removeItem(R.id.action_share_subscription)
+                    popup.menu.removeItem(R.id.action_edit_subscription_config)
                 }
                 popup.setOnMenuItemClickListener(this)
                 popup.show()
@@ -470,6 +492,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     }
                 }
 
+                configButton.isVisible = false
                 updateButton.isInvisible = true
                 editButton.isGone = true
             } else {
@@ -478,7 +501,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 }
 
                 subscriptionUpdateProgress.isVisible = false
-                updateButton.isInvisible = proxyGroup.type != GroupType.SUBSCRIPTION
+                configButton.isVisible = isSubscription
+                updateButton.isInvisible = !isSubscription
                 editButton.isGone = proxyGroup.ungrouped
             }
 
