@@ -146,10 +146,13 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
                 SagerNet.stopService()
             }
             val previousServerAddress = entity.requireBean().serverAddress?.trim()
+            val previousServerPort = entity.requireBean().serverPort
             entity.apply {
                 (requireBean() as T).serialize()
-                if (requireBean().serverAddress?.trim() != previousServerAddress) {
-                    // Clear stale card IP metadata whenever the node's target server changes.
+                if (requireBean().serverAddress?.trim() != previousServerAddress ||
+                    requireBean().serverPort != previousServerPort
+                ) {
+                    // Clear stale card IP metadata whenever the node's target server or port changes.
                     entryIp = ""
                     entryProvider = ""
                     exitIp = ""
@@ -243,6 +246,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
             super.onViewCreated(view, savedInstanceState)
 
+            io.nekohasekai.sagernet.ui.SurgePreferenceStyler.applyTo(this)
             ViewCompat.setOnApplyWindowInsetsListener(listView, ListListener)
 
             activity?.apply {

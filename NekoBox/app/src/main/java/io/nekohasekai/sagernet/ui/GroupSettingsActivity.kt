@@ -631,6 +631,7 @@ class GroupSettingsActivity(
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
             super.onViewCreated(view, savedInstanceState)
 
+            SurgePreferenceStyler.applyTo(this)
             ViewCompat.setOnApplyWindowInsetsListener(listView, ListListener)
         }
 

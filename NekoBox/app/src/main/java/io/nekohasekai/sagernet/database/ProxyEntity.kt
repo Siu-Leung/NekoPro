@@ -678,6 +678,9 @@ data class ProxyEntity(
             updatedAt: Long,
         ): Int
 
+        @Query("UPDATE proxy_entities SET exitIp = '', exitProvider = '' WHERE exitIp != '' OR exitProvider != ''")
+        fun clearLegacyExitIpInfo(): Int
+
         @Query("UPDATE proxy_entities SET tx = :tx, rx = :rx WHERE id = :proxyId")
         fun updateTraffic(
             proxyId: Long,

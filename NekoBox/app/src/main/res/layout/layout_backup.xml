@@ -54,27 +54,37 @@
                     android:text="@string/backup_settings"
                     android:textAppearance="?attr/textAppearanceSubtitle2" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/action_export"
-                    style="@style/Widget.AppCompat.Button.Colored"
+                    style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="44dp"
                     android:layout_marginTop="12dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
                     android:text="@string/action_export"
                     android:textAllCaps="false"
                     android:textColor="?whiteOrTextPrimary"
+                    android:textSize="14sp"
+                    app:backgroundTint="?colorPrimary"
                     app:cornerRadius="10dp" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/action_share"
-                    style="@style/Widget.AppCompat.Button.Colored"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="44dp"
                     android:layout_marginTop="8dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
                     android:text="@string/share"
                     android:textAllCaps="false"
-                    android:textColor="?whiteOrTextPrimary"
-                    app:cornerRadius="10dp" />
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="14sp"
+                    app:backgroundTint="@color/card_action_bg"
+                    app:cornerRadius="10dp"
+                    app:strokeColor="@color/card_action_stroke"
+                    app:strokeWidth="1dp" />
 
             </LinearLayout>
 
@@ -104,27 +114,37 @@
                     android:textColor="@color/surge_text_secondary"
                     android:textSize="13sp" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/action_import_file"
-                    style="@style/Widget.AppCompat.Button.Colored"
+                    style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="44dp"
                     android:layout_marginTop="12dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
                     android:text="@string/action_import_file"
                     android:textAllCaps="false"
                     android:textColor="?whiteOrTextPrimary"
+                    android:textSize="14sp"
+                    app:backgroundTint="?colorPrimary"
                     app:cornerRadius="10dp" />
 
-                <Button
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/reset_settings"
-                    style="@style/Widget.AppCompat.Button.Colored"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="44dp"
                     android:layout_marginTop="8dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
                     android:text="@string/reset_settings"
                     android:textAllCaps="false"
-                    android:textColor="?whiteOrTextPrimary"
-                    app:cornerRadius="10dp" />
+                    android:textColor="@color/surge_red"
+                    android:textSize="14sp"
+                    app:backgroundTint="@color/card_action_bg"
+                    app:cornerRadius="10dp"
+                    app:strokeColor="@color/card_action_stroke"
+                    app:strokeWidth="1dp" />
 
             </LinearLayout>
 

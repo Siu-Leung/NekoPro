@@ -423,6 +423,10 @@ class MainActivity : ThemedActivity(),
         binding.fab.changeState(state, previousState, animate)
         binding.stats.changeState(state)
         notifyConfigurationSurgeHeader()
+        if (state == BaseService.State.Connected && previousState != BaseService.State.Connected) {
+            (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
+                ?.onActiveNodeConnectedRefreshIp()
+        }
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
     }
 
@@ -476,6 +480,10 @@ class MainActivity : ThemedActivity(),
         DataStore.currentProfile = id
         runOnUiThread {
             notifyConfigurationSurgeHeader()
+            if (DataStore.serviceState.connected) {
+                (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
+                    ?.onActiveNodeConnectedRefreshIp()
+            }
         }
         runOnDefaultDispatcher {
             ProfileManager.postUpdate(old, true)

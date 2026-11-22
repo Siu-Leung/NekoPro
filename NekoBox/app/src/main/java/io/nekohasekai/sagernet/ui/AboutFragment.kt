@@ -178,6 +178,34 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
 
             view.findViewById<RecyclerView>(R.id.mal_recyclerview).apply {
                 overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                // WHY: material-about-library inflates its own CardView items internally with a
+                // 2dp shadow; restyling attached child cards aligns them with NekoPro's Surge cards.
+                addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
+                    override fun onChildViewAttachedToWindow(child: View) {
+                        val card = child as? androidx.cardview.widget.CardView ?: return
+                        val ctx = child.context
+                        val density = ctx.resources.displayMetrics.density
+                        card.cardElevation = 0f
+                        card.maxCardElevation = 0f
+                        card.radius = 14f * density
+                        card.setCardBackgroundColor(
+                            androidx.core.content.ContextCompat.getColor(ctx, R.color.surge_surface)
+                        )
+                        (card.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.apply {
+                            val horizontal = (12f * density).toInt()
+                            marginStart = horizontal
+                            marginEnd = horizontal
+                        }
+                        if (card is com.google.android.material.card.MaterialCardView) {
+                            card.strokeWidth = (1f * density).toInt().coerceAtLeast(1)
+                            card.strokeColor =
+                                androidx.core.content.ContextCompat.getColor(ctx, R.color.card_stroke)
+                        }
+                    }
+
+                    override fun onChildViewDetachedFromWindow(child: View) = Unit
+                })
             }
         }
 

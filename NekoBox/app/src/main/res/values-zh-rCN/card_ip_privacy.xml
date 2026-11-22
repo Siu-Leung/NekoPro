@@ -1,19 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="card_hidden_title">地址已隐藏</string>
+    <string name="card_entry_badge">入口</string>
+    <string name="card_exit_badge">出口</string>
     <string name="card_entry_literal">配置入口</string>
     <string name="card_entry_dns">入口 DNS 应答</string>
     <string name="card_exit_sample">实测出口</string>
-    <string name="card_ip_probe">查询 IP / ASN</string>
-    <string name="card_ip_probe_disclosure">入口域名通过组内 HTTPS DNS 查询；未设置组解析器时使用系统 DNS。入口 IP 将发送至 api.ip.sb 查询归属。支持的节点还会通过该节点向 api.ip.sb 发送出口探测请求。隐藏地址仅影响显示。</string>
-    <string name="card_ip_probe_failed">未得到可验证结果，保留上次成功结果。</string>
-    <string name="card_ip_probe_entry_only">已更新入口，未能验证此节点的出口。</string>
-    <string name="card_ip_probe_complete">IP 信息已更新。</string>
+    <string name="card_ip_probe">查询出入口 IP 与服务商</string>
+    <string name="card_ip_probe_disclosure">首次查询说明：节点入口域名将优先通过本组 DNS 或直连 DNS 解析，并通过该节点加密代理通道查询入口与出口 IP 的归属服务商（ASN / 地区）。确认后后续点击将直接一键查询；开启“隐藏节点地址”时仅脱敏显示 IP，保留地区与服务商。</string>
+    <string name="card_ip_probe_failed">未能获取出入口信息，请检查节点连通性或网络。</string>
+    <string name="card_ip_probe_entry_only">已更新入口 IP / 服务商，该节点出口暂不可达。</string>
+    <string name="card_ip_probe_complete">出入口 IP 与服务商已更新。</string>
     <string name="card_speed_test">测速</string>
-    <string name="card_ip_probe_short">IP/归属</string>
+    <string name="card_ip_probe_short">出入口/ISP</string>
     <string name="card_ip_probe_probing">查询中…</string>
-    <string name="card_ip_probe_started">正在查询入口与出口 IP / 服务商…</string>
-    <string name="card_ip_probe_busy">正在查询节点 IP，请稍候…</string>
+    <string name="card_ip_tap_isp_hint">点击查询服务商与出口</string>
+    <string name="card_ip_probe_started">正在查询出入口 IP 与服务商…</string>
+    <string name="card_ip_probe_busy">正在查询节点出入口 IP，请稍候…</string>
+    <string name="surge_ip_tap_to_probe">点击查询当前节点出入口 IP 与服务商</string>
+    <string name="action_probe_group_ip_info">查询本组出入口 IP / 服务商</string>
+    <string name="group_ip_probe_testing">正在查询：%1$s</string>
     <string name="surge_status_idle_hint">未连接 · 点击右下角按钮启动</string>
     <string name="surge_drawer_subtitle">sing-box · mihomo 双核代理引擎</string>
     <string name="group_dns_multi_hint">每行一个端点：第一行为主端点，后续为依次回退的镜像。</string>

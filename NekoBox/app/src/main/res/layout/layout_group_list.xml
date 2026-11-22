@@ -49,6 +49,8 @@
         android:layout_marginTop="10dp"
         android:layout_marginEnd="12dp"
         android:layout_marginBottom="4dp"
+        android:clickable="true"
+        android:focusable="true"
         app:cardBackgroundColor="@color/surge_surface"
         app:cardCornerRadius="13dp"
         app:cardElevation="0dp"
@@ -69,20 +71,42 @@
                 android:id="@+id/surge_status_dot"
                 android:layout_width="8dp"
                 android:layout_height="8dp"
-                android:layout_marginEnd="9dp"
+                android:layout_marginEnd="10dp"
                 android:background="@drawable/bg_surge_status_dot" />
 
-            <TextView
-                android:id="@+id/surge_active_profile"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:maxLines="1"
-                android:text="@string/surge_status_idle_hint"
-                android:textColor="@color/surge_text_primary"
-                android:textSize="13sp" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/surge_active_profile"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:text="@string/surge_status_idle_hint"
+                    android:textColor="@color/surge_text_primary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/surge_active_ip_summary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2.5dp"
+                    android:ellipsize="end"
+                    android:fontFeatureSettings="tnum"
+                    android:lineSpacingExtra="1.5dp"
+                    android:maxLines="2"
+                    android:textColor="@color/surge_text_secondary"
+                    android:textSize="11sp"
+                    android:visibility="gone"
+                    tools:text="入口 203.0.113.8 · 🇨🇳 CN · AS4134\n出口 104.28.14.92 · 🇭🇰 HK · AS13335"
+                    tools:visibility="visible" />
+
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/surge_route_mode_chip"

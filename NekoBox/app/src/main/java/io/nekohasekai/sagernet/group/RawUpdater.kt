@@ -354,8 +354,18 @@ object RawUpdater : GroupUpdater() {
                 when {
                     existsBean != bean -> {
                         changed++
+                        val endpointChanged =
+                            existsBean.serverAddress?.trim() != bean.serverAddress?.trim() ||
+                                existsBean.serverPort != bean.serverPort
                         entity.userOrder = userOrder
                         entity.putBean(bean)
+                        if (endpointChanged) {
+                            entity.entryIp = ""
+                            entity.entryProvider = ""
+                            entity.exitIp = ""
+                            entity.exitProvider = ""
+                            entity.ipInfoUpdatedAt = 0L
+                        }
                         toUpdate.add(entity)
                         updated[entity.displayName()] = name
 

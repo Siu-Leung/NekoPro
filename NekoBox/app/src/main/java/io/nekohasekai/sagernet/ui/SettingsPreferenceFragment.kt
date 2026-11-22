@@ -88,6 +88,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         super.onViewCreated(view, savedInstanceState)
 
         listView.layoutManager = FixedLinearLayoutManager(listView)
+        SurgePreferenceStyler.applyTo(this)
     }
 
     private val reloadListener = Preference.OnPreferenceChangeListener { _, _ ->

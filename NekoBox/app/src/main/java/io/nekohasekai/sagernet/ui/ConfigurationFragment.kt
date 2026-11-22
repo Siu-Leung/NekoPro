@@ -185,10 +185,13 @@ class ConfigurationFragment @JvmOverloads constructor(
     @Volatile
     private var activeTestHandle: ActiveTestHandle? = null
 
-    // Never trust legacy persisted exitIp: it may have been the physical connection.
-    // Keep proven exits only for this screen instance, bound to the tested profile/config.
-    private data class ExitSample(val profile: ProxyEntity, val group: ProxyGroup, val owner: io.nekohasekai.sagernet.ipinfo.IpOwner)
-    private val verifiedExits = mutableMapOf<Long, ExitSample>()
+    companion object {
+        private const val GROUP_IP_PROBE_CONCURRENCY = 3
+        private const val DNS_PROBE_TIMEOUT_MS = 6_000
+        private const val OWNER_PROBE_TIMEOUT_MS = 8_000
+        private const val EXIT_PROBE_TIMEOUT_MS = 10_000
+    }
+
     private var ipInfoJob: Job? = null
     private var ipInfoDialog: AlertDialog? = null
     private var lastIpDisplayOptions: Pair<Boolean, Boolean>? = null
@@ -200,6 +203,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     private var surgeStatusCard: View? = null
     private var surgeStatusDot: View? = null
     private var surgeActiveProfile: TextView? = null
+    private var surgeActiveIpSummary: TextView? = null
     private var surgeRouteModeChip: TextView? = null
 
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
@@ -233,6 +237,17 @@ class ConfigurationFragment @JvmOverloads constructor(
     @SuppressLint("DetachAndAttachSameFragment")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // WHY: Pre-rc3 builds could have legacy unverified exitIp strings in SQLite; scrub once
+        // so every persisted exitIp/exitProvider is guaranteed to come from strict proxy probing.
+        if (!DataStore.ipExitStrictMigrationDone) {
+            runOnDefaultDispatcher {
+                runCatching {
+                    SagerDatabase.proxyDao.clearLegacyExitIpInfo()
+                    DataStore.ipExitStrictMigrationDone = true
+                }.onFailure { Logs.w(it) }
+            }
+        }
 
         if (savedInstanceState != null) {
             parentFragmentManager.beginTransaction()
@@ -275,6 +290,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         surgeStatusCard = view.findViewById(R.id.surge_status_card)
         surgeStatusDot = view.findViewById(R.id.surge_status_dot)
         surgeActiveProfile = view.findViewById(R.id.surge_active_profile)
+        surgeActiveIpSummary = view.findViewById(R.id.surge_active_ip_summary)
         surgeRouteModeChip = view.findViewById(R.id.surge_route_mode_chip)
 
         surgeStatusCard?.isGone = select
@@ -284,7 +300,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                 (activity as? MainActivity)?.switchRouteMode(nextMode)
             }
             surgeStatusCard?.setOnClickListener {
-                scrollToSelectedProfile()
+                handleSurgeStatusCardClick()
+            }
+            surgeStatusCard?.setOnLongClickListener {
+                val selectedId = DataStore.selectedProxy
+                if (selectedId > 0L && DataStore.showNodeIpOwner) {
+                    confirmNodeIpInfo(selectedId)
+                    true
+                } else {
+                    false
+                }
             }
             refreshSurgeStatusHeader()
         }
@@ -330,14 +355,30 @@ class ConfigurationFragment @JvmOverloads constructor(
         fragment.configurationListView.scrollTo(0)
     }
 
+    private fun handleSurgeStatusCardClick() {
+        val selectedId = DataStore.selectedProxy
+        if (selectedId > 0L && DataStore.showNodeIpOwner) {
+            val entity = SagerDatabase.proxyDao.getById(selectedId)
+            if (entity != null && supportsCardIpProbe(entity) && shouldOfferHeaderQuickProbe(entity)) {
+                confirmNodeIpInfo(selectedId)
+                return
+            }
+        }
+        scrollToSelectedProfile()
+    }
+
+    private fun shouldOfferHeaderQuickProbe(entity: ProxyEntity): Boolean =
+        entity.exitIp.isBlank() && (!supportsCardEntry(entity) || entity.entryProvider.isBlank())
+
     /**
      * Refreshes the compact Surge status strip above the node list with live connection
-     * state, active proxy name (respecting screenshot address redaction), and route mode.
+     * state, active proxy name, Entry/Exit IP + ISP telemetry, and active route mode.
      */
     fun refreshSurgeStatusHeader() {
         if (select || !isAdded) return
         val dot = surgeStatusDot ?: return
         val titleView = surgeActiveProfile ?: return
+        val ipSummaryView = surgeActiveIpSummary ?: return
         val modeChip = surgeRouteModeChip ?: return
         val ctx = context ?: return
 
@@ -354,6 +395,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         val selectedId = DataStore.selectedProxy
         val hideAddress = DataStore.hideNodeAddress
+        val showIpOwner = DataStore.showNodeIpOwner
+        val isProbingSelected = selectedId > 0L && probingProxyId == selectedId
         runOnDefaultDispatcher {
             val entity = if (selectedId > 0L) SagerDatabase.proxyDao.getById(selectedId) else null
             val displayTitle = if (entity != null) {
@@ -379,9 +422,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                     else -> getString(R.string.surge_status_idle_hint)
                 }
             }
+            val headerIpText: CharSequence? = when {
+                !showIpOwner || entity == null || !supportsCardIpProbe(entity) -> null
+                isProbingSelected -> getString(R.string.card_ip_probe_started)
+                else -> formatIpInfoSpannable(ctx, entity, hideAddress)
+                    ?: getString(R.string.surge_ip_tap_to_probe)
+            }
             onMainDispatcher {
                 if (isAdded && surgeActiveProfile === titleView) {
                     titleView.text = displayTitle
+                    ipSummaryView.text = headerIpText ?: ""
+                    ipSummaryView.isVisible = !headerIpText.isNullOrBlank()
                 }
             }
         }
@@ -417,8 +468,8 @@ class ConfigurationFragment @JvmOverloads constructor(
         surgeStatusCard = null
         surgeStatusDot = null
         surgeActiveProfile = null
+        surgeActiveIpSummary = null
         surgeRouteModeChip = null
-        verifiedExits.clear()
         super.onDestroyView()
     }
 
@@ -818,6 +869,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_speed_test_retry_failed -> {
                 retryFailedSpeedTest()
             }
+
+            R.id.action_probe_group_ip_info -> {
+                confirmGroupIpInfo()
+            }
         }
         return true
     }
@@ -847,38 +902,125 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
-    private fun supportsCardEntry(entity: ProxyEntity): Boolean = when (entity.type) {
+    internal fun supportsCardEntry(entity: ProxyEntity): Boolean = when (entity.type) {
         ProxyEntity.TYPE_CONFIG, ProxyEntity.TYPE_CHAIN, ProxyEntity.TYPE_NEKO -> false
         else -> true
     }
 
-    private fun ipInfoLabel(entity: ProxyEntity, group: ProxyGroup, hide: Boolean): String? {
-        if (!supportsCardEntry(entity)) return null
-        val host = entity.requireBean().serverAddress.orEmpty()
-        val literal = host.trim().removeSurrounding("[", "]").takeIf(IpInfoStore::isIpLiteral)
-        val entry = literal ?: entity.entryIp.takeIf(IpInfoStore::isIpLiteral)
-        val exit = verifiedExits[entity.id]?.takeIf { sample ->
-            sameProbeProfile(sample.profile, entity) && sameProbeGroup(sample.group, group)
-        }?.owner
-        fun row(title: Int, ip: String, provider: String) = listOf(
-            getString(title), AddressRedactor.maskIp(ip, hide),
-            if (hide) AddressRedactor.scrub(provider, host) else provider,
-        ).filter { it.isNotBlank() }.joinToString(" ")
-        return listOfNotNull(
-            entry?.let { ip ->
-                row(if (literal != null) R.string.card_entry_literal else R.string.card_entry_dns, ip,
-                    entity.entryProvider.takeIf { entity.entryIp == ip }.orEmpty())
-            },
-            exit?.let { row(R.string.card_exit_sample, it.ip, it.label()) },
-        ).takeIf { it.isNotEmpty() }?.joinToString("\n")
+    internal fun supportsCardExit(entity: ProxyEntity): Boolean =
+        entity.type != ProxyEntity.TYPE_NEKO && !entity.needExternal()
+
+    internal fun supportsCardIpProbe(entity: ProxyEntity): Boolean =
+        supportsCardEntry(entity) || supportsCardExit(entity)
+
+    /**
+     * Builds a Surge-styled two-line `CharSequence` rendering both Entry IP + ISP (`入口`)
+     * and verified Exit IP + ISP (`出口`) with semantic badge colors and screenshot redaction.
+     *
+     * @param ctx Android context used to resolve Surge theme colors and localized badge strings.
+     * @param entity Proxy profile entity whose persisted/literal Entry and Exit metadata is read.
+     * @param hide When `true`, masks IP octets/hextets and scrubs raw server hostnames.
+     * @return Formatted `CharSequence` when at least one Entry or Exit IP is available, or `null`.
+     */
+    internal fun formatIpInfoSpannable(
+        ctx: android.content.Context,
+        entity: ProxyEntity,
+        hide: Boolean,
+    ): CharSequence? {
+        if (!supportsCardIpProbe(entity)) return null
+        val canReadEntry = supportsCardEntry(entity)
+        val rawHost = if (canReadEntry) entity.requireBean().serverAddress.orEmpty() else ""
+        val literalEntry = if (canReadEntry) {
+            rawHost.trim().removeSurrounding("[", "]").takeIf(IpInfoStore::isIpLiteral)
+        } else {
+            null
+        }
+        val entryIp = literalEntry ?: entity.entryIp.takeIf { canReadEntry && IpInfoStore.isIpLiteral(it) }
+        val entryProviderRaw = if (entryIp != null &&
+            (entity.entryIp.isBlank() || IpInfoStore.sameIp(entity.entryIp, entryIp))
+        ) {
+            entity.entryProvider
+        } else {
+            ""
+        }
+        val exitIp = entity.exitIp.takeIf(IpInfoStore::isIpLiteral)
+        val exitProviderRaw = entity.exitProvider
+        if (entryIp == null && exitIp == null) return null
+
+        val entryBadgeColor = ctx.getColorAttr(R.attr.primaryOrTextPrimary)
+        val exitBadgeColor = ctx.getColour(R.color.surge_green)
+        val ipTextColor = ctx.getColour(R.color.surge_text_primary)
+        val metaTextColor = ctx.getColour(R.color.surge_text_secondary)
+
+        fun appendTelemetryRow(
+            builder: SpannableStringBuilder,
+            badgeText: String,
+            badgeColor: Int,
+            rawIp: String,
+            rawProvider: String,
+            fallbackHint: String?,
+        ) {
+            if (builder.isNotEmpty()) builder.append('\n')
+            val badgeStart = builder.length
+            builder.append(badgeText)
+            builder.setSpan(ForegroundColorSpan(badgeColor), badgeStart, builder.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+            builder.setSpan(
+                android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                badgeStart,
+                builder.length,
+                SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            builder.append("  ")
+
+            val maskedIp = AddressRedactor.maskIp(rawIp, hide)
+            val ipStart = builder.length
+            builder.append(maskedIp)
+            builder.setSpan(ForegroundColorSpan(ipTextColor), ipStart, builder.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+
+            val scrubbedProvider = (if (hide) AddressRedactor.scrub(rawProvider, rawHost) else rawProvider).trim()
+            val detail = scrubbedProvider.ifBlank { fallbackHint.orEmpty() }
+            if (detail.isNotBlank()) {
+                val metaStart = builder.length
+                builder.append(" · ").append(detail)
+                builder.setSpan(ForegroundColorSpan(metaTextColor), metaStart, builder.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+
+        val builder = SpannableStringBuilder()
+        if (entryIp != null) {
+            val unprobedLiteralHint = if (entryProviderRaw.isBlank() && exitIp == null) {
+                ctx.getString(R.string.card_ip_tap_isp_hint)
+            } else {
+                null
+            }
+            appendTelemetryRow(
+                builder = builder,
+                badgeText = ctx.getString(R.string.card_entry_badge),
+                badgeColor = entryBadgeColor,
+                rawIp = entryIp,
+                rawProvider = entryProviderRaw,
+                fallbackHint = unprobedLiteralHint,
+            )
+        }
+        if (exitIp != null) {
+            appendTelemetryRow(
+                builder = builder,
+                badgeText = ctx.getString(R.string.card_exit_badge),
+                badgeColor = exitBadgeColor,
+                rawIp = exitIp,
+                rawProvider = exitProviderRaw,
+                fallbackHint = null,
+            )
+        }
+        return builder.takeIf { it.isNotEmpty() }
     }
 
-    private fun sameProbeProfile(a: ProxyEntity, b: ProxyEntity) =
+    private fun sameProbeProfile(a: ProxyEntity, b: ProxyEntity): Boolean =
         a.id == b.id && a.groupId == b.groupId && a.type == b.type && a.requireBean() == b.requireBean()
 
-    private fun sameProbeGroup(a: ProxyGroup, b: ProxyGroup) =
+    private fun sameProbeGroup(a: ProxyGroup, b: ProxyGroup): Boolean =
         a.id == b.id && a.frontProxy == b.frontProxy && a.landingProxy == b.landingProxy &&
-            a.effectiveNodeDnsList() == b.effectiveNodeDnsList() && a.requiresNodeDnsAdoption() == b.requiresNodeDnsAdoption()
+            a.effectiveNodeDnsList() == b.effectiveNodeDnsList()
 
     private fun confirmNodeIpInfo(id: Long) {
         if (!isResumed || ipInfoDialog?.isShowing == true) return
@@ -886,108 +1028,348 @@ class ConfigurationFragment @JvmOverloads constructor(
             snackbar(R.string.card_ip_probe_busy).show()
             return
         }
+        if (DataStore.ipProbeConsentGranted) {
+            requestNodeIpInfo(id, isSilent = false)
+            return
+        }
         ipInfoDialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.card_ip_probe)
             .setMessage(R.string.card_ip_probe_disclosure)
-            .setPositiveButton(R.string.card_ip_probe) { _, _ -> requestNodeIpInfo(id) }
+            .setPositiveButton(R.string.card_ip_probe) { _, _ ->
+                DataStore.ipProbeConsentGranted = true
+                requestNodeIpInfo(id, isSilent = false)
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
-    private fun requestNodeIpInfo(id: Long) {
-        if (view == null || ipInfoJob?.isActive == true) return
-        probingProxyId = id
-        if (isResumed) snackbar(R.string.card_ip_probe_started).show()
-        ipInfoJob = viewLifecycleOwner.lifecycleScope.launch {
-            withContext(Dispatchers.IO) { ProfileManager.postUpdate(id) }
-            val result = try {
-                withContext(Dispatchers.IO) {
-                    val dao = SagerDatabase.proxyDao
-                    val profile = dao.getById(id) ?: return@withContext null
-                    val group = SagerDatabase.groupDao.getById(profile.groupId) ?: return@withContext null
-                    val bean = profile.requireBean()
-                    val host = bean.serverAddress.orEmpty()
-                    val resolvers = group.effectiveNodeDnsList()
-                    // Config/chain pseudo-beans do not expose a single entry hostname.
-                    val supportedEntry = supportsCardEntry(profile)
-                    val entry = if (supportedEntry && (resolvers.isNotEmpty() || !group.requiresNodeDnsAdoption() ||
-                            IpInfoStore.isIpLiteral(host))) IpInfoStore.resolveEntry(host, resolvers) else null
-                    val entryProvider = entry?.let { IpInfoStore.owner(it)?.label().orEmpty() }
-                    val exit = if (supportedEntry) probeNodeExit(profile, group, entry) else null
-                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                    SagerDatabase.instance.runInTransaction<IpCardProbeResult?> {
-                        val current = dao.getById(id) ?: return@runInTransaction null
-                        val currentGroup = SagerDatabase.groupDao.getById(current.groupId) ?: return@runInTransaction null
-                        if (!sameProbeProfile(profile, current) || !sameProbeGroup(group, currentGroup)) return@runInTransaction null
-                        if (entry != null) dao.updateIpInfo(
-                            proxyId = id,
-                            entryIp = entry,
-                            entryProvider = entryProvider.orEmpty().ifBlank {
-                                current.entryProvider.takeIf { current.entryIp == entry }.orEmpty()
-                            },
-                            exitIp = "", exitProvider = "", updatedAt = System.currentTimeMillis(),
-                        )
-                        // Allow an entry-only result to refresh the card without claiming an exit.
-                        if (entry != null || exit != null) IpCardProbeResult(current, currentGroup, exit) else null
-                    }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                null // No raw resolver path, URL or node name in logs/errors.
-            } finally {
-                probingProxyId = null
-                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                    ProfileManager.postUpdate(id)
+    /**
+     * Automatically refreshes Entry/Exit IP & ISP for the currently connected proxy node when
+     * the user has already granted one-time probe consent and the node lacks cached telemetry.
+     */
+    fun onActiveNodeConnectedRefreshIp() {
+        if (select || !isAdded || !DataStore.showNodeIpOwner || !DataStore.ipProbeConsentGranted) return
+        val selectedId = DataStore.selectedProxy
+        if (selectedId <= 0L || ipInfoJob?.isActive == true) return
+        runOnDefaultDispatcher {
+            val entity = SagerDatabase.proxyDao.getById(selectedId) ?: return@runOnDefaultDispatcher
+            val isMissingTelemetry = entity.exitIp.isBlank() ||
+                (supportsCardEntry(entity) && entity.entryProvider.isBlank())
+            if (!isMissingTelemetry || !supportsCardIpProbe(entity)) return@runOnDefaultDispatcher
+            onMainDispatcher {
+                if (isAdded && ipInfoJob?.isActive != true) {
+                    requestNodeIpInfo(selectedId, isSilent = true)
                 }
             }
-            if (result?.exit != null) {
-                verifiedExits[id] = ExitSample(result.profile, result.group, result.exit)
-            } else {
-                // Clear stale cached exit if a fresh re-probe could not verify an exit IP.
-                verifiedExits.remove(id)
-            }
-            if (result != null) withContext(Dispatchers.IO) { ProfileManager.postUpdate(id) }
-            if (isResumed) snackbar(getString(when {
-                result == null -> R.string.card_ip_probe_failed
-                result.exit == null -> R.string.card_ip_probe_entry_only
-                else -> R.string.card_ip_probe_complete
-            })).show()
         }
     }
 
-    private data class IpCardProbeResult(val profile: ProxyEntity, val group: ProxyGroup, val exit: io.nekohasekai.sagernet.ipinfo.IpOwner?)
-
-    private suspend fun probeNodeExit(profile: ProxyEntity, group: ProxyGroup, entry: String?): io.nekohasekai.sagernet.ipinfo.IpOwner? {
-        val bean = profile.requireBean()
-        val resolvers = group.effectiveNodeDnsList()
-        // Allow exit probing when entry resolved, when the group uses non-HTTPS resolvers handled
-        // natively by sing-box, or when no private group DNS adoption is required.
-        val hasNonHttpsGroupDns = resolvers.any { !IpInfoStore.isHttpsResolver(it) }
-        val canResolveInTestBox = entry != null || hasNonHttpsGroupDns ||
-            (resolvers.isEmpty() && !group.requiresNodeDnsAdoption())
-        if (!canResolveInTestBox || group.frontProxy > 0 || group.landingProxy > 0 || profile.needExternal() ||
-            !bean.customConfigJson.isNullOrBlank() || !bean.customOutboundJson.isNullOrBlank()
-        ) return null
-        return try {
-            val generated = io.nekohasekai.sagernet.fmt.buildConfig(profile, forTest = true)
-            if (generated.externalIndex.any { it.chain.isNotEmpty() }) return null
-            val port = io.nekohasekai.sagernet.ktx.mkPort()
-            val password = IpInfoStore.newProbePassword()
-            val config = IpInfoStore.exitProbeConfig(generated.config, port, password) ?: return null
-            // Pass LocalResolverImpl so domain-based direct/bootstrap DNS (local/dhcp/DoH hostnames)
-            // resolves via Android ConnectivityManager instead of failing on /etc/resolv.conf.
-            val box = libcore.Libcore.newTestSingBoxInstance(config, moe.matsuri.nb4a.net.LocalResolverImpl)
-            try {
-                box.start()
-                IpInfoStore.probeExit(port, password)
+    private fun requestNodeIpInfo(id: Long, isSilent: Boolean = false) {
+        if (view == null || ipInfoJob?.isActive == true) return
+        probingProxyId = id
+        refreshSurgeStatusHeader()
+        if (!isSilent && isResumed) snackbar(R.string.card_ip_probe_started).show()
+        ipInfoJob = viewLifecycleOwner.lifecycleScope.launch {
+            withContext(Dispatchers.IO) { ProfileManager.postUpdate(id, true) }
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    probeAndPersistNodeIpInfo(id)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logs.w(e)
+                null
             } finally {
-                runCatching { box.close() }
+                probingProxyId = null
+                withContext(NonCancellable + Dispatchers.IO) {
+                    ProfileManager.postUpdate(id, true)
+                }
+                refreshSurgeStatusHeader()
             }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (_: Exception) {
+            if (!isSilent && isResumed) {
+                snackbar(
+                    getString(
+                        when {
+                            result == null -> R.string.card_ip_probe_failed
+                            !result.hasVerifiedExit -> R.string.card_ip_probe_entry_only
+                            else -> R.string.card_ip_probe_complete
+                        }
+                    )
+                ).show()
+            }
+        }
+    }
+
+    private data class IpCardProbeOutcome(
+        val hasEntry: Boolean,
+        val hasVerifiedExit: Boolean,
+    )
+
+    /**
+     * Resolves a node's Entry IP + ISP and verified Exit IP + ISP inside a single isolated
+     * `BoxInstance` lifecycle, then atomically persists both to Room SQLite.
+     *
+     * WHY: Running DNS lookup, exit verification (`probeExitViaBox`), and entry ASN lookup
+     * (`ownerViaBox`) over the same in-memory `BoxInstance` supports every sing-box DNS transport
+     * (`https`, `h3`, `tls`, `quic`, `udp`), supports WireGuard endpoints and proxy chains, and
+     * bypasses carrier censorship against `api.ip.sb` even when the main VPN service is stopped.
+     */
+    private suspend fun probeAndPersistNodeIpInfo(id: Long): IpCardProbeOutcome? {
+        val dao = SagerDatabase.proxyDao
+        val profile = dao.getById(id) ?: return null
+        val group = SagerDatabase.groupDao.getById(profile.groupId) ?: return null
+        if (!supportsCardIpProbe(profile)) return null
+
+        val canReadEntry = supportsCardEntry(profile)
+        val canTestExit = supportsCardExit(profile)
+        val host = if (canReadEntry) profile.requireBean().serverAddress.orEmpty().trim() else ""
+        val resolvers = group.effectiveNodeDnsList()
+
+        val generated = if (canTestExit) {
+            runCatching { io.nekohasekai.sagernet.fmt.buildConfig(profile, forTest = true) }.getOrNull()
+        } else {
             null
+        }
+        val canStartBox = generated != null && generated.externalIndex.none { it.chain.isNotEmpty() }
+
+        var resolvedEntry: String? = null
+        var entryOwnerLabel = ""
+        var exitOwner: io.nekohasekai.sagernet.ipinfo.IpOwner? = null
+
+        val box = if (canStartBox) {
+            runCatching {
+                libcore.Libcore.newTestSingBoxInstance(
+                    generated!!.config,
+                    moe.matsuri.nb4a.net.LocalResolverImpl,
+                )
+            }.getOrNull()
+        } else {
+            null
+        }
+
+        try {
+            val isBoxStarted = if (box != null) {
+                runCatching { box.start(); true }.getOrDefault(false)
+            } else {
+                false
+            }
+            val activeBox = if (isBoxStarted) box else null
+
+            if (canReadEntry && host.isNotEmpty()) {
+                resolvedEntry = resolveNodeEntryIp(host, group.id, resolvers, activeBox)
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+
+            if (activeBox != null) {
+                exitOwner = IpInfoStore.probeExitViaBox(activeBox, EXIT_PROBE_TIMEOUT_MS)
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+
+            if (resolvedEntry != null) {
+                entryOwnerLabel = if (exitOwner != null &&
+                    IpInfoStore.sameIp(resolvedEntry, exitOwner.ip) &&
+                    exitOwner.label().isNotBlank()
+                ) {
+                    exitOwner.label()
+                } else {
+                    // WHY: Only reuse activeBox for entry GeoIP if exitOwner succeeded; if the node
+                    // itself timed out, pass null so ownerViaBox falls back immediately without
+                    // waiting for two more dead-tunnel timeouts.
+                    IpInfoStore.ownerViaBox(
+                        box = if (exitOwner != null) activeBox else null,
+                        ip = resolvedEntry,
+                        timeoutMs = OWNER_PROBE_TIMEOUT_MS,
+                    )?.label().orEmpty()
+                }
+            }
+        } finally {
+            runCatching { box?.close() }
+        }
+
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (resolvedEntry == null && exitOwner == null) return null
+
+        return SagerDatabase.instance.runInTransaction<IpCardProbeOutcome?> {
+            val current = dao.getById(id) ?: return@runInTransaction null
+            val currentGroup = SagerDatabase.groupDao.getById(current.groupId) ?: return@runInTransaction null
+            if (!sameProbeProfile(profile, current) || !sameProbeGroup(group, currentGroup)) {
+                return@runInTransaction null
+            }
+
+            val finalEntryIp = resolvedEntry ?: current.entryIp
+            val finalEntryProvider = when {
+                entryOwnerLabel.isNotBlank() -> entryOwnerLabel
+                resolvedEntry != null && IpInfoStore.sameIp(current.entryIp, resolvedEntry) -> current.entryProvider
+                resolvedEntry == null -> current.entryProvider
+                else -> ""
+            }
+            val finalExitIp = exitOwner?.ip.orEmpty()
+            val finalExitProvider = exitOwner?.label().orEmpty()
+
+            dao.updateIpInfo(
+                proxyId = id,
+                entryIp = finalEntryIp,
+                entryProvider = finalEntryProvider,
+                exitIp = finalExitIp,
+                exitProvider = finalExitProvider,
+                updatedAt = System.currentTimeMillis(),
+            )
+            IpCardProbeOutcome(
+                hasEntry = finalEntryIp.isNotBlank(),
+                hasVerifiedExit = finalExitIp.isNotBlank(),
+            )
+        }
+    }
+
+    private suspend fun resolveNodeEntryIp(
+        host: String,
+        groupId: Long,
+        resolvers: List<String>,
+        activeBox: libcore.BoxInstance?,
+    ): String? {
+        if (IpInfoStore.isIpLiteral(host)) {
+            return IpInfoStore.resolveEntry(host, emptyList())
+        }
+        if (activeBox != null) {
+            val transportTag = if (resolvers.isNotEmpty()) "dns-group-$groupId" else "dns-direct"
+            val viaBox = withContext(Dispatchers.IO) {
+                runCatching {
+                    activeBox.lookupDomainWithTag(host, transportTag, DNS_PROBE_TIMEOUT_MS)
+                }.getOrNull()
+            }?.takeIf(IpInfoStore::isUsableEntryIp)
+            if (viaBox != null) return viaBox
+        }
+        return IpInfoStore.resolveEntry(host, resolvers)
+    }
+
+    private fun confirmGroupIpInfo() {
+        if (!isAdded) return
+        if (DataStore.ipProbeConsentGranted) {
+            probeGroupIpInfo(force = false)
+            return
+        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.action_probe_group_ip_info)
+            .setMessage(R.string.card_ip_probe_disclosure)
+            .setPositiveButton(R.string.card_ip_probe) { _, _ ->
+                DataStore.ipProbeConsentGranted = true
+                probeGroupIpInfo(force = false)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * Batch-probes Entry/Exit IP & ISP across all supported nodes in the active group with
+     * bounded concurrency ([GROUP_IP_PROBE_CONCURRENCY]), live card updates, and minimize/cancel
+     * dialog controls unified under [ActiveTestHandle].
+     */
+    fun probeGroupIpInfo(force: Boolean = false) {
+        if (!isAdded) return
+        val testToken = acquireOrPromptTestToken(force) {
+            probeGroupIpInfo(force = true)
+        }
+        if (testToken == 0) return
+
+        val group = DataStore.currentGroup()
+        val titleText = "${group.displayName()} · ${getString(R.string.card_ip_probe_short)}"
+        val binding = LayoutProgressListBinding.inflate(layoutInflater)
+        binding.progressCircular.isGone = true
+        binding.progressLinear.isVisible = true
+        binding.progressLinear.max = 1
+        binding.progressLinear.setProgressCompat(0, false)
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(titleText)
+            .setView(binding.root)
+            .setPositiveButton(R.string.minimize, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setCancelable(false)
+            .show()
+
+        val workerJobs = java.util.Collections.synchronizedList(mutableListOf<Job>())
+        var coordinatorJob: Job? = null
+        val handle = ActiveTestHandle(token = testToken, dialog = dialog) {
+            coordinatorJob?.cancel()
+            synchronized(workerJobs) { workerJobs.toList() }.forEach { it.cancel() }
+        }
+        activeTestHandle = handle
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (!DataStore.isTestTokenActive(testToken)) return@setOnClickListener
+            handle.isHidden = true
+            handle.notification = ConnectionTestNotification(dialog.context, titleText)
+            dialog.hide()
+        }
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+            handle.cancel(dismissDialog = true)
+        }
+
+        coordinatorJob = runOnDefaultDispatcher {
+            try {
+                val targets = SagerDatabase.proxyDao.getByGroup(group.id).filter(::supportsCardIpProbe)
+                if (targets.isEmpty()) return@runOnDefaultDispatcher
+                val total = targets.size
+                val completedCount = AtomicInteger(0)
+                val queue = ConcurrentLinkedQueue(targets)
+
+                onMainDispatcher {
+                    if (!DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
+                    binding.progressLinear.max = total
+                    binding.progressLinear.setProgressCompat(0, false)
+                    binding.progress.text = "0 / $total"
+                }
+
+                val workerCount = minOf(GROUP_IP_PROBE_CONCURRENCY, total)
+                repeat(workerCount) {
+                    workerJobs.add(launch(Dispatchers.IO) {
+                        while (isActive && DataStore.isTestTokenActive(testToken)) {
+                            val item = queue.poll() ?: break
+                            onMainDispatcher {
+                                if (!handle.isHidden && isAdded && DataStore.isTestTokenActive(testToken)) {
+                                    binding.nowTesting.text = getString(
+                                        R.string.group_ip_probe_testing,
+                                        item.displayName(),
+                                    )
+                                }
+                            }
+                            runCatching { probeAndPersistNodeIpInfo(item.id) }
+                                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                            if (!isActive || !DataStore.isTestTokenActive(testToken)) break
+                            ProfileManager.postUpdate(item.id, true)
+                            val done = completedCount.incrementAndGet()
+                            onMainDispatcher {
+                                if (!isAdded || !DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
+                                handle.notification?.updateNotification(done, total, done >= total, item.displayName())
+                                if (!handle.isHidden) {
+                                    binding.progress.text = "$done / $total"
+                                    binding.progressLinear.setProgressCompat(done, true)
+                                }
+                                if (item.id == DataStore.selectedProxy) {
+                                    refreshSurgeStatusHeader()
+                                }
+                            }
+                        }
+                    })
+                }
+                synchronized(workerJobs) { workerJobs.toList() }.joinAll()
+            } finally {
+                withContext(Dispatchers.Main.immediate + NonCancellable) {
+                    if (dialog.isShowing) {
+                        runCatching { dialog.dismiss() }
+                    }
+                    handle.notification?.updateNotification(0, 0, true)
+                    handle.notification = null
+                    handle.dialog = null
+                    handle.isHidden = false
+                    if (activeTestHandle === handle) {
+                        activeTestHandle = null
+                    }
+                    refreshSurgeStatusHeader()
+                }
+                DataStore.releaseTestToken(testToken)
+            }
         }
     }
 
@@ -1229,6 +1611,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
                 DataStore.releaseTestToken(testToken)
+                if (isSingle && targetProfile != null && DataStore.showNodeIpOwner && DataStore.ipProbeConsentGranted) {
+                    val refreshed = SagerDatabase.proxyDao.getById(targetProfile.id)
+                    if (refreshed != null && refreshed.exitIp.isBlank() && supportsCardIpProbe(refreshed)) {
+                        onMainDispatcher {
+                            if (isAdded && ipInfoJob?.isActive != true) {
+                                requestNodeIpInfo(refreshed.id, isSilent = true)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2411,9 +2803,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profileAddress.text = address
                 (trafficText.parent as View).isGone = (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
 
-                val canProbeIp = !select && DataStore.showNodeIpOwner && pf.supportsCardEntry(proxyEntity)
-                val ipInfoText = if (DataStore.showNodeIpOwner) pf.ipInfoLabel(proxyEntity, proxyGroup, hideAddress) else null
-                profileIpInfo.text = ipInfoText.orEmpty()
+                val canProbeIp = !select && DataStore.showNodeIpOwner && pf.supportsCardIpProbe(proxyEntity)
+                val ipInfoText = if (DataStore.showNodeIpOwner) {
+                    pf.formatIpInfoSpannable(view.context, proxyEntity, hideAddress)
+                } else {
+                    null
+                }
+                profileIpInfo.text = ipInfoText ?: ""
                 profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
                 profileIpInfo.setOnClickListener(if (canProbeIp && profileIpInfo.isVisible) View.OnClickListener {
                     pf.confirmNodeIpInfo(proxyEntity.id)

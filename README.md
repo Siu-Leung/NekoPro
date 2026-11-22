@@ -29,10 +29,21 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.6`
+`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc3`）
 
 - [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
 - 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
+
+### v1.4.7-rc3 测试版改动日志 (2026-11-21)
+
+- **全量二级菜单、嵌套子菜单与全部子页面 Surge 化重塑**
+  - **全系设置与 19 套协议编辑器升级为 Surge Inset Grouped 圆角卡片列表**：新增 `SurgePreferenceStyler`，将全局设置（`SettingsPreferenceFragment`）、分组设置（`GroupSettingsActivity`）、路由规则编辑（`RouteSettingsActivity`）以及全部 19 个协议配置页（VLESS / VMess / Trojan / AnyTLS / Snell / Hysteria / TUIC / Juicity / Mieru / ShadowTLS / WireGuard / Naive / SSH / SOCKS / HTTP / 自定义配置等）统一渲染为 iOS/Surge 内嵌分组圆角卡片（`14dp` 圆角 + `1dp` 轻描边 + `16dp` 缩进发丝分隔线）。
+  - **全部二级弹出菜单、三级嵌套菜单与下拉框统一为 Surge 浮层**：重塑顶栏 `+`（含「手动输入配置」二级协议子菜单）、顶栏 `⋮`（含「排序与布局」二级子菜单）、节点卡片「分享」（二维码 / 剪贴板 / 导出配置二级子菜单）以及设置项 `SimpleMenuPreference` 下拉弹窗，统一采用 `14dp` 圆角纯净表面 + `1dp` 发丝描边与高对比排版；侧边抽屉菜单项升级为 Surge 圆角胶囊高亮条，全面适配 Android 15+ 状态栏安全边距。
+  - **补齐全部二级工具与子页面 Surge 视觉一致性**：完成分应用代理（`AppManagerActivity` / `AppListActivity`）、代理链编辑（`ChainSettingsActivity`）、配置 JSON 编辑器与扩展键盘栏（`ConfigEditActivity`）、实时日志控制台（`LogcatFragment`）、STUN NAT 检测（`StunActivity`）、关于页（`AboutFragment`）、分组弹窗与测速/探测进度弹窗的 Surge 扁平化改造。
+- **彻底打通「入口 IP + 服务商」与「出口 IP + 服务商」全链路探测与常驻展示**
+  - **修复 Cloudflare WAF `403` 拦截与直连被墙问题**：修复 `IpInfoStore` 默认发送 `okhttp/*` UA 被 `api.ip.sb` 前端 Cloudflare WAF 拦截导致入口/出口归属服务商全部返回空值的问题；新增 `api.ip.sb` → `ipwho.is` → Cloudflare `trace` 多源容灾链路与 6 小时内存归属缓存，并优先复用节点自身隔离代理隧道查询入口与出口归属，即使未开启主 VPN 也不受本地运营商阻断影响。
+  - **内核级 `BoxInstance` 原生严格代理探测与全协议 DNS 支持**：`libcore` 新增 `FetchHttpsJson`（严格限定经由 `"proxy"` 出站或 WireGuard `"proxy"` Endpoint 拨号，绝不回退直连）与 `LookupDomainWithTag`（原生支持 `https`/`h3`/`tls`/`quic`/`udp`/`fallback` 全部组 DNS 协议），彻底解决 WireGuard、代理链、自定义配置、DoT/DoQ/DoH3 组 DNS 及 `autoAdoptNodeDns` 纯节点订阅下无法探测出入口的问题。
+  - **持久化双行徽标展示 + 顶部状态栏遥测 + 批量整组查询**：修复旧版将 `exitIp` / `exitProvider` 强制写空导致切页即丢的问题（升级自动清理历史遗留非严格字段，仅在服务器地址或端口变更时失效）；节点卡片与顶部 Surge 状态卡同步以「`入口`（蓝）+ IP + 国旗/ASN/服务商」与「`出口`（绿）+ IP + 国旗/ASN/服务商」双行呈现；首次授权后一键直查，连接节点或单节点测速后自动补齐，并在顶栏 `⋮` 菜单新增「查询本组出入口 IP / 服务商」并发批量探测。
 
 ### v1.4.6 改动日志 (2026-11-21)
 

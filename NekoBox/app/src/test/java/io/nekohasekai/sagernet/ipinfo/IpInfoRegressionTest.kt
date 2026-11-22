@@ -139,6 +139,34 @@ class IpInfoRegressionTest {
         )
     }
 
+    @Test
+    fun setsBrowserCompatibleUserAgentAndParsesFallbackProviders() {
+        val req = IpInfoStore.request(okhttp3.HttpUrl.Builder().scheme("https").host("api.ip.sb").addPathSegment("geoip").build())
+        val ua = req.header("User-Agent").orEmpty()
+        assertTrue("Expected non-okhttp User-Agent, got: $ua", ua.startsWith("Mozilla/5.0") && !ua.contains("okhttp", ignoreCase = true))
+
+        val ipWhoisPayload = """
+            {"ip":"45.207.209.10","success":true,"country":"Hong Kong","country_code":"HK","connection":{"asn":9269,"org":"HKT Limited","isp":"PCCW"}}
+        """.trimIndent().encodeToByteArray()
+        val whoisOwner = IpInfoStore.parseIpWhoisOwner(ipWhoisPayload, "45.207.209.10")
+        assertNotNull(whoisOwner)
+        assertTrue(whoisOwner!!.label().contains("AS9269 HKT Limited"))
+        assertNull(IpInfoStore.parseIpWhoisOwner(ipWhoisPayload, "45.207.209.11"))
+        assertNull(IpInfoStore.parseIpWhoisOwner("""{"ip":"45.207.209.10","success":false}""".encodeToByteArray()))
+
+        val tracePayload = "fl=29f12\nh=www.cloudflare.com\nip=104.28.14.99\nloc=SG\ntls=TLSv1.3\n".encodeToByteArray()
+        val traceOwner = IpInfoStore.parseCloudflareTrace(tracePayload)
+        assertNotNull(traceOwner)
+        assertEquals("104.28.14.99", traceOwner!!.ip)
+        assertEquals("SG", traceOwner.countryCode)
+        assertTrue(traceOwner.label().contains("SG"))
+
+        assertTrue(IpInfoStore.sameIp("2001:0db8::1", "[2001:db8::1]"))
+        assertTrue(IpInfoStore.sameIp("1.1.1.1", "1.1.1.1"))
+        assertFalse(IpInfoStore.sameIp("1.1.1.1", "1.0.0.1"))
+        assertFalse(IpInfoStore.sameIp("example.com", "1.1.1.1"))
+    }
+
     private fun answer(query: ByteArray, type: Int, address: ByteArray): ByteArray =
         query.copyOf().apply {
             this[2] = 0x81.toByte()
