@@ -62,3 +62,15 @@ func TestForbiddenProbeOutboundTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestStripAnsiEscapeCodes(t *testing.T) {
+	sample := "\x1b[36mINFO\x1b[0m[2576] [\x1b[38;5;193m2136742438\x1b[0m 0ms] inbound/mixed[mixed-in]: inbound connection"
+	want := "INFO[2576] [2136742438 0ms] inbound/mixed[mixed-in]: inbound connection"
+	if got := stripAnsiEscapeCodes(sample); got != want {
+		t.Fatalf("stripAnsiEscapeCodes() = %q, want %q", got, want)
+	}
+	if plain := "WARN[0001] plain text [not ansi]"; stripAnsiEscapeCodes(plain) != plain {
+		t.Fatalf("expected plain text to remain unchanged")
+	}
+}
+

@@ -29,10 +29,18 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc3`）
+`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc4`）
 
 - [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
 - 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
+
+### v1.4.7-rc4 测试版改动日志 (2026-11-21)
+
+- **功能重塑为「测拓扑」并根治探测完成后界面无显示的三大真机问题**
+  - **修复设置页 `showNodeIpOwner` 缺失 `defaultValue="true"` 静默隐藏全部拓扑 UI 的缺陷**：此前 `global_preferences.xml` 未声明 `app:defaultValue="true"`，导致用户只要进入过一次设置页，AndroidX `TwoStatePreference` 即向数据库写入 `false`，使卡片按钮、拓扑面板与顶部状态栏全面隐藏（即便后台跑完整组探测也不渲染任何内容）。现已补齐 `defaultValue="true"`、增加升级自动恢复迁移，并将节点卡片「测拓扑」按钮设为常驻可见、手动发起拓扑检测自动开启展示。
+  - **修复 VPN 连接态流量刷新竞态与五源 BGP/ASN 拓扑识别**：新增 `ConfigurationAdapter.updateTopologyResult` 原地同步列表实体并修复 `onUpdated(TrafficData)` 旧 `holder.entity` 覆盖竞态；将归属数据源扩展为 `api.ip.sb` → `api.ipapi.is` → `ipinfo.io` → `freeipapi.com` → `ipwho.is`（外加 `1.1.1.1` / `cloudflare.com` trace 兜底），彻底解决共享机场 IEPL 出口（如阿里 GTM 动态入口 → 香港专线出口）触发单一接口限流的问题，并在拓扑面板直观标注 `[中转]`（琥珀色）与 `[直连]`（翠绿色）。
+- **彻底清除日志页 ANSI 256 色转义乱码与首行截断**
+  - 修复 `sing-box/log/observable.go` 中 `platformFormatter` 未开启 `DisableColors` 导致向 `neko.log` 持续写入 `[38;5;193m` / `[37m` / `[0m` 终端控制码的问题；在 `platform_box.go` 与 `LogcatFragment` 双端剥离 ANSI CSI 序列，修复 `SendLog.getNekoLog` 尾部截取断行残片（如 `E[0m`），并按 `INFO`（翠绿）/ `WARN`（琥珀）/ `ERROR`（珊瑚红）/ `DEBUG`（次级灰）异步高亮渲染日志。
 
 ### v1.4.7-rc3 测试版改动日志 (2026-11-21)
 

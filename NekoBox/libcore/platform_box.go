@@ -244,7 +244,7 @@ var disableSingBoxLog = false
 func (w *boxPlatformInterfaceWrapper) Write(p []byte) (n int, err error) {
 	// use neko_log
 	if !disableSingBoxLog {
-		log.Print(string(p))
+		log.Print(stripAnsiEscapeCodes(string(p)))
 	}
 	return len(p), nil
 }
@@ -257,8 +257,35 @@ type boxPlatformLogWriterWrapper struct {
 var boxPlatformLogWriter sblog.PlatformWriter = &boxPlatformLogWriterWrapper{}
 
 func (w *boxPlatformLogWriterWrapper) WriteMessage(level sblog.Level, message string) {
-	if !strings.HasSuffix(message, "\n") {
-		message += "\n"
+	cleaned := stripAnsiEscapeCodes(message)
+	if !strings.HasSuffix(cleaned, "\n") {
+		cleaned += "\n"
 	}
-	neko_log.LogWriter.Write([]byte(message))
+	_, _ = neko_log.LogWriter.Write([]byte(cleaned))
+}
+
+// stripAnsiEscapeCodes removes VT100/ANSI CSI escape sequences (e.g. "\x1b[38;5;193m", "\x1b[0m")
+// without regex allocation overhead when no ESC byte is present.
+func stripAnsiEscapeCodes(input string) string {
+	if !strings.ContainsRune(input, '\x1b') {
+		return input
+	}
+	var out strings.Builder
+	out.Grow(len(input))
+	i := 0
+	for i < len(input) {
+		if input[i] == '\x1b' && i+1 < len(input) && input[i+1] == '[' {
+			j := i + 2
+			for j < len(input) && ((input[j] >= '0' && input[j] <= '9') || input[j] == ';' || input[j] == '?') {
+				j++
+			}
+			if j < len(input) && ((input[j] >= 'A' && input[j] <= 'Z') || (input[j] >= 'a' && input[j] <= 'z')) {
+				i = j + 1
+				continue
+			}
+		}
+		out.WriteByte(input[i])
+		i++
+	}
+	return out.String()
 }

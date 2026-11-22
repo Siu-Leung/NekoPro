@@ -165,6 +165,33 @@ class IpInfoRegressionTest {
         assertTrue(IpInfoStore.sameIp("1.1.1.1", "1.1.1.1"))
         assertFalse(IpInfoStore.sameIp("1.1.1.1", "1.0.0.1"))
         assertFalse(IpInfoStore.sameIp("example.com", "1.1.1.1"))
+
+        val ipApiIsPayload = """
+            {"ip":"14.23.28.105","location":{"country_code":"CN","country":"China"},"asn":{"asn":4134,"org":"Chinanet","descr":"CHINANET-BACKBONE"},"company":{"name":"China Telecom"}}
+        """.trimIndent().encodeToByteArray()
+        val ipApiOwner = IpInfoStore.parseIpApiIsOwner(ipApiIsPayload, "14.23.28.105")
+        assertNotNull(ipApiOwner)
+        assertTrue(ipApiOwner!!.label().contains("CN"))
+        assertTrue(ipApiOwner.label().contains("AS4134 Chinanet"))
+
+        val ipInfoPayload = """
+            {"ip":"45.207.209.10","country":"HK","org":"AS9269 HKT Limited"}
+        """.trimIndent().encodeToByteArray()
+        val ipInfoOwner = IpInfoStore.parseIpInfoIoOwner(ipInfoPayload, "45.207.209.10")
+        assertNotNull(ipInfoOwner)
+        assertEquals("AS9269", ipInfoOwner!!.asn)
+        assertEquals("HKT Limited", ipInfoOwner.organization)
+
+        val freeIpApiPayload = """
+            {"ipAddress":"183.232.253.16","countryCode":"CN","countryName":"China","asn":"AS9808","asnOrganization":"China Mobile"}
+        """.trimIndent().encodeToByteArray()
+        val freeOwner = IpInfoStore.parseFreeIpApiOwner(freeIpApiPayload, "183.232.253.16")
+        assertNotNull(freeOwner)
+        assertTrue(freeOwner!!.label().contains("AS9808 China Mobile"))
+
+        val rawAnsiLog = "E[0m[2568] conn closed\n\u001B[36mINFO\u001B[0m[2576] [\u001B[38;5;193m2136742438\u001B[0m 0ms] inbound/mixed"
+        val cleanedLog = io.nekohasekai.sagernet.ui.LogcatFragment.stripAnsiAndNormalize(rawAnsiLog)
+        assertEquals("[2568] conn closed\nINFO[2576] [2136742438 0ms] inbound/mixed", cleanedLog)
     }
 
     private fun answer(query: ByteArray, type: Int, address: ByteArray): ByteArray =

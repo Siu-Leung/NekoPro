@@ -283,8 +283,8 @@
     <string name="standard">标准</string>
     <string name="unavailable">不可用</string>
     <string name="always_show_address">始终显示地址</string>
-    <string name="show_node_ip_owner">显示 IP 服务商</string>
-    <string name="show_node_ip_owner_sum">在节点卡片上显示入口与出口 IP 的归属服务商。服务商始终不隐藏。</string>
+    <string name="show_node_ip_owner">显示节点拓扑（出入口 / 服务商）</string>
+    <string name="show_node_ip_owner_sum">在节点卡片与顶部状态栏展示入口与出口 IP、地区、ASN 服务商及中转/直连形态。</string>
     <string name="hide_node_address">隐藏地址（方便截图）</string>
     <string name="hide_node_address_sum">遮蔽卡片上的节点域名与 IP，但保留地区与服务商信息。</string>
     <string name="node_entry_label">入口</string>

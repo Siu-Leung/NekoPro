@@ -238,6 +238,13 @@ class ConfigurationFragment @JvmOverloads constructor(
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // WHY: Earlier builds omitted app:defaultValue="true" on showNodeIpOwner in global_preferences.xml,
+        // causing SettingsFragment initialization to persist false into PublicDatabase and hide all topology UI.
+        if (!DataStore.topologyDisplayRestoredV1) {
+            DataStore.showNodeIpOwner = true
+            DataStore.topologyDisplayRestoredV1 = true
+        }
+
         // WHY: Pre-rc3 builds could have legacy unverified exitIp strings in SQLite; scrub once
         // so every persisted exitIp/exitProvider is guaranteed to come from strict proxy probing.
         if (!DataStore.ipExitStrictMigrationDone) {
@@ -304,7 +311,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
             surgeStatusCard?.setOnLongClickListener {
                 val selectedId = DataStore.selectedProxy
-                if (selectedId > 0L && DataStore.showNodeIpOwner) {
+                if (selectedId > 0L) {
                     confirmNodeIpInfo(selectedId)
                     true
                 } else {
@@ -949,6 +956,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         val entryBadgeColor = ctx.getColorAttr(R.attr.primaryOrTextPrimary)
         val exitBadgeColor = ctx.getColour(R.color.surge_green)
+        val relayTagColor = ctx.getColour(R.color.surge_amber)
         val ipTextColor = ctx.getColour(R.color.surge_text_primary)
         val metaTextColor = ctx.getColour(R.color.surge_text_secondary)
 
@@ -959,6 +967,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             rawIp: String,
             rawProvider: String,
             fallbackHint: String?,
+            topologyModeTag: String? = null,
+            topologyModeColor: Int = exitBadgeColor,
         ) {
             if (builder.isNotEmpty()) builder.append('\n')
             val badgeStart = builder.length
@@ -984,6 +994,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                 builder.append(" · ").append(detail)
                 builder.setSpan(ForegroundColorSpan(metaTextColor), metaStart, builder.length, SPAN_EXCLUSIVE_EXCLUSIVE)
             }
+            if (!topologyModeTag.isNullOrBlank()) {
+                builder.append(' ')
+                val modeStart = builder.length
+                builder.append(topologyModeTag)
+                builder.setSpan(
+                    ForegroundColorSpan(topologyModeColor),
+                    modeStart,
+                    builder.length,
+                    SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
         }
 
         val builder = SpannableStringBuilder()
@@ -1003,6 +1024,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             )
         }
         if (exitIp != null) {
+            val isDirectTopology = entryIp != null && IpInfoStore.sameIp(entryIp, exitIp)
+            val modeTag = when {
+                entryIp == null -> null
+                isDirectTopology -> ctx.getString(R.string.topology_mode_direct)
+                else -> ctx.getString(R.string.topology_mode_relay)
+            }
+            val modeColor = if (isDirectTopology) exitBadgeColor else relayTagColor
             appendTelemetryRow(
                 builder = builder,
                 badgeText = ctx.getString(R.string.card_exit_badge),
@@ -1010,6 +1038,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                 rawIp = exitIp,
                 rawProvider = exitProviderRaw,
                 fallbackHint = null,
+                topologyModeTag = modeTag,
+                topologyModeColor = modeColor,
             )
         }
         return builder.takeIf { it.isNotEmpty() }
@@ -1022,12 +1052,45 @@ class ConfigurationFragment @JvmOverloads constructor(
         a.id == b.id && a.frontProxy == b.frontProxy && a.landingProxy == b.landingProxy &&
             a.effectiveNodeDnsList() == b.effectiveNodeDnsList()
 
+    /**
+     * Ensures topology panels are visible whenever the user explicitly initiates a topology test.
+     */
+    private fun ensureTopologyDisplayEnabled() {
+        if (!DataStore.showNodeIpOwner) {
+            DataStore.showNodeIpOwner = true
+            lastIpDisplayOptions = DataStore.hideNodeAddress to true
+            if (::adapter.isInitialized) {
+                adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
+            }
+        }
+    }
+
+    private fun applyTopologyOutcomeOnMain(id: Long, outcome: IpCardProbeOutcome?) {
+        if (!::adapter.isInitialized) return
+        adapter.groupFragments.values.forEach { fragment ->
+            if (outcome != null) {
+                fragment.adapter?.updateTopologyResult(
+                    profileId = id,
+                    entryIp = outcome.entryIp,
+                    entryProvider = outcome.entryProvider,
+                    exitIp = outcome.exitIp,
+                    exitProvider = outcome.exitProvider,
+                    updatedAt = outcome.updatedAt,
+                )
+            } else {
+                val idx = fragment.adapter?.configurationIdList?.indexOf(id) ?: -1
+                if (idx >= 0) fragment.adapter?.notifyItemChanged(idx)
+            }
+        }
+    }
+
     private fun confirmNodeIpInfo(id: Long) {
         if (!isResumed || ipInfoDialog?.isShowing == true) return
         if (ipInfoJob?.isActive == true) {
             snackbar(R.string.card_ip_probe_busy).show()
             return
         }
+        ensureTopologyDisplayEnabled()
         if (DataStore.ipProbeConsentGranted) {
             requestNodeIpInfo(id, isSilent = false)
             return
@@ -1067,32 +1130,35 @@ class ConfigurationFragment @JvmOverloads constructor(
     private fun requestNodeIpInfo(id: Long, isSilent: Boolean = false) {
         if (view == null || ipInfoJob?.isActive == true) return
         probingProxyId = id
+        applyTopologyOutcomeOnMain(id, null)
         refreshSurgeStatusHeader()
         if (!isSilent && isResumed) snackbar(R.string.card_ip_probe_started).show()
         ipInfoJob = viewLifecycleOwner.lifecycleScope.launch {
-            withContext(Dispatchers.IO) { ProfileManager.postUpdate(id, true) }
-            val result = try {
-                withContext(Dispatchers.IO) {
+            var outcome: IpCardProbeOutcome? = null
+            try {
+                outcome = withContext(Dispatchers.IO) {
                     probeAndPersistNodeIpInfo(id)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Logs.w(e)
-                null
             } finally {
                 probingProxyId = null
+                withContext(Dispatchers.Main.immediate + NonCancellable) {
+                    applyTopologyOutcomeOnMain(id, outcome)
+                    refreshSurgeStatusHeader()
+                }
                 withContext(NonCancellable + Dispatchers.IO) {
                     ProfileManager.postUpdate(id, true)
                 }
-                refreshSurgeStatusHeader()
             }
             if (!isSilent && isResumed) {
                 snackbar(
                     getString(
                         when {
-                            result == null -> R.string.card_ip_probe_failed
-                            !result.hasVerifiedExit -> R.string.card_ip_probe_entry_only
+                            outcome == null -> R.string.card_ip_probe_failed
+                            !outcome.hasVerifiedExit -> R.string.card_ip_probe_entry_only
                             else -> R.string.card_ip_probe_complete
                         }
                     )
@@ -1102,9 +1168,15 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     private data class IpCardProbeOutcome(
-        val hasEntry: Boolean,
-        val hasVerifiedExit: Boolean,
-    )
+        val entryIp: String,
+        val entryProvider: String,
+        val exitIp: String,
+        val exitProvider: String,
+        val updatedAt: Long,
+    ) {
+        val hasEntry: Boolean get() = entryIp.isNotBlank()
+        val hasVerifiedExit: Boolean get() = exitIp.isNotBlank()
+    }
 
     /**
      * Resolves a node's Entry IP + ISP and verified Exit IP + ISP inside a single isolated
@@ -1113,7 +1185,7 @@ class ConfigurationFragment @JvmOverloads constructor(
      * WHY: Running DNS lookup, exit verification (`probeExitViaBox`), and entry ASN lookup
      * (`ownerViaBox`) over the same in-memory `BoxInstance` supports every sing-box DNS transport
      * (`https`, `h3`, `tls`, `quic`, `udp`), supports WireGuard endpoints and proxy chains, and
-     * bypasses carrier censorship against `api.ip.sb` even when the main VPN service is stopped.
+     * bypasses carrier censorship against GeoIP endpoints even when the main VPN service is stopped.
      */
     private suspend fun probeAndPersistNodeIpInfo(id: Long): IpCardProbeOutcome? {
         val dao = SagerDatabase.proxyDao
@@ -1127,7 +1199,9 @@ class ConfigurationFragment @JvmOverloads constructor(
         val resolvers = group.effectiveNodeDnsList()
 
         val generated = if (canTestExit) {
-            runCatching { io.nekohasekai.sagernet.fmt.buildConfig(profile, forTest = true) }.getOrNull()
+            runCatching { io.nekohasekai.sagernet.fmt.buildConfig(profile, forTest = true) }
+                .onFailure { Logs.w(it) }
+                .getOrNull()
         } else {
             null
         }
@@ -1143,14 +1217,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                     generated!!.config,
                     moe.matsuri.nb4a.net.LocalResolverImpl,
                 )
-            }.getOrNull()
+            }.onFailure { Logs.w(it) }.getOrNull()
         } else {
             null
         }
 
         try {
             val isBoxStarted = if (box != null) {
-                runCatching { box.start(); true }.getOrDefault(false)
+                runCatching { box.start(); true }.onFailure { Logs.w(it) }.getOrDefault(false)
             } else {
                 false
             }
@@ -1175,7 +1249,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 } else {
                     // WHY: Only reuse activeBox for entry GeoIP if exitOwner succeeded; if the node
                     // itself timed out, pass null so ownerViaBox falls back immediately without
-                    // waiting for two more dead-tunnel timeouts.
+                    // waiting for dead-tunnel timeouts.
                     IpInfoStore.ownerViaBox(
                         box = if (exitOwner != null) activeBox else null,
                         ip = resolvedEntry,
@@ -1188,9 +1262,17 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        if (resolvedEntry == null && exitOwner == null) return null
+        val hideInLogs = DataStore.hideNodeAddress
+        if (resolvedEntry == null && exitOwner == null) {
+            runCatching {
+                val safeTitle = if (hideInLogs) "#$id" else profile.displayName()
+                libcore.Libcore.nekoLogPrintln("WARN [topology] $safeTitle: no entry or exit resolved")
+            }
+            return null
+        }
 
-        return SagerDatabase.instance.runInTransaction<IpCardProbeOutcome?> {
+        val now = System.currentTimeMillis()
+        val persisted = SagerDatabase.instance.runInTransaction<IpCardProbeOutcome?> {
             val current = dao.getById(id) ?: return@runInTransaction null
             val currentGroup = SagerDatabase.groupDao.getById(current.groupId) ?: return@runInTransaction null
             if (!sameProbeProfile(profile, current) || !sameProbeGroup(group, currentGroup)) {
@@ -1213,13 +1295,27 @@ class ConfigurationFragment @JvmOverloads constructor(
                 entryProvider = finalEntryProvider,
                 exitIp = finalExitIp,
                 exitProvider = finalExitProvider,
-                updatedAt = System.currentTimeMillis(),
+                updatedAt = now,
             )
             IpCardProbeOutcome(
-                hasEntry = finalEntryIp.isNotBlank(),
-                hasVerifiedExit = finalExitIp.isNotBlank(),
+                entryIp = finalEntryIp,
+                entryProvider = finalEntryProvider,
+                exitIp = finalExitIp,
+                exitProvider = finalExitProvider,
+                updatedAt = now,
             )
         }
+        if (persisted != null) {
+            runCatching {
+                val safeTitle = if (hideInLogs) "#$id" else profile.displayName()
+                val inIp = AddressRedactor.maskIp(persisted.entryIp, hideInLogs).ifBlank { "-" }
+                val outIp = AddressRedactor.maskIp(persisted.exitIp, hideInLogs).ifBlank { "-" }
+                libcore.Libcore.nekoLogPrintln(
+                    "INFO [topology] $safeTitle: IN=$inIp (${persisted.entryProvider.ifBlank { "-" }}) -> OUT=$outIp (${persisted.exitProvider.ifBlank { "-" }})"
+                )
+            }
+        }
+        return persisted
     }
 
     private suspend fun resolveNodeEntryIp(
@@ -1245,6 +1341,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun confirmGroupIpInfo() {
         if (!isAdded) return
+        ensureTopologyDisplayEnabled()
         if (DataStore.ipProbeConsentGranted) {
             probeGroupIpInfo(force = false)
             return
@@ -1261,12 +1358,13 @@ class ConfigurationFragment @JvmOverloads constructor(
     }
 
     /**
-     * Batch-probes Entry/Exit IP & ISP across all supported nodes in the active group with
-     * bounded concurrency ([GROUP_IP_PROBE_CONCURRENCY]), live card updates, and minimize/cancel
-     * dialog controls unified under [ActiveTestHandle].
+     * Batch-probes node topology (Entry/Exit IP, ASN/ISP, and Relay/Direct mode) across all
+     * supported nodes in the active group with bounded concurrency ([GROUP_IP_PROBE_CONCURRENCY]),
+     * live in-memory card updates, and minimize/cancel controls unified under [ActiveTestHandle].
      */
     fun probeGroupIpInfo(force: Boolean = false) {
         if (!isAdded) return
+        ensureTopologyDisplayEnabled()
         val testToken = acquireOrPromptTestToken(force) {
             probeGroupIpInfo(force = true)
         }
@@ -1307,21 +1405,24 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
 
         coordinatorJob = runOnDefaultDispatcher {
+            var totalCount = 0
+            val successCount = AtomicInteger(0)
+            var wasCompletedNormally = false
             try {
                 val targets = SagerDatabase.proxyDao.getByGroup(group.id).filter(::supportsCardIpProbe)
                 if (targets.isEmpty()) return@runOnDefaultDispatcher
-                val total = targets.size
+                totalCount = targets.size
                 val completedCount = AtomicInteger(0)
                 val queue = ConcurrentLinkedQueue(targets)
 
                 onMainDispatcher {
                     if (!DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
-                    binding.progressLinear.max = total
+                    binding.progressLinear.max = totalCount
                     binding.progressLinear.setProgressCompat(0, false)
-                    binding.progress.text = "0 / $total"
+                    binding.progress.text = "0 / $totalCount"
                 }
 
-                val workerCount = minOf(GROUP_IP_PROBE_CONCURRENCY, total)
+                val workerCount = minOf(GROUP_IP_PROBE_CONCURRENCY, totalCount)
                 repeat(workerCount) {
                     workerJobs.add(launch(Dispatchers.IO) {
                         while (isActive && DataStore.isTestTokenActive(testToken)) {
@@ -1334,16 +1435,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     )
                                 }
                             }
-                            runCatching { probeAndPersistNodeIpInfo(item.id) }
+                            val outcome = runCatching { probeAndPersistNodeIpInfo(item.id) }
                                 .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                                .getOrNull()
+                            if (outcome != null) {
+                                successCount.incrementAndGet()
+                            }
                             if (!isActive || !DataStore.isTestTokenActive(testToken)) break
-                            ProfileManager.postUpdate(item.id, true)
                             val done = completedCount.incrementAndGet()
                             onMainDispatcher {
                                 if (!isAdded || !DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
-                                handle.notification?.updateNotification(done, total, done >= total, item.displayName())
+                                if (outcome != null) {
+                                    applyTopologyOutcomeOnMain(item.id, outcome)
+                                }
+                                handle.notification?.updateNotification(done, totalCount, done >= totalCount, item.displayName())
                                 if (!handle.isHidden) {
-                                    binding.progress.text = "$done / $total"
+                                    binding.progress.text = "$done / $totalCount"
                                     binding.progressLinear.setProgressCompat(done, true)
                                 }
                                 if (item.id == DataStore.selectedProxy) {
@@ -1354,6 +1461,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     })
                 }
                 synchronized(workerJobs) { workerJobs.toList() }.joinAll()
+                wasCompletedNormally = DataStore.isTestTokenActive(testToken)
             } finally {
                 withContext(Dispatchers.Main.immediate + NonCancellable) {
                     if (dialog.isShowing) {
@@ -1367,6 +1475,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                         activeTestHandle = null
                     }
                     refreshSurgeStatusHeader()
+                    if (wasCompletedNormally && isResumed && totalCount > 0) {
+                        snackbar(getString(R.string.group_topology_complete, successCount.get(), totalCount)).show()
+                    }
                 }
                 DataStore.releaseTestToken(testToken)
             }
@@ -2439,6 +2550,37 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (index >= 0) notifyItemChanged(index)
             }
 
+            /**
+             * Updates cached topology fields in-place on the adapter's live [ProxyEntity]
+             * reference and triggers an immediate item rebind so concurrent traffic ticks
+             * (`cbTrafficUpdate`) never overwrite the card with stale topology state.
+             */
+            fun updateTopologyResult(
+                profileId: Long,
+                entryIp: String,
+                entryProvider: String,
+                exitIp: String,
+                exitProvider: String,
+                updatedAt: Long,
+            ) {
+                val profile = configurationList[profileId] ?: return
+                profile.entryIp = entryIp
+                profile.entryProvider = entryProvider
+                profile.exitIp = exitIp
+                profile.exitProvider = exitProvider
+                profile.ipInfoUpdatedAt = updatedAt
+                val index = configurationIdList.indexOf(profileId)
+                if (index >= 0) {
+                    val holder = layoutManager.findViewByPosition(index)
+                        ?.let { configurationListView.getChildViewHolder(it) } as? ConfigurationHolder
+                    if (holder != null && holder.entity.id == profileId) {
+                        holder.bind(profile)
+                    } else {
+                        notifyItemChanged(index)
+                    }
+                }
+            }
+
             private fun getItem(profileId: Long): ProxyEntity {
                 var profile = configurationList[profileId]
                 if (profile == null) {
@@ -2567,18 +2709,20 @@ class ConfigurationFragment @JvmOverloads constructor(
                         undoManager.flush()
                     }
                     val oldProfile = configurationList[profile.id]
-                    configurationList[profile.id] = profile
-                    notifyItemChanged(index)
+                    // WHY: Preserve live rx/tx counters directly on the new entity before binding
+                    // instead of scheduling a second TrafficData callback that could re-bind a
+                    // recycled or not-yet-swapped holder.entity with stale fields.
                     if (noTraffic && oldProfile != null) {
-                        runOnDefaultDispatcher {
-                            onUpdated(
-                                TrafficData(
-                                    id = profile.id,
-                                    rx = oldProfile.rx,
-                                    tx = oldProfile.tx
-                                )
-                            )
-                        }
+                        profile.rx = oldProfile.rx
+                        profile.tx = oldProfile.tx
+                    }
+                    configurationList[profile.id] = profile
+                    val holder = layoutManager.findViewByPosition(index)
+                        ?.let { configurationListView.getChildViewHolder(it) } as? ConfigurationHolder
+                    if (holder != null && holder.entity.id == profile.id) {
+                        holder.bind(profile)
+                    } else {
+                        notifyItemChanged(index)
                     }
                 }
             }
@@ -2589,10 +2733,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (!isAdded) return@onMainDispatcher
                         val index = configurationIdList.indexOf(data.id)
                         if (index < 0) return@onMainDispatcher
+                        val latestEntity = configurationList[data.id]
+                        if (latestEntity != null) {
+                            latestEntity.rx = data.rx
+                            latestEntity.tx = data.tx
+                        }
                         val holder = layoutManager.findViewByPosition(index)
                             ?.let { configurationListView.getChildViewHolder(it) } as? ConfigurationHolder
                         if (holder != null && holder.entity.id == data.id) {
-                            holder.bind(holder.entity, data)
+                            holder.bind(latestEntity ?: holder.entity, data)
                         }
                     }
                 } catch (e: Exception) {
@@ -2803,7 +2952,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 profileAddress.text = address
                 (trafficText.parent as View).isGone = (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
 
-                val canProbeIp = !select && DataStore.showNodeIpOwner && pf.supportsCardIpProbe(proxyEntity)
+                val canProbeIp = !select && pf.supportsCardIpProbe(proxyEntity)
                 val ipInfoText = if (DataStore.showNodeIpOwner) {
                     pf.formatIpInfoSpannable(view.context, proxyEntity, hideAddress)
                 } else {

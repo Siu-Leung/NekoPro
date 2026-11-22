@@ -55,6 +55,7 @@ func NewDefaultFactory(
 		formatter: formatter,
 		platformFormatter: Formatter{
 			BaseTime:         formatter.BaseTime,
+			DisableColors:    true,
 			DisableLineBreak: true,
 		},
 		writer:         writer,
