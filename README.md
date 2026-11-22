@@ -29,10 +29,26 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc4`）
+`Neko-Pro-1.4.6`（测试分支预发布：`Neko-Pro-1.4.7-rc5`）
 
 - [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.6)
 - 核心 APK：`NekoBox-Neko-Pro-1.4.6-arm64-v8a.apk`
+
+### v1.4.7-rc5 测试版改动日志 (2026-11-22)
+
+- **订阅配置文件本地持久化管理（FlClash 风格查看/编辑）与多格式私有 DoH 识别升级**
+  - **新增订阅配置文件查看器与编辑器（`SubscriptionConfigStore` + `SubscriptionConfigActivity`）**：所有订阅拉取时默认优先协商 `FlClash` / `Clash Verge` / `clash-meta` 完整配置并将原始 YAML / JSON / Surge `.conf` 以 `0600` 权限持久化于应用私有 `noBackupFilesDir`；在订阅管理页每张订阅卡片（「配置」按钮与 `⋮` 菜单）、订阅设置页及主界面右上角 `⋮` 菜单均可一键打开原文，支持「定位 DNS 段」、「仅看 DNS 原文」、「提取私人 DNS」以及修改原文后「保存并解析节点」。
+  - **大幅增强订阅 DoH / 私有 DNS 识别范围**：兼容 Mihomo 直连后缀（`#DIRECT`、`#h3=true` 自动映射 `h3://`、`#ecs=...`、`#skip-cert-verify=false`）与 `doh://` / `+local://` 协议头，兼容 `proxy-server-nameserver` 附带 `system` / `dhcp://auto` 兜底项自动采纳，并新增 sing-box JSON `dns.servers`、Surge `.conf` `doh-server` 以及交互式注释/自定义字段加密 DNS 扫描。
+- **主界面右上角「截图隐私眼睛开关」与「私人 DNS 快捷管理」**
+  - **顶栏常驻眼睛图标（`action_toggle_privacy_mask`）**：将原本深藏在全局设置内的「隐藏地址（方便截图）」提至主界面右上角工具栏，单击即可实时切换节点域名及拓扑出入口 IP 脱敏并保留地区国旗与运营商信息。
+  - **主界面 `⋮` 菜单直达「私人 DNS 管理」与「查看/编辑订阅配置」**：无需层层进入分组设置，在主界面即可查看当前组生效的私人 DNS、开关「自动采用订阅节点 DNS」、手填多行 DoH/DoT/DoQ 或从订阅配置直接提取应用。
+- **修复内置仪表板提示未登录 / 无数据问题**
+  - **`VpnService` 系统代理排除本地回环（`localhost` / `127.0.0.1` / `::1`）**：防止开启追加 HTTP 代理后 WebView 将 `http://127.0.0.1:9090` 与 `ws://127.0.0.1:9090/{traffic,connections,logs}` 转发至 `mixed-in` 导致 WebSocket 升级失败；同时放行本地 `ws://` 子资源请求。
+  - **自动注入与修复 Yacd `localStorage` 密钥及未连接状态引导**：首次打开或存在历史残留无效后端项时自动写入当前 `ClashApiSecret` 并锁定本地控制器索引；未连接代理或端口未就绪时展示清晰的 Surge 状态引导卡片或自动重载内核。
+- **主界面底部实时速率校准、常驻显示与内置测速联动**
+  - **单调时钟采样 + Selector L3 流统计修复 + 直连分流速率同屏呈现**：`TrafficUpdater` 切换至 `SystemClock.elapsedRealtime()` 消除首帧清零与校时跳变；`TrafficLooper` 同时聚合 `proxy` 与 Selector 子出站 `RoutedFlow` 计数以及 `bypass` + `direct` 直连速率，解决规则分流下国内测速显示 `0 B/s` 的问题；取消列表滚动自动隐藏底部状态坞，并在运行节点/整组带宽测速时将实时 `MB/s (Mbps)` 同步投射至底部速率栏。
+- **修复 AnyTLS / UoT 远端 UDP DNS `UoT read: short buffer` 报错**
+  - 将 `sing-box` `UDPTransport` 默认接收缓冲区由 `2048` 提升至 `4096` 字节，并在 TCP 承载的 `*uot.Conn` 收到非标准/失步帧时立即重置复用流并自动回退标准 RFC 1035 DNS-over-TCP 重试。
 
 ### v1.4.7-rc4 测试版改动日志 (2026-11-21)
 

@@ -57,8 +57,7 @@
             app:fabAlignmentMode="end"
             app:fabCradleMargin="7dp"
             app:fabCradleRoundedCornerRadius="16dp"
-            app:hideOnScroll="true"
-            app:layout_scrollFlags="enterAlways|scroll">
+            app:hideOnScroll="false">
 
             <LinearLayout
                 android:layout_width="match_parent"

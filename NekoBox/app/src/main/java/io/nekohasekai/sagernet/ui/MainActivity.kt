@@ -423,6 +423,8 @@ class MainActivity : ThemedActivity(),
         binding.fab.changeState(state, previousState, animate)
         binding.stats.changeState(state)
         notifyConfigurationSurgeHeader()
+        (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? WebviewFragment)
+            ?.onProxyServiceStateChanged(state)
         if (state == BaseService.State.Connected && previousState != BaseService.State.Connected) {
             (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
                 ?.onActiveNodeConnectedRefreshIp()
@@ -435,7 +437,6 @@ class MainActivity : ThemedActivity(),
             if (binding.fab.isShown) {
                 anchorView = binding.fab
             }
-            // TODO
         }
     }
 
@@ -465,7 +466,14 @@ class MainActivity : ThemedActivity(),
     // may NOT called when app is in background
     // ONLY do UI update here, write DB in bg process
     override fun cbSpeedUpdate(stats: SpeedDisplayData) {
-        binding.stats.updateSpeed(stats.txRateProxy, stats.rxRateProxy)
+        binding.stats.updateSpeed(
+            txRateProxy = stats.txRateProxy,
+            rxRateProxy = stats.rxRateProxy,
+            txRateDirect = stats.txRateDirect,
+            rxRateDirect = stats.rxRateDirect,
+        )
+        (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
+            ?.onLiveSpeedSample(stats)
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {

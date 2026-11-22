@@ -146,4 +146,67 @@ class ClashDnsCandidatesTest {
         }
         assertTrue(ClashDnsCandidates.parse(aliasBomb).malformed)
     }
+
+    @Test
+    fun recognizesMihomoDirectFlagsSingBoxJsonAndSurgeDohProfiles() {
+        val mihomoFlags = profile("""
+            prefer-h3: false
+            proxy-server-nameserver:
+              - 'https://private-a.example/dns-query#DIRECT'
+              - 'https://private-b.example/dns-query#DIRECT&h3=true&ecs=114.114.114.0/24'
+              - system
+        """)
+        assertEquals(
+            listOf(
+                "https://private-a.example/dns-query",
+                "h3://private-b.example/dns-query",
+            ),
+            mihomoFlags.auto,
+        )
+
+        val singBoxJson = """
+            {
+              "dns": {
+                "servers": [
+                  { "type": "https", "tag": "dns-node", "server": "doh.private.example", "server_port": 8443, "path": "/dns-query/secret" },
+                  { "type": "https", "tag": "dns-remote", "server": "dns.google", "detour": "proxy" }
+                ]
+              },
+              "outbounds": [
+                { "type": "socks", "tag": "proxy", "server": "entry.example", "server_port": 1080 }
+              ]
+            }
+        """.trimIndent()
+        val parsedSingBox = ClashDnsCandidates.parse(singBoxJson)
+        assertTrue(parsedSingBox.hasDns)
+        assertEquals(
+            listOf("https://doh.private.example:8443/dns-query/secret"),
+            parsedSingBox.rows.mapNotNull { it.selectable },
+        )
+
+        val surgeConf = """
+            [General]
+            doh-server = https://surge-doh.example/dns-query
+            dns-server = system, 223.5.5.5
+            [Proxy]
+            NodeA = socks5, entry.example, 1080
+        """.trimIndent()
+        val parsedSurge = ClashDnsCandidates.parse(surgeConf)
+        assertTrue(parsedSurge.hasDns)
+        assertEquals(
+            listOf("https://surge-doh.example/dns-query", "223.5.5.5"),
+            parsedSurge.rows.mapNotNull { it.selectable },
+        )
+
+        val commentedRaw = """
+            # Provider private DoH: https://hidden-doh.example:9443/dns-query/uuid-1
+            ss://YWVzLTI1Ni1nY206cGFzcw==@entry.example:8388#HK
+        """.trimIndent()
+        val interactive = ClashDnsCandidates.parseOrScanInteractive(commentedRaw)
+        assertTrue(interactive.hasDns)
+        assertEquals(
+            listOf("https://hidden-doh.example:9443/dns-query/uuid-1"),
+            interactive.rows.mapNotNull { it.selectable },
+        )
+    }
 }

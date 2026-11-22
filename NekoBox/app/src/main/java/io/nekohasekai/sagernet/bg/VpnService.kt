@@ -192,7 +192,16 @@ class VpnService : BaseVpnService(),
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && DataStore.appendHttpProxy) {
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(LOCALHOST, DataStore.mixedPort))
+            // WHY: Without loopback exclusions, Android WebView routes `http://127.0.0.1:9090` and
+            // `ws://127.0.0.1:9090/{traffic,connections,logs}` through the HTTP forward proxy (`mixed-in`),
+            // breaking WebSocket upgrades and causing Yacd dashboard authentication/connection failures.
+            builder.setHttpProxy(
+                ProxyInfo.buildDirectProxy(
+                    LOCALHOST,
+                    DataStore.mixedPort,
+                    listOf("localhost", "127.0.0.1", "::1"),
+                )
+            )
         }
 
         metered = DataStore.meteredNetwork

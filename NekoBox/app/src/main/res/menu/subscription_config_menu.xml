@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_fetch_remote_config"
+        android:icon="@drawable/ic_baseline_refresh_24"
+        android:title="@string/subscription_config_fetch_remote"
+        app:showAsAction="ifRoom" />
+    <item
+        android:id="@+id/action_apply"
+        android:icon="@drawable/ic_action_done"
+        android:title="@string/subscription_config_save_apply"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_switch_fetch_ua"
+        android:title="@string/group_dns_candidates_pick_client"
+        app:showAsAction="never" />
+</menu>

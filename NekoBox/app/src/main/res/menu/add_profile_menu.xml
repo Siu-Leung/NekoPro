@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    xmlns:app="http://schemas.android.com/apk/res/auto">
     <item
         android:id="@+id/action_search"
         android:title="@android:string/search_go"
         app:actionViewClass="androidx.appcompat.widget.SearchView"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_toggle_privacy_mask"
+        android:icon="@drawable/ic_baseline_visibility_24"
+        android:title="@string/hide_node_address"
         app:showAsAction="always" />
 
     <item
@@ -98,6 +104,12 @@
             <item
                 android:id="@+id/action_update_subscription"
                 android:title="@string/update_current_subscription" />
+            <item
+                android:id="@+id/action_group_private_dns"
+                android:title="@string/action_group_private_dns" />
+            <item
+                android:id="@+id/action_edit_subscription_config"
+                android:title="@string/subscription_config_view_edit" />
             <item
                 android:id="@+id/action_clear_traffic_statistics"
                 android:title="@string/clear_traffic_statistics" />

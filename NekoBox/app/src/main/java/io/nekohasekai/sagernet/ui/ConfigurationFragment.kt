@@ -271,6 +271,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         if (!select) {
             toolbar.inflateMenu(R.menu.add_profile_menu)
             toolbar.setOnMenuItemClickListener(this)
+            updatePrivacyMaskMenuItem()
         } else {
             toolbar.setTitle(titleRes)
             toolbar.setNavigationIcon(R.drawable.ic_navigation_close)
@@ -499,9 +500,47 @@ class ConfigurationFragment @JvmOverloads constructor(
             lastIpDisplayOptions = displayOptions
             adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
         }
+        updatePrivacyMaskMenuItem()
         refreshSurgeStatusHeader()
         activeTestHandle?.restoreIfHidden()
     }
+
+    /**
+     * Synchronizes the top-right toolbar Eye / Eye-Off icon with [DataStore.hideNodeAddress].
+     */
+    private fun updatePrivacyMaskMenuItem() {
+        if (select || !isAdded) return
+        val item = toolbar.menu?.findItem(R.id.action_toggle_privacy_mask) ?: return
+        val isHidden = DataStore.hideNodeAddress
+        item.setIcon(
+            if (isHidden) R.drawable.ic_baseline_visibility_off_24
+            else R.drawable.ic_baseline_visibility_24
+        )
+        item.setTitle(
+            if (isHidden) R.string.privacy_mask_restore_addresses
+            else R.string.hide_node_address
+        )
+    }
+
+    private fun toggleScreenshotPrivacyMask() {
+        val nextHidden = !DataStore.hideNodeAddress
+        DataStore.hideNodeAddress = nextHidden
+        lastIpDisplayOptions = nextHidden to DataStore.showNodeIpOwner
+        updatePrivacyMaskMenuItem()
+        if (::adapter.isInitialized) {
+            adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
+        }
+        refreshSurgeStatusHeader()
+        snackbar(
+            if (nextHidden) R.string.privacy_mask_enabled_toast
+            else R.string.privacy_mask_disabled_toast
+        ).show()
+    }
+
+    /**
+     * Hook invoked on live foreground speed ticks from [MainActivity.cbSpeedUpdate].
+     */
+    fun onLiveSpeedSample(@Suppress("UNUSED_PARAMETER") stats: io.nekohasekai.sagernet.aidl.SpeedDisplayData) = Unit
 
     override fun onKeyDown(ketCode: Int, event: KeyEvent): Boolean {
         val fragment = getCurrentGroupFragment()
@@ -1678,6 +1717,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                     runOnMainDispatcher {
                         if (!isAdded || !DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
                         val detail = formatSpeedTestSnapshot(sample)
+                        (activity as? MainActivity)?.binding?.stats?.updateLiveSpeedTest(
+                            statusLabel = detail,
+                            downloadBitsPerSecond = sample.downloadBitsPerSecond,
+                            uploadBitsPerSecond = sample.uploadBitsPerSecond,
+                        )
                         handle.notification?.updateNotification(index + 1, total, false, detail)
                         if (!handle.isHidden && isAdded) {
                             val completed = completedSpeedTestCount(index, total, sample.done)
@@ -1708,6 +1752,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             } finally {
                 withContext(Dispatchers.Main.immediate + NonCancellable) {
+                    (activity as? MainActivity)?.binding?.stats?.clearLiveSpeedTest()
                     if (dialog.isShowing) {
                         runCatching { dialog.dismiss() }
                     }
@@ -1730,6 +1775,53 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 requestNodeIpInfo(refreshed.id, isSilent = true)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun openSubscriptionConfigFromMainMenu() {
+        runOnDefaultDispatcher {
+            val currentGroup = DataStore.currentGroup()
+            if (currentGroup.type == GroupType.SUBSCRIPTION) {
+                onMainDispatcher {
+                    if (!isAdded) return@onMainDispatcher
+                    startActivity(
+                        Intent(requireContext(), SubscriptionConfigActivity::class.java).apply {
+                            putExtra(SubscriptionConfigActivity.EXTRA_GROUP_ID, currentGroup.id)
+                        }
+                    )
+                }
+                return@runOnDefaultDispatcher
+            }
+            val subscriptionGroups = SagerDatabase.groupDao.allGroups()
+                .filter { it.type == GroupType.SUBSCRIPTION }
+            onMainDispatcher {
+                if (!isAdded) return@onMainDispatcher
+                when {
+                    subscriptionGroups.isEmpty() -> snackbar(R.string.group_not_subscription).show()
+                    subscriptionGroups.size == 1 -> {
+                        startActivity(
+                            Intent(requireContext(), SubscriptionConfigActivity::class.java).apply {
+                                putExtra(SubscriptionConfigActivity.EXTRA_GROUP_ID, subscriptionGroups.single().id)
+                            }
+                        )
+                    }
+                    else -> {
+                        val names = subscriptionGroups.map { it.displayName() }.toTypedArray()
+                        MaterialAlertDialogBuilder(requireContext())
+                            .setTitle(R.string.subscription_config_view_edit)
+                            .setItems(names) { _, which ->
+                                val chosen = subscriptionGroups.getOrNull(which) ?: return@setItems
+                                startActivity(
+                                    Intent(requireContext(), SubscriptionConfigActivity::class.java).apply {
+                                        putExtra(SubscriptionConfigActivity.EXTRA_GROUP_ID, chosen.id)
+                                    }
+                                )
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
                     }
                 }
             }

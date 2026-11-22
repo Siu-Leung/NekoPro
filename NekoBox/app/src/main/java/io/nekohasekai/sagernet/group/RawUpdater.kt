@@ -122,6 +122,9 @@ object RawUpdater : GroupUpdater() {
      * @param userAgents Ordered client identifiers; the first usable answer wins.
      * @param forceProxy Locked proxy requirement across all UA attempts so mid-loop VPN drops fail closed.
      * @param customUserAgent Optional group custom UA tried first when non-blank.
+     * @param groupId Optional group ID used to cache complete downloaded profiles locally.
+     * @param preferCached When `true`, returns selectable DNS candidates from the locally cached
+     * subscription file first before performing any network request.
      * @throws Exception if every HTTP attempt failed with a network/TLS/HTTP error.
      */
     internal suspend fun inspectSubscriptionDns(
@@ -129,10 +132,24 @@ object RawUpdater : GroupUpdater() {
         userAgents: List<String>,
         forceProxy: Boolean = DataStore.serviceState.connected,
         customUserAgent: String? = null,
+        groupId: Long = 0L,
+        preferCached: Boolean = false,
     ): ClashDnsCandidates.Profile {
         currentCoroutineContext().ensureActive()
+        if (preferCached && groupId > 0L) {
+            SubscriptionConfigStore.read(groupId)?.let { cached ->
+                val parsedCached = ClashDnsCandidates.parseOrScanInteractive(cached.content)
+                if (parsedCached.hasDns && parsedCached.rows.any { it.selectable != null }) {
+                    return parsedCached
+                }
+            }
+        }
         if (link.startsWith("content://")) {
-            return ClashDnsCandidates.parse(readSubscriptionFile(link))
+            val content = readSubscriptionFile(link)
+            if (groupId > 0L) {
+                runCatching { SubscriptionConfigStore.save(groupId, content, "content-uri") }
+            }
+            return ClashDnsCandidates.parseOrScanInteractive(content)
         }
         require(link.startsWith("http://", true) || link.startsWith("https://", true))
         val effectiveUserAgents = buildList {
@@ -143,9 +160,12 @@ object RawUpdater : GroupUpdater() {
         var lastError: Exception? = null
         for (userAgent in effectiveUserAgents) {
             currentCoroutineContext().ensureActive()
+            var downloadedBody: String? = null
             val profile = try {
                 withSubscriptionResponse(link, userAgent, forceProxy) { response ->
-                    ClashDnsCandidates.parse(readBoundedResponseText(response))
+                    val body = readBoundedResponseText(response)
+                    downloadedBody = body
+                    ClashDnsCandidates.parseOrScanInteractive(body)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -153,8 +173,15 @@ object RawUpdater : GroupUpdater() {
                 lastError = e
                 continue
             }
-            if (profile.hasDns && profile.rows.any { it.selectable != null }) return profile
-            if (lastProfile == null || (profile.hasDns && !lastProfile.hasDns)) lastProfile = profile
+            if (profile.hasDns && profile.rows.any { it.selectable != null }) {
+                if (groupId > 0L && !downloadedBody.isNullOrBlank()) {
+                    runCatching { SubscriptionConfigStore.save(groupId, downloadedBody!!, userAgent) }
+                }
+                return profile
+            }
+            if (lastProfile == null || (profile.hasDns && !lastProfile.hasDns)) {
+                lastProfile = profile
+            }
         }
         if (lastProfile == null && lastError != null) {
             throw lastError
@@ -164,19 +191,108 @@ object RawUpdater : GroupUpdater() {
         )
     }
 
+    /**
+     * Downloads the raw subscription text using modern Clash/FlClash User-Agents first so
+     * providers return the full YAML configuration (including `dns:` and protocol extensions).
+     *
+     * @return Pair of `(rawConfigText, winningUserAgent)`.
+     */
+    internal suspend fun fetchSubscriptionConfigText(
+        link: String,
+        userAgents: List<String> = DNS_CANDIDATE_USER_AGENTS,
+        forceProxy: Boolean = DataStore.serviceState.connected,
+        customUserAgent: String? = null,
+    ): Pair<String, String> {
+        currentCoroutineContext().ensureActive()
+        if (link.startsWith("content://")) {
+            return readSubscriptionFile(link) to "content-uri"
+        }
+        require(link.startsWith("http://", true) || link.startsWith("https://", true))
+        val effectiveUserAgents = buildList {
+            customUserAgent?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+            addAll(userAgents.ifEmpty { DNS_CANDIDATE_USER_AGENTS })
+            add(USER_AGENT)
+            add("v2rayN/7.8.2")
+            add("sing-box/1.14.0")
+        }.distinct()
+
+        var fallbackBody: Pair<String, String>? = null
+        var lastError: Exception? = null
+        for (userAgent in effectiveUserAgents) {
+            currentCoroutineContext().ensureActive()
+            try {
+                val candidateBody = withSubscriptionResponse(link, userAgent, forceProxy) { response ->
+                    readBoundedResponseText(response)
+                }
+                if (candidateBody.isBlank() || isLikelyHtmlDocument(candidateBody)) continue
+                val dnsProfile = ClashDnsCandidates.parseOrScanInteractive(candidateBody)
+                if (dnsProfile.hasDns) {
+                    return candidateBody to userAgent
+                }
+                if (fallbackBody == null) {
+                    val hasNodes = runCatching { !parseSubscription(candidateBody).isNullOrEmpty() }.getOrDefault(false)
+                    if (hasNodes) fallbackBody = candidateBody to userAgent
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        fallbackBody?.let { return it }
+        if (lastError != null) throw lastError
+        error(app.getString(R.string.group_dns_candidates_failed))
+    }
+
+    /**
+     * Parses a locally edited subscription configuration file, persists it to
+     * [SubscriptionConfigStore], and atomically updates the group's nodes and adopted DNS.
+     *
+     * @return Number of parsed nodes committed into [proxyGroup].
+     */
+    suspend fun applyEditedSubscriptionConfig(
+        proxyGroup: ProxyGroup,
+        editedText: String,
+        byUser: Boolean = true,
+    ): Int {
+        currentCoroutineContext().ensureActive()
+        val subscription = proxyGroup.subscription
+            ?: SubscriptionBean().apply { initializeDefaultValues() }.also { proxyGroup.subscription = it }
+        val parsedProxies = parseSubscription(editedText).orEmpty()
+        if (parsedProxies.isEmpty()) {
+            error(app.getString(R.string.no_proxies_found_in_subscription))
+        }
+        val adoptedNodeDnsCandidate = if (subscription.autoAdoptNodeDns == true && proxyGroup.manualNodeDns() == null) {
+            extractClashProxyServerNameservers(editedText)
+        } else {
+            emptyList()
+        }
+        if (proxyGroup.id > 0L) {
+            SubscriptionConfigStore.save(proxyGroup.id, editedText, "local-edit")
+        }
+        return commitSubscriptionSnapshot(
+            proxyGroup = proxyGroup,
+            subscription = subscription,
+            initialProxies = parsedProxies,
+            adoptedNodeDnsCandidate = adoptedNodeDnsCandidate,
+            userInterface = GroupManager.userInterface,
+            byUser = byUser,
+        )
+    }
+
     override suspend fun doUpdate(
         proxyGroup: ProxyGroup,
         subscription: SubscriptionBean,
         userInterface: GroupManager.Interface?,
         byUser: Boolean
     ) {
-
         val link = subscription.link.orEmpty()
-        // An explicit group DNS is sufficient; a nodes-only subscription can still refresh.
         val requireAdoptedDns = proxyGroup.requiresNodeDnsAdoption()
-        val savedManualDns = proxyGroup.manualNodeDns()
         var adoptedNodeDnsCandidate: List<String> = emptyList()
         var proxies: List<AbstractBean>
+        var downloadedRawText: String? = null
+        var winningUserAgent = ""
+
         if (link.startsWith("content://")) {
             val contentText = try {
                 readSubscriptionFile(link)
@@ -197,17 +313,17 @@ object RawUpdater : GroupUpdater() {
                 adoptedNodeDnsCandidate = extractClashProxyServerNameservers(contentText)
                 if (adoptedNodeDnsCandidate.isEmpty()) error(app.getString(R.string.group_dns_candidates_auto_missing))
             }
+            downloadedRawText = contentText
+            winningUserAgent = "content-uri"
         } else {
-            // Align Clash UA fallback order with ClashDnsCandidates (FlClash -> Clash Verge -> clash-meta)
-            // so providers that gate the DNS section or AnyTLS certificate pins behind modern Clash clients succeed.
+            // WHY: Always prioritize FlClash / Clash Verge / clash-meta User-Agents ahead of bare
+            // `NekoPro/Android/...` when no custom UA is configured. Otherwise commercial panels
+            // fall back to stripped Base64 node links without `dns:` or Clash protocol metadata.
             val candidateUserAgents = buildList {
                 subscription.customUserAgent?.takeIf { it.isNotBlank() }?.let { add(it) }
-                if (requireAdoptedDns || savedManualDns != null) {
-                    addAll(DNS_CANDIDATE_USER_AGENTS)
-                }
+                addAll(DNS_CANDIDATE_USER_AGENTS)
                 if (!requireAdoptedDns) {
                     add(USER_AGENT)
-                    addAll(DNS_CANDIDATE_USER_AGENTS)
                     add("v2rayN/7.8.2")
                     add("sing-box/1.14.0")
                 }
@@ -228,8 +344,11 @@ object RawUpdater : GroupUpdater() {
                         val parsed = parseSubscription(responseText).orEmpty()
                         if (parsed.isEmpty()) return@withSubscriptionResponse false
 
-                        val candidateDns = if (requireAdoptedDns) extractClashProxyServerNameservers(responseText)
-                        else emptyList()
+                        val candidateDns = if (requireAdoptedDns) {
+                            extractClashProxyServerNameservers(responseText)
+                        } else {
+                            extractClashProxyServerNameservers(responseText)
+                        }
                         if (requireAdoptedDns && candidateDns.isEmpty()) {
                             validNodesWithoutDns = true
                             return@withSubscriptionResponse false
@@ -240,15 +359,15 @@ object RawUpdater : GroupUpdater() {
                             lastDisposition = Util.getStringBox(response.getHeader("content-disposition"))
                         }
                         proxies = parsed
-                        adoptedNodeDnsCandidate = candidateDns
+                        adoptedNodeDnsCandidate = if (subscription.autoAdoptNodeDns == true) candidateDns else emptyList()
+                        downloadedRawText = responseText
+                        winningUserAgent = candidate
                         true
                     }
                     if (accepted) break
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
-                    // Network, SubscriptionFoundException, and parse exceptions must not leak the URL
-                    // or abort remaining candidate User-Agents.
                     Logs.d("Subscription response could not be downloaded or parsed")
                 }
             }
@@ -260,7 +379,6 @@ object RawUpdater : GroupUpdater() {
 
             subscription.subscriptionUserinfo = lastUserinfo
 
-            // 修改默认名字
             if (proxyGroup.name?.startsWith("Subscription #") == true && lastDisposition.isNotBlank()) {
                 val remoteName = Util.decodeFilename(lastDisposition)
                 if (remoteName.isNotBlank()) {
@@ -269,8 +387,33 @@ object RawUpdater : GroupUpdater() {
             }
         }
 
+        if (proxyGroup.id > 0L && !downloadedRawText.isNullOrEmpty()) {
+            runCatching {
+                SubscriptionConfigStore.save(proxyGroup.id, downloadedRawText!!, winningUserAgent)
+            }.onFailure { Logs.w(it) }
+        }
+
+        commitSubscriptionSnapshot(
+            proxyGroup = proxyGroup,
+            subscription = subscription,
+            initialProxies = proxies,
+            adoptedNodeDnsCandidate = adoptedNodeDnsCandidate,
+            userInterface = userInterface,
+            byUser = byUser,
+        )
+    }
+
+    private suspend fun commitSubscriptionSnapshot(
+        proxyGroup: ProxyGroup,
+        subscription: SubscriptionBean,
+        initialProxies: List<AbstractBean>,
+        adoptedNodeDnsCandidate: List<String>,
+        userInterface: GroupManager.Interface?,
+        byUser: Boolean,
+    ): Int {
+        val savedManualDns = proxyGroup.manualNodeDns()
         val proxiesMap = LinkedHashMap<String, AbstractBean>()
-        for (proxy in proxies) {
+        for (proxy in initialProxies) {
             var index = 0
             var name = proxy.displayName()
             while (proxiesMap.containsKey(name)) {
@@ -281,7 +424,7 @@ object RawUpdater : GroupUpdater() {
             }
             proxiesMap[proxy.displayName()] = proxy
         }
-        proxies = proxiesMap.values.toList()
+        var proxies = proxiesMap.values.toList()
 
         // A group resolver must see the original node hostname, not a public DNS result.
         if (subscription.forceResolve == true && savedManualDns == null && adoptedNodeDnsCandidate.isEmpty()) {
@@ -315,11 +458,7 @@ object RawUpdater : GroupUpdater() {
         }
 
         Logs.d("New profiles: ${proxies.size}")
-
-        val nameMap = proxies.associateBy { bean ->
-            bean.displayName()
-        }
-
+        val nameMap = proxies.associateBy { bean -> bean.displayName() }
         Logs.d("Unique profiles: ${nameMap.size}")
 
         val toDelete = ArrayList<ProxyEntity>()
@@ -333,9 +472,6 @@ object RawUpdater : GroupUpdater() {
             }
         }
 
-        Logs.d("toDelete profiles: ${toDelete.size}")
-        Logs.d("toReplace profiles: ${toReplace.size}")
-
         val toUpdate = ArrayList<ProxyEntity>()
         val toAdd = ArrayList<ProxyEntity>()
         val added = mutableListOf<String>()
@@ -348,7 +484,6 @@ object RawUpdater : GroupUpdater() {
             if (toReplace.contains(name)) {
                 val entity = toReplace[name]!!
                 val existsBean = entity.requireBean()
-                // 更新订阅，保留自定义覆写设置
                 bean.customOutboundJson = existsBean.customOutboundJson
                 bean.customConfigJson = existsBean.customConfigJson
                 when {
@@ -368,32 +503,24 @@ object RawUpdater : GroupUpdater() {
                         }
                         toUpdate.add(entity)
                         updated[entity.displayName()] = name
-
-                        Logs.d("Updated profile: $name")
                     }
-
                     entity.userOrder != userOrder -> {
                         entity.userOrder = userOrder
                         entity.putBean(bean)
                         toUpdate.add(entity)
-
-                        Logs.d("Reordered profile: $name")
-                    }
-
-                    else -> {
-                        Logs.d("Ignored profile: $name")
                     }
                 }
             } else {
                 changed++
                 toAdd.add(
                     ProxyEntity(
-                        groupId = proxyGroup.id, userOrder = userOrder
+                        groupId = proxyGroup.id,
+                        userOrder = userOrder,
                     ).apply {
                         putBean(bean)
-                    })
+                    }
+                )
                 added.add(name)
-                Logs.d("Inserted profile: $name")
             }
             userOrder++
         }
@@ -401,30 +528,18 @@ object RawUpdater : GroupUpdater() {
         SagerDatabase.instance.withTransaction {
             if (toAdd.isNotEmpty()) {
                 SagerDatabase.proxyDao.insert(toAdd)
-                Logs.d("Inserted profiles: ${toAdd.size}")
             }
-
-            SagerDatabase.proxyDao.updateProxy(toUpdate).also {
-                Logs.d("Updated profiles: $it")
-            }
-
-            SagerDatabase.proxyDao.deleteProxy(toDelete).also {
-                Logs.d("Deleted profiles: $it")
-            }
+            SagerDatabase.proxyDao.updateProxy(toUpdate)
+            SagerDatabase.proxyDao.deleteProxy(toDelete)
 
             val currentSelected = DataStore.selectedProxy
             if (currentSelected != 0L && toDelete.any { it.id == currentSelected }) {
                 DataStore.selectedProxy = 0L
             }
 
-            val existCount = SagerDatabase.proxyDao.countByGroup(proxyGroup.id).toInt()
-
-            if (existCount != proxies.size) {
-                Logs.e("Exist profiles: $existCount, new profiles: ${proxies.size}")
+            if (adoptedNodeDnsCandidate.isNotEmpty()) {
+                subscription.adoptedNodeDns = adoptedNodeDnsCandidate.joinToString("\n")
             }
-
-            // The source DNS and node list are one snapshot; a failed refresh changes neither.
-            if (adoptedNodeDnsCandidate.isNotEmpty()) subscription.adoptedNodeDns = adoptedNodeDnsCandidate.joinToString("\n")
             subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
             SagerDatabase.groupDao.updateGroup(proxyGroup)
         }
@@ -432,6 +547,7 @@ object RawUpdater : GroupUpdater() {
         userInterface?.onUpdateSuccess(
             proxyGroup, changed, added, updated, deleted, duplicate, byUser
         )
+        return proxies.size
     }
 
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? =

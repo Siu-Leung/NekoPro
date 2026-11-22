@@ -52,10 +52,21 @@ class DashboardUrlTest {
     }
 
     @Test
-    fun secretSyncScriptChecksLocalBaseUrl() {
+    fun secretSyncScriptChecksLocalBaseUrlAndSeedsInitialConfig() {
         val script = buildLocalSecretSyncScript("test-secret")
         assertTrue(script.contains("http://127.0.0.1:9090"))
         assertTrue(script.contains("http://localhost:9090"))
+        assertTrue(script.contains("selectedClashAPIConfigIndex: 0"))
         assertFalse(script.contains("backends[0].secret"))
+    }
+
+    @Test
+    fun subresourceOriginCheckPermitsLoopbackHttpAndWebSocketOnly() {
+        assertTrue(isSameLocalDashboardSubresourceOrigin("http://127.0.0.1:9090/configs"))
+        assertTrue(isSameLocalDashboardSubresourceOrigin("ws://127.0.0.1:9090/traffic?token=abc"))
+        assertTrue(isSameLocalDashboardSubresourceOrigin("ws://localhost:9090/connections?token=abc"))
+        assertFalse(isSameLocalDashboardSubresourceOrigin("wss://127.0.0.1:9090/traffic"))
+        assertFalse(isSameLocalDashboardSubresourceOrigin("ws://attacker.example:9090/traffic"))
+        assertFalse(isSameLocalDashboardSubresourceOrigin("ws://127.0.0.1:8080/traffic"))
     }
 }

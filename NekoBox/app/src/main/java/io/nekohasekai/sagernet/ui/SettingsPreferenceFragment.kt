@@ -206,8 +206,13 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         val acquireWakeLock = findPreference<SwitchPreference>(Key.ACQUIRE_WAKE_LOCK)!!
         val enableClashAPI = findPreference<SwitchPreference>(Key.ENABLE_CLASH_API)!!
         enableClashAPI.setOnPreferenceChangeListener { _, newValue ->
-            (activity as MainActivity?)?.refreshNavMenu(newValue as Boolean)
-            needReload()
+            val enabled = newValue as Boolean
+            (activity as MainActivity?)?.refreshNavMenu(enabled)
+            if (DataStore.serviceState.connected) {
+                SagerNet.reloadService()
+            } else {
+                needReload()
+            }
             true
         }
 
