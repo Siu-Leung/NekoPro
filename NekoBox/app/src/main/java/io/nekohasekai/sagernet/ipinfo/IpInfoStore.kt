@@ -548,7 +548,7 @@ object IpInfoStore {
                     }
                 )
             }
-            val configJson = io.nekohasekai.sagernet.fmt.gson.gson.toJson(options.asMap())
+            val configJson = moe.matsuri.nb4a.utils.JavaUtil.gson.toJson(options.asMap())
             var testBox: libcore.BoxInstance? = null
             try {
                 testBox = libcore.Libcore.newTestSingBoxInstance(

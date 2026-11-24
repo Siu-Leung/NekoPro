@@ -68,41 +68,43 @@ class TrafficLooper(
     var selectorNowId = -114514L
     var selectorNowFakeTag = ""
 
-    fun selectMain(id: Long) = synchronized(stateLock) {
-        Logs.d("select traffic count $TAG_PROXY to $id, old id is $selectorNowId")
-        val oldData = idMap[selectorNowId]
-        val newData = idMap[id] ?: return
-        oldData?.apply {
-            tag = selectorNowFakeTag
-            secondaryTags = emptyList()
-            ignore = true
-            if (DataStore.profileTrafficStatistics) {
-                data.proxy?.config?.trafficMap?.get(tag)?.firstOrNull()?.let {
-                    it.rx = rx
-                    it.tx = tx
-                    val profileId = it.id
-                    val finalTx = tx
-                    val finalRx = rx
-                    runOnDefaultDispatcher {
-                        ProfileManager.updateTraffic(profileId, finalTx, finalRx)
+    fun selectMain(id: Long) {
+        synchronized(stateLock) {
+            Logs.d("select traffic count $TAG_PROXY to $id, old id is $selectorNowId")
+            val oldData = idMap[selectorNowId]
+            val newData = idMap[id] ?: return
+            oldData?.apply {
+                tag = selectorNowFakeTag
+                secondaryTags = emptyList()
+                ignore = true
+                if (DataStore.profileTrafficStatistics) {
+                    data.proxy?.config?.trafficMap?.get(tag)?.firstOrNull()?.let {
+                        it.rx = rx
+                        it.tx = tx
+                        val profileId = it.id
+                        val finalTx = tx
+                        val finalRx = rx
+                        runOnDefaultDispatcher {
+                            ProfileManager.updateTraffic(profileId, finalTx, finalRx)
+                        }
                     }
                 }
             }
-        }
-        selectorNowFakeTag = newData.tag
-        selectorNowId = id
-        newData.apply {
-            tag = TAG_PROXY
-            // WHY: In sing-box 1.14, TCP/UDP `RoutedConnection` counts against the outer Selector
-            // tag (`proxy`), whereas L3 `RoutedFlow` counts against the resolved leaf outbound tag
-            // (`chain[last]`). Summing both non-overlapping counters guarantees exact speed in Selector mode.
-            secondaryTags = if (selectorNowFakeTag.isNotEmpty() && selectorNowFakeTag != TAG_PROXY) {
-                listOf(selectorNowFakeTag)
-            } else {
-                emptyList()
+            selectorNowFakeTag = newData.tag
+            selectorNowId = id
+            newData.apply {
+                tag = TAG_PROXY
+                // WHY: In sing-box 1.14, TCP/UDP `RoutedConnection` counts against the outer Selector
+                // tag (`proxy`), whereas L3 `RoutedFlow` counts against the resolved leaf outbound tag
+                // (`chain[last]`). Summing both non-overlapping counters guarantees exact speed in Selector mode.
+                secondaryTags = if (selectorNowFakeTag.isNotEmpty() && selectorNowFakeTag != TAG_PROXY) {
+                    listOf(selectorNowFakeTag)
+                } else {
+                    emptyList()
+                }
+                lastUpdate = SystemClock.elapsedRealtime()
+                ignore = false
             }
-            lastUpdate = SystemClock.elapsedRealtime()
-            ignore = false
         }
     }
 

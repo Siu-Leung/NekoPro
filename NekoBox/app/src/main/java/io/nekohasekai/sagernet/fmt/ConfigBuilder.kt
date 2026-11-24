@@ -913,8 +913,14 @@ fun buildConfig(
             }
         }
 
-        val hasProxyTarget = outbounds.any { it.tag == TAG_PROXY || it._hack_config_map["tag"] == TAG_PROXY } ||
-            (endpoints?.any { it._hack_config_map["tag"] == TAG_PROXY } == true)
+        val hasProxyTarget = outbounds.any {
+            (it as? Outbound)?.tag == TAG_PROXY ||
+                it._hack_config_map["tag"] == TAG_PROXY ||
+                (it as? CustomSingBoxOption)?.basicMap?.get("tag") == TAG_PROXY
+        } || (endpoints?.any {
+            it._hack_config_map["tag"] == TAG_PROXY ||
+                (it as? CustomSingBoxOption)?.basicMap?.get("tag") == TAG_PROXY
+        } == true)
         val remoteDnsAddr = remoteDns.firstOrNull()
         if (!forTest && remoteDnsAddr == null) {
             throw Exception("No remote DNS, check your settings!")

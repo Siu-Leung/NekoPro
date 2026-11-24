@@ -11,6 +11,8 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.gson.GsonConverters
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class],
@@ -49,7 +51,7 @@ abstract class SagerDatabase : RoomDatabase() {
 
         val instance by lazy {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
-            val ioExecutor = kotlinx.coroutines.Dispatchers.IO.let { kotlinx.coroutines.asExecutor(it) }
+            val ioExecutor = Dispatchers.IO.asExecutor()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .setJournalMode(JournalMode.TRUNCATE)
