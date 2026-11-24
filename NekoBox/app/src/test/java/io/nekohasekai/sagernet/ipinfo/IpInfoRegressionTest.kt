@@ -138,7 +138,7 @@ class IpInfoRegressionTest {
             AddressRedactor.scrub("abcde:2001:db8::1"),
         )
         assertEquals(
-            "DoH ••• failed on •••",
+            "DoH https+local://••• failed on •••",
             AddressRedactor.scrub("DoH https+local://dns.secret-sub.xyz/token123 failed on edge1.transit-provider.net:8443"),
         )
         assertEquals(
