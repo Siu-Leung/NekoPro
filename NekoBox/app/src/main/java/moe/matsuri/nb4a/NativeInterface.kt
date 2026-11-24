@@ -24,7 +24,10 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
     //  libbox interface
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        DataStore.vpnService?.protect(fd)
+        val vpn = DataStore.vpnService ?: return
+        if (!vpn.protect(fd)) {
+            error("VpnService.protect failed for fd $fd")
+        }
     }
 
     override fun openTun(singTunOptionsJson: String, tunPlatformOptionsJson: String): Long {
@@ -94,6 +97,10 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
                 val id = proxy.config.profileTagMap
                     .filterValues { it == tag }.keys.firstOrNull() ?: -1
                 val ent = SagerDatabase.proxyDao.getById(id) ?: return@runOnDefaultDispatcher
+                // WHY: Persist active profile directly in `:bg` so SwitchActivity and Clash API
+                // outbound switches stay consistent even when MainActivity is unbound.
+                DataStore.selectedProxy = id
+                DataStore.currentProfile = id
                 // traffic & title
                 proxy.apply {
                     looper?.selectMain(id)

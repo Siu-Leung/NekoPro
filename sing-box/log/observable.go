@@ -140,10 +140,16 @@ func (f *defaultFactory) NewLogger(tag string) ContextLogger {
 }
 
 func (f *defaultFactory) Subscribe() (subscription observable.Subscription[Entry], done <-chan struct{}, err error) {
+	if f.observer == nil {
+		return nil, nil, os.ErrInvalid
+	}
 	return f.observer.Subscribe()
 }
 
 func (f *defaultFactory) UnSubscribe(sub observable.Subscription[Entry]) {
+	if f.observer == nil {
+		return
+	}
 	f.observer.UnSubscribe(sub)
 }
 
@@ -162,7 +168,7 @@ func (f *defaultFactory) output(ctx context.Context, level Level, tag string, me
 		f.subscriber.Emit(Entry{level, f.formatter.FormatSimple(ctx, tag, message)})
 	}
 	platformWriters := f.loadPlatformWriters()
-	if len(platformWriters) > 0 {
+	if level <= f.level && len(platformWriters) > 0 {
 		platformMessage := f.platformFormatter.Format(ctx, level, tag, message, timestamp)
 		for _, platformWriter := range platformWriters {
 			platformWriter.WriteMessage(level, platformMessage)
@@ -179,8 +185,9 @@ type observableLogger struct {
 
 func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
 	level = OverrideLevelFromContext(level, ctx)
-	platformWriters := l.loadPlatformWriters()
-	if level > l.level && len(platformWriters) == 0 && !l.needObservable {
+	// WHY: Drop suppressed log entries before string formatting and pending buffering
+	// even when PlatformWriters are attached so TRACE/DEBUG never floods neko.log.
+	if level > l.level && !l.needObservable {
 		return
 	}
 	nowTime := time.Now()

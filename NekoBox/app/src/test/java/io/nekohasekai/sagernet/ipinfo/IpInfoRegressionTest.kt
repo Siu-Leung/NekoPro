@@ -137,6 +137,14 @@ class IpInfoRegressionTest {
             "abcde:•••",
             AddressRedactor.scrub("abcde:2001:db8::1"),
         )
+        assertEquals(
+            "DoH ••• failed on •••",
+            AddressRedactor.scrub("DoH https+local://dns.secret-sub.xyz/token123 failed on edge1.transit-provider.net:8443"),
+        )
+        assertEquals(
+            "exchange failed for [redacted-url]",
+            moe.matsuri.nb4a.Protocols.sanitizeErrorMessage("exchange failed for https+local://dns.secret-sub.xyz/token123"),
+        )
     }
 
     @Test

@@ -432,28 +432,28 @@ class ConfigurationFragment @JvmOverloads constructor(
                     entity.displayName(),
                     bean.name,
                     bean.serverAddress.orEmpty(),
-                    getString(R.string.card_hidden_title),
+                    ctx.getString(R.string.card_hidden_title),
                     hideAddress,
                 )
                 when (state) {
                     BaseService.State.Connected -> safeName
-                    BaseService.State.Connecting -> "${getString(R.string.connecting)} · $safeName"
-                    BaseService.State.Stopping -> "${getString(R.string.stopping)} · $safeName"
-                    else -> "${getString(R.string.not_connected)} · $safeName"
+                    BaseService.State.Connecting -> "${ctx.getString(R.string.connecting)} · $safeName"
+                    BaseService.State.Stopping -> "${ctx.getString(R.string.stopping)} · $safeName"
+                    else -> "${ctx.getString(R.string.not_connected)} · $safeName"
                 }
             } else {
                 when (state) {
-                    BaseService.State.Connected -> getString(R.string.vpn_connected)
-                    BaseService.State.Connecting -> getString(R.string.connecting)
-                    BaseService.State.Stopping -> getString(R.string.stopping)
-                    else -> getString(R.string.surge_status_idle_hint)
+                    BaseService.State.Connected -> ctx.getString(R.string.vpn_connected)
+                    BaseService.State.Connecting -> ctx.getString(R.string.connecting)
+                    BaseService.State.Stopping -> ctx.getString(R.string.stopping)
+                    else -> ctx.getString(R.string.surge_status_idle_hint)
                 }
             }
             val headerIpText: CharSequence? = when {
                 !showIpOwner || entity == null || !supportsCardIpProbe(entity) -> null
-                isProbingSelected -> getString(R.string.card_ip_probe_started)
+                isProbingSelected -> ctx.getString(R.string.card_ip_probe_started)
                 else -> formatIpInfoSpannable(ctx, entity, hideAddress)
-                    ?: getString(R.string.surge_ip_tap_to_probe)
+                    ?: ctx.getString(R.string.surge_ip_tap_to_probe)
             }
             onMainDispatcher {
                 if (isAdded && surgeActiveProfile === titleView) {
@@ -632,59 +632,69 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private val importFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { file ->
-            if (file != null) runOnDefaultDispatcher {
-                try {
-                    val fileName =
-                        requireContext().contentResolver.query(file, null, null, null, null)
-                            ?.use { cursor ->
-                                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
-                            }
-                    val proxies = mutableListOf<AbstractBean>()
-                    if (fileName != null && fileName.endsWith(".zip", ignoreCase = true)) {
-                        // try parse wireguard zip (bounded against zip bombs)
-                        val maxEntries = 256
-                        val maxEntryBytes = 2 * 1024 * 1024
-                        val maxTotalBytes = 16 * 1024 * 1024
-                        ZipInputStream(requireContext().contentResolver.openInputStream(file)!!).use { zip ->
-                            var entryCount = 0
-                            var totalBytes = 0
-                            while (true) {
-                                val entry = zip.nextEntry ?: break
-                                try {
-                                    if (entry.isDirectory) continue
-                                    entryCount++
-                                    if (entryCount > maxEntries) {
-                                        throw IllegalArgumentException("Zip archive contains too many entries")
+            if (file != null) {
+                val resolver = context?.contentResolver ?: return@registerForActivityResult
+                runOnDefaultDispatcher {
+                    try {
+                        val fileName =
+                            resolver.query(file, null, null, null, null)
+                                ?.use { cursor ->
+                                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                    if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+                                }
+                        val proxies = mutableListOf<AbstractBean>()
+                        if (fileName != null && fileName.endsWith(".zip", ignoreCase = true)) {
+                            // try parse wireguard zip (bounded against zip bombs)
+                            val maxEntries = 256
+                            val maxEntryBytes = 2 * 1024 * 1024
+                            val maxTotalBytes = 16 * 1024 * 1024
+                            val inputStream = resolver.openInputStream(file)
+                                ?: throw java.io.IOException("Failed to open selected archive")
+                            ZipInputStream(inputStream).use { zip ->
+                                var entryCount = 0
+                                var totalBytes = 0
+                                while (true) {
+                                    val entry = zip.nextEntry ?: break
+                                    try {
+                                        if (entry.isDirectory) continue
+                                        entryCount++
+                                        if (entryCount > maxEntries) {
+                                            throw IllegalArgumentException("Zip archive contains too many entries")
+                                        }
+                                        val remaining = (maxTotalBytes - totalBytes).coerceAtMost(maxEntryBytes)
+                                        val bytes = readBoundedBytes(zip, remaining)
+                                        totalBytes += bytes.size
+                                        val fileText = String(bytes, Charsets.UTF_8)
+                                        RawUpdater.parseRaw(fileText, entry.name)
+                                            ?.let { pl -> proxies.addAll(pl) }
+                                    } finally {
+                                        zip.closeEntry()
                                     }
-                                    val remaining = (maxTotalBytes - totalBytes).coerceAtMost(maxEntryBytes)
-                                    val bytes = readBoundedBytes(zip, remaining)
-                                    totalBytes += bytes.size
-                                    val fileText = String(bytes, Charsets.UTF_8)
-                                    RawUpdater.parseRaw(fileText, entry.name)
-                                        ?.let { pl -> proxies.addAll(pl) }
-                                } finally {
-                                    zip.closeEntry()
                                 }
                             }
-                        }
-                    } else {
-                        val fileText =
-                            requireContext().contentResolver.openInputStream(file)!!.use {
+                        } else {
+                            val inputStream = resolver.openInputStream(file)
+                                ?: throw java.io.IOException("Failed to open selected file")
+                            val fileText = inputStream.use {
                                 String(readBoundedBytes(it, 16 * 1024 * 1024), Charsets.UTF_8)
                             }
-                        RawUpdater.parseRaw(fileText, fileName ?: "")
-                            ?.let { pl -> proxies.addAll(pl) }
-                    }
-                    if (proxies.isEmpty()) onMainDispatcher {
-                        snackbar(getString(R.string.no_proxies_found_in_file)).show()
-                    } else import(proxies)
-                } catch (e: SubscriptionFoundException) {
-                    (requireActivity() as MainActivity).importSubscription(e.link.toUri())
-                } catch (e: Exception) {
-                    Logs.w(e)
-                    onMainDispatcher {
-                        snackbar(e.readableMessage).show()
+                            RawUpdater.parseRaw(fileText, fileName ?: "")
+                                ?.let { pl -> proxies.addAll(pl) }
+                        }
+                        if (proxies.isEmpty()) onMainDispatcher {
+                            if (!isAdded) return@onMainDispatcher
+                            snackbar(getString(R.string.no_proxies_found_in_file)).show()
+                        } else import(proxies)
+                    } catch (e: SubscriptionFoundException) {
+                        onMainDispatcher {
+                            (activity as? MainActivity)?.importSubscription(e.link.toUri())
+                        }
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                        onMainDispatcher {
+                            if (!isAdded) return@onMainDispatcher
+                            snackbar(Protocols.sanitizeErrorMessage(e.readableMessage)).show()
+                        }
                     }
                 }
             }
@@ -697,8 +707,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
         onMainDispatcher {
             DataStore.editingGroup = targetId
+            val ctx = context ?: return@onMainDispatcher
+            if (!isAdded) return@onMainDispatcher
             snackbar(
-                requireContext().resources.getQuantityString(
+                ctx.resources.getQuantityString(
                     R.plurals.added, proxies.size, proxies.size
                 )
             ).show()
@@ -728,15 +740,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                     try {
                         val proxies = RawUpdater.parseRaw(text)
                         if (proxies.isNullOrEmpty()) onMainDispatcher {
+                            if (!isAdded) return@onMainDispatcher
                             snackbar(getString(R.string.no_proxies_found_in_clipboard)).show()
                         } else import(proxies)
                     } catch (e: SubscriptionFoundException) {
-                        (requireActivity() as MainActivity).importSubscription(e.link.toUri())
+                        onMainDispatcher {
+                            (activity as? MainActivity)?.importSubscription(e.link.toUri())
+                        }
                     } catch (e: Exception) {
                         Logs.w(e)
 
                         onMainDispatcher {
-                            snackbar(e.readableMessage).show()
+                            if (!isAdded) return@onMainDispatcher
+                            snackbar(Protocols.sanitizeErrorMessage(e.readableMessage)).show()
                         }
                     }
                 }
@@ -869,6 +885,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val groupId = DataStore.currentGroupId()
                     SagerDatabase.proxyDao.clearTestResults(groupId)
                     onMainDispatcher {
+                        if (!isAdded || !::adapter.isInitialized) return@onMainDispatcher
                         adapter.groupFragments.values.forEach { fragment ->
                             fragment.adapter?.apply {
                                 configurationList.values.forEach { profile ->
@@ -900,16 +917,20 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                     if (toClear.isNotEmpty()) {
                         onMainDispatcher {
-                            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                            val ctx = context ?: return@onMainDispatcher
+                            if (!isAdded) return@onMainDispatcher
+                            MaterialAlertDialogBuilder(ctx).setTitle(R.string.confirm)
                                 .setMessage(R.string.delete_confirm_prompt)
                                 .setPositiveButton(R.string.yes) { _, _ ->
-                                    for (profile in toClear) {
-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
-                                            val index = configurationIdList.indexOf(profile.id)
-                                            if (index >= 0) {
-                                                configurationIdList.removeAt(index)
-                                                configurationList.remove(profile.id)
-                                                notifyItemRemoved(index)
+                                    if (::adapter.isInitialized) {
+                                        for (profile in toClear) {
+                                            adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
+                                                val index = configurationIdList.indexOf(profile.id)
+                                                if (index >= 0) {
+                                                    configurationIdList.removeAt(index)
+                                                    configurationList.remove(profile.id)
+                                                    notifyItemRemoved(index)
+                                                }
                                             }
                                         }
                                     }
@@ -941,12 +962,18 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                     if (toClear.isNotEmpty()) {
                         onMainDispatcher {
-                            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
+                            val ctx = context ?: return@onMainDispatcher
+                            if (!isAdded) return@onMainDispatcher
+                            val hideAddress = DataStore.hideNodeAddress
+                            MaterialAlertDialogBuilder(ctx).setTitle(R.string.confirm)
                                 .setMessage(
                                     getString(R.string.delete_confirm_prompt) + "\n" +
                                             toClear.mapIndexedNotNull { index, proxyEntity ->
                                                 if (index < 20) {
-                                                    proxyEntity.displayName()
+                                                    AddressRedactor.beanTitle(
+                                                        proxyEntity.requireBean(),
+                                                        hideAddress,
+                                                    )
                                                 } else if (index == 20) {
                                                     "......"
                                                 } else {
@@ -955,13 +982,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                                             }.joinToString("\n")
                                 )
                                 .setPositiveButton(R.string.yes) { _, _ ->
-                                    for (profile in toClear) {
-                                        adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
-                                            val index = configurationIdList.indexOf(profile.id)
-                                            if (index >= 0) {
-                                                configurationIdList.removeAt(index)
-                                                configurationList.remove(profile.id)
-                                                notifyItemRemoved(index)
+                                    if (::adapter.isInitialized) {
+                                        for (profile in toClear) {
+                                            adapter.groupFragments[DataStore.selectedGroup]?.adapter?.apply {
+                                                val index = configurationIdList.indexOf(profile.id)
+                                                if (index >= 0) {
+                                                    configurationIdList.removeAt(index)
+                                                    configurationList.remove(profile.id)
+                                                    notifyItemRemoved(index)
+                                                }
                                             }
                                         }
                                     }
@@ -1232,14 +1261,14 @@ class ConfigurationFragment @JvmOverloads constructor(
     fun onActiveNodeConnectedRefreshIp() {
         if (select || !isAdded || !DataStore.showNodeIpOwner || !DataStore.ipProbeConsentGranted) return
         val selectedId = DataStore.selectedProxy
-        if (selectedId <= 0L || ipInfoJob?.isActive == true) return
+        if (selectedId <= 0L || ipInfoJob?.isActive == true || DataStore.runningTest) return
         runOnDefaultDispatcher {
             val entity = SagerDatabase.proxyDao.getById(selectedId) ?: return@runOnDefaultDispatcher
             val isMissingTelemetry = entity.exitIp.isBlank() ||
                 (supportsCardEntry(entity) && entity.entryProvider.isBlank())
             if (!isMissingTelemetry || !supportsCardIpProbe(entity)) return@runOnDefaultDispatcher
             onMainDispatcher {
-                if (isAdded && ipInfoJob?.isActive != true) {
+                if (isAdded && ipInfoJob?.isActive != true && !DataStore.runningTest) {
                     requestNodeIpInfo(selectedId, isSilent = true)
                 }
             }
@@ -1248,6 +1277,15 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun requestNodeIpInfo(id: Long, isSilent: Boolean = false) {
         if (view == null || ipInfoJob?.isActive == true) return
+        if (DataStore.runningTest) {
+            if (!isSilent && isResumed) {
+                showForceTestDialog {
+                    cancelAllTests(releaseToken = true)
+                    requestNodeIpInfo(id, isSilent = false)
+                }
+            }
+            return
+        }
         probingProxyId = id
         applyTopologyOutcomeOnMain(id, null)
         refreshSurgeStatusHeader()
@@ -1546,11 +1584,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                     workerJobs.add(launch(Dispatchers.IO) {
                         while (isActive && DataStore.isTestTokenActive(testToken)) {
                             val item = queue.poll() ?: break
+                            val safeItemName = AddressRedactor.beanTitle(
+                                item.requireBean(),
+                                DataStore.hideNodeAddress,
+                            )
                             onMainDispatcher {
                                 if (!handle.isHidden && isAdded && DataStore.isTestTokenActive(testToken)) {
                                     binding.nowTesting.text = getString(
                                         R.string.group_ip_probe_testing,
-                                        item.displayName(),
+                                        safeItemName,
                                     )
                                 }
                             }
@@ -1562,12 +1604,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                             }
                             if (!isActive || !DataStore.isTestTokenActive(testToken)) break
                             val done = completedCount.incrementAndGet()
+                            val notifName = AddressRedactor.beanTitle(
+                                item.requireBean(),
+                                DataStore.hideNodeAddress,
+                            )
                             onMainDispatcher {
                                 if (!isAdded || !DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
                                 if (outcome != null) {
                                     applyTopologyOutcomeOnMain(item.id, outcome)
                                 }
-                                handle.notification?.updateNotification(done, totalCount, done >= totalCount, item.displayName())
+                                handle.notification?.updateNotification(done, totalCount, done >= totalCount, notifName)
                                 if (!handle.isHidden) {
                                     binding.progress.text = "$done / $totalCount"
                                     binding.progressLinear.setProgressCompat(done, true)
@@ -1640,10 +1686,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun retryFailedSpeedTest(force: Boolean = false) {
         if (!isAdded) return
-        if (DataStore.runningTest && !force) {
-            showForceTestDialog { retryFailedSpeedTest(force = true) }
-            return
-        }
+        val preToken = acquireOrPromptTestToken(force) { retryFailedSpeedTest(force = true) }
+        if (preToken == 0) return
         val group = DataStore.currentGroup()
         runOnDefaultDispatcher {
             val allProfiles = SagerDatabase.proxyDao.getByGroup(group.id)
@@ -1658,15 +1702,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                 isErrorStatus || isFailedSpeed
             }
             onMainDispatcher {
-                if (!isAdded) return@onMainDispatcher
+                if (!isAdded) {
+                    DataStore.releaseTestToken(preToken)
+                    return@onMainDispatcher
+                }
                 if (failedProfiles.isEmpty()) {
+                    DataStore.releaseTestToken(preToken)
                     android.widget.Toast.makeText(
                         requireContext(),
                         R.string.speed_test_no_failed_nodes,
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 } else {
-                    speedTest(targetProfiles = failedProfiles, force = force)
+                    speedTest(targetProfiles = failedProfiles, force = force, preAcquiredToken = preToken)
                 }
             }
         }
@@ -1676,17 +1724,28 @@ class ConfigurationFragment @JvmOverloads constructor(
         targetProfile: ProxyEntity? = null,
         targetProfiles: List<ProxyEntity>? = null,
         force: Boolean = false,
+        preAcquiredToken: Int = 0,
     ) {
-        if (!isAdded) return
-        val testToken = acquireOrPromptTestToken(force) {
-            speedTest(targetProfile, targetProfiles, force = true)
+        if (!isAdded) {
+            if (preAcquiredToken != 0) DataStore.releaseTestToken(preAcquiredToken)
+            return
+        }
+        val testToken = if (preAcquiredToken != 0) {
+            preAcquiredToken
+        } else {
+            acquireOrPromptTestToken(force) {
+                speedTest(targetProfile, targetProfiles, force = true)
+            }
         }
         if (testToken == 0) return
 
         val group = DataStore.currentGroup()
         val isSingle = targetProfile != null
         val titleText = when {
-            isSingle -> targetProfile!!.displayName()
+            isSingle -> AddressRedactor.beanTitle(
+                targetProfile!!.requireBean(),
+                DataStore.hideNodeAddress,
+            )
             targetProfiles != null -> getString(R.string.speed_test_retry_failed)
             else -> getString(R.string.speed_test_group)
         }
@@ -1709,10 +1768,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             failureSnapshot = { profile, error ->
                 SpeedTestSnapshot(
                     profileId = profile.id,
-                    profileName = profile.displayName(),
+                    profileName = AddressRedactor.beanTitle(
+                        profile.requireBean(),
+                        DataStore.hideNodeAddress,
+                    ),
                     mode = DataStore.speedTestMode,
                     stage = SpeedTestQueueRunner.STAGE_ERROR,
-                    error = error.readableMessage,
+                    error = Protocols.sanitizeErrorMessage(error.readableMessage),
                     done = true,
                 )
             },
@@ -1744,6 +1806,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (profiles.isEmpty()) {
                     return@runOnDefaultDispatcher
                 }
+                val profilesById = profiles.associateBy { it.id }
                 onMainDispatcher {
                     if (!DataStore.isTestTokenActive(testToken)) return@onMainDispatcher
                     binding.progressLinear.max = profiles.size
@@ -1752,12 +1815,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 runner.run(profiles) { index, total, sample ->
                     if (!DataStore.isTestTokenActive(testToken)) return@run
+                    val sanitizedSampleError = if (sample.error.isNotBlank()) {
+                        Protocols.sanitizeErrorMessage(sample.error)
+                    } else {
+                        ""
+                    }
                     val outcome = SpeedTestOutcome.completedOrNull(
                         mode = sample.mode,
                         stage = sample.stage,
                         done = sample.done,
                         cancelled = sample.cancelled,
-                        error = sample.error,
+                        error = sanitizedSampleError,
                         downloadBitsPerSecond = sample.downloadBitsPerSecond,
                         uploadBitsPerSecond = sample.uploadBitsPerSecond,
                     )
@@ -1774,9 +1842,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 fragment.adapter?.updateSpeedTestResult(sample.profileId, outcome)
                             }
                         }
-                    } else if (sample.done && sample.error.isNotBlank()) {
+                    } else if (sample.done && sanitizedSampleError.isNotBlank()) {
                         // 测速失败时清空过期速度值，若原本已有延迟（status==1）则保留其可用状态
-                        SagerDatabase.proxyDao.updateSpeedTestFailure(sample.profileId, sample.error)
+                        SagerDatabase.proxyDao.updateSpeedTestFailure(sample.profileId, sanitizedSampleError)
                         runOnMainDispatcher {
                             if (!DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
                             adapter.groupFragments.values.forEach { fragment ->
@@ -1786,7 +1854,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     p.speedTestUploadBitsPerSecond = 0L
                                     if (p.status != 1) {
                                         p.status = 2
-                                        p.error = sample.error
+                                        p.error = sanitizedSampleError
                                     }
                                     val idx = fragment.adapter?.configurationIdList?.indexOf(sample.profileId) ?: -1
                                     if (idx >= 0) fragment.adapter?.notifyItemChanged(idx)
@@ -1796,13 +1864,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                     runOnMainDispatcher {
                         if (!isAdded || !DataStore.isTestTokenActive(testToken)) return@runOnMainDispatcher
-                        val detail = formatSpeedTestSnapshot(sample)
+                        val hideNow = DataStore.hideNodeAddress
+                        val profileEntity = profilesById[sample.profileId]
+                        val safeProfileName = when {
+                            profileEntity != null -> AddressRedactor.beanTitle(profileEntity.requireBean(), hideNow)
+                            hideNow -> AddressRedactor.scrub(sample.profileName)
+                            else -> sample.profileName
+                        }
+                        val stageLabel = speedTestStageLabel(sample.stage)
+                        val compactLabel = "$safeProfileName · $stageLabel"
+                        val detail = formatSpeedTestSnapshot(sample, safeProfileName, hideNow)
                         (activity as? MainActivity)?.binding?.stats?.updateLiveSpeedTest(
-                            statusLabel = detail,
+                            statusLabel = compactLabel,
                             downloadBitsPerSecond = sample.downloadBitsPerSecond,
                             uploadBitsPerSecond = sample.uploadBitsPerSecond,
                         )
-                        handle.notification?.updateNotification(index + 1, total, false, detail)
+                        handle.notification?.updateNotification(index + 1, total, false, compactLabel)
                         if (!handle.isHidden && isAdded) {
                             val completed = completedSpeedTestCount(index, total, sample.done)
                             binding.nowTesting.text = detail
@@ -1827,7 +1904,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 Logs.w(e)
                 runOnMainDispatcher {
                     if (isAdded && DataStore.isTestTokenActive(testToken)) {
-                        snackbar(e.readableMessage).show()
+                        snackbar(Protocols.sanitizeErrorMessage(e.readableMessage)).show()
                     }
                 }
             } finally {
@@ -1979,31 +2056,38 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
-    private fun formatSpeedTestSnapshot(snapshot: SpeedTestSnapshot): String {
-        val stage = when (snapshot.stage) {
-            SpeedTestQueueRunner.STAGE_DISCOVERY -> getString(R.string.speed_test_stage_discovery)
-            SpeedTestQueueRunner.STAGE_LATENCY -> getString(R.string.speed_test_stage_latency)
-            SpeedTestQueueRunner.STAGE_DOWNLOAD -> getString(R.string.speed_test_stage_download)
-            SpeedTestQueueRunner.STAGE_UPLOAD -> getString(R.string.speed_test_stage_upload)
-            SpeedTestQueueRunner.STAGE_COMPLETE -> getString(R.string.speed_test_stage_complete)
-            SpeedTestQueueRunner.STAGE_CANCELLED -> getString(R.string.speed_test_stage_cancelled)
-            SpeedTestQueueRunner.STAGE_ERROR -> getString(R.string.speed_test_stage_error)
-            else -> getString(R.string.speed_test_stage_pending)
-        }
+    private fun speedTestStageLabel(stage: String): String = when (stage) {
+        SpeedTestQueueRunner.STAGE_DISCOVERY -> getString(R.string.speed_test_stage_discovery)
+        SpeedTestQueueRunner.STAGE_LATENCY -> getString(R.string.speed_test_stage_latency)
+        SpeedTestQueueRunner.STAGE_DOWNLOAD -> getString(R.string.speed_test_stage_download)
+        SpeedTestQueueRunner.STAGE_UPLOAD -> getString(R.string.speed_test_stage_upload)
+        SpeedTestQueueRunner.STAGE_COMPLETE -> getString(R.string.speed_test_stage_complete)
+        SpeedTestQueueRunner.STAGE_CANCELLED -> getString(R.string.speed_test_stage_cancelled)
+        SpeedTestQueueRunner.STAGE_ERROR -> getString(R.string.speed_test_stage_error)
+        else -> getString(R.string.speed_test_stage_pending)
+    }
+
+    private fun formatSpeedTestSnapshot(
+        snapshot: SpeedTestSnapshot,
+        safeProfileName: String,
+        hideAddress: Boolean,
+    ): String {
+        val stage = speedTestStageLabel(snapshot.stage)
+        val ctx = context ?: app
         return buildString {
-            append(snapshot.profileName).append(" — ").append(stage)
+            append(safeProfileName).append(" — ").append(stage)
             if (snapshot.downloadBitsPerSecond > 0) append('\n').append(
                 getString(
                     R.string.speed_test_download_format,
                     getString(R.string.speed_test_rate_mbps, snapshot.downloadBitsPerSecond / 1_000_000.0),
-                    Formatter.formatFileSize(requireContext(), snapshot.downloadBytes),
+                    Formatter.formatFileSize(ctx, snapshot.downloadBytes),
                 )
             )
             if (snapshot.uploadBitsPerSecond > 0) append('\n').append(
                 getString(
                     R.string.speed_test_upload_format,
                     getString(R.string.speed_test_rate_mbps, snapshot.uploadBitsPerSecond / 1_000_000.0),
-                    Formatter.formatFileSize(requireContext(), snapshot.uploadBytes),
+                    Formatter.formatFileSize(ctx, snapshot.uploadBytes),
                 )
             )
             if (snapshot.latencyMs > 0) append('\n').append(
@@ -2012,13 +2096,22 @@ class ConfigurationFragment @JvmOverloads constructor(
             val server = listOf(snapshot.serverName, snapshot.serverCountry)
                 .filter { it.isNotBlank() }
                 .joinToString(", ")
+                .let { if (hideAddress) AddressRedactor.scrub(it) else it }
             if (server.isNotBlank()) append('\n').append(getString(R.string.speed_test_server_format, server))
-            if (snapshot.error.isNotBlank()) append('\n').append(snapshot.error)
+            if (snapshot.error.isNotBlank()) {
+                val safeErr = Protocols.sanitizeErrorMessage(snapshot.error)
+                append('\n').append(if (hideAddress) AddressRedactor.scrub(safeErr) else safeErr)
+            }
         }
     }
 
     inner class TestDialog(private val testToken: Int) {
-        val binding = LayoutProgressListBinding.inflate(layoutInflater)
+        val binding = LayoutProgressListBinding.inflate(layoutInflater).apply {
+            progressCircular.isGone = true
+            progressLinear.isVisible = true
+            progressLinear.max = 1
+            progressLinear.setProgressCompat(0, false)
+        }
         val builder = MaterialAlertDialogBuilder(requireContext()).setView(binding.root)
             .setPositiveButton(R.string.minimize) { _, _ ->
                 minimize()
@@ -2036,6 +2129,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         var notification: ConnectionTestNotification? = null
 
         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
+        @Volatile
         var proxyN = 0
         val finishedN = AtomicInteger(0)
 
@@ -2049,10 +2143,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val context = context ?: return@runOnMainDispatcher
                 val progress = finishedN.addAndGet(1)
                 val status = dialogStatus.get()
+                val hideAddress = DataStore.hideNodeAddress
+                val safeName = AddressRedactor.beanTitle(profile.requireBean(), hideAddress)
                 notification?.updateNotification(
                     progress,
                     proxyN,
-                    progress >= proxyN || status == 2
+                    progress >= proxyN || status == 2,
+                    safeName,
                 )
                 if (status >= 1) return@runOnMainDispatcher
                 if (!isAdded) return@runOnMainDispatcher
@@ -2064,7 +2161,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 when (profile.status) {
                     -1 -> {
-                        profileStatusText = profile.error
+                        val raw = Protocols.sanitizeErrorMessage(profile.error.orEmpty())
+                        profileStatusText = if (hideAddress) AddressRedactor.scrub(raw) else raw
                         profileStatusColor = context.getColorAttr(android.R.attr.textColorSecondary)
                     }
 
@@ -2079,20 +2177,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
 
                     2 -> {
-                        profileStatusText = profile.error
+                        val raw = Protocols.sanitizeErrorMessage(profile.error.orEmpty())
+                        profileStatusText = if (hideAddress) AddressRedactor.scrub(raw) else raw
                         profileStatusColor = context.getColour(R.color.material_red_500)
                     }
 
                     3 -> {
                         val err = profile.error ?: ""
                         val msg = Protocols.genFriendlyMsg(err)
-                        profileStatusText = if (msg != err) msg else getString(R.string.unavailable)
+                        val displayMsg = if (msg != err) msg else getString(R.string.unavailable)
+                        profileStatusText = if (hideAddress) AddressRedactor.scrub(displayMsg) else displayMsg
                         profileStatusColor = context.getColour(R.color.material_red_500)
                     }
                 }
 
                 val text = SpannableStringBuilder().apply {
-                    append("\n" + profile.displayName())
+                    append("\n" + safeName)
                     append("\n")
                     append(
                         profile.displayType(),
@@ -2101,7 +2201,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     )
                     append(" ")
                     append(
-                        profileStatusText,
+                        profileStatusText ?: "",
                         ForegroundColorSpan(profileStatusColor),
                         SPAN_EXCLUSIVE_EXCLUSIVE
                     )
@@ -2110,6 +2210,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 binding.nowTesting.text = text
                 binding.progress.text = "$progress / $proxyN"
+                if (proxyN > 0) {
+                    binding.progressLinear.max = proxyN
+                    binding.progressLinear.setProgressCompat(progress.coerceAtMost(proxyN), true)
+                }
             }
         }
 
@@ -2165,8 +2269,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
                 test.proxyN = profilesList.size
+                if (profilesList.isEmpty()) {
+                    return@runOnDefaultDispatcher
+                }
+                onMainDispatcher {
+                    if (isAdded && DataStore.isTestTokenActive(testToken)) {
+                        test.binding.progressLinear.max = profilesList.size
+                        test.binding.progressLinear.setProgressCompat(0, false)
+                        test.binding.progress.text = "0 / ${profilesList.size}"
+                    }
+                }
                 val profiles = ConcurrentLinkedQueue(profilesList)
-                repeat(DataStore.connectionTestConcurrent) {
+                val workerCount = minOf(DataStore.connectionTestConcurrent.coerceAtLeast(1), profilesList.size)
+                repeat(workerCount) {
                     testJobs.add(launch(Dispatchers.IO) {
                         while (isActive && DataStore.isTestTokenActive(testToken)) {
                             val profile = profiles.poll() ?: break
@@ -2218,26 +2333,26 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 }
                             } catch (e: Exception) {
                                 if (!isActive || !DataStore.isTestTokenActive(testToken)) break
-                                val message = e.readableMessage
+                                val message = Protocols.sanitizeErrorMessage(e.readableMessage)
 
                                 if (icmpPing) {
                                     profile.status = 2
-                                    profile.error = getString(R.string.connection_test_unreachable)
+                                    profile.error = app.getString(R.string.connection_test_unreachable)
                                 } else {
                                     profile.status = 2
                                     when {
                                         !message.contains("failed:") -> profile.error =
-                                            getString(R.string.connection_test_timeout)
+                                            app.getString(R.string.connection_test_timeout)
 
                                         else -> when {
                                             message.contains("ECONNREFUSED") -> {
                                                 profile.error =
-                                                    getString(R.string.connection_test_refused)
+                                                    app.getString(R.string.connection_test_refused)
                                             }
 
                                             message.contains("ENETUNREACH") -> {
                                                 profile.error =
-                                                    getString(R.string.connection_test_unreachable)
+                                                    app.getString(R.string.connection_test_unreachable)
                                             }
 
                                             else -> {
@@ -2327,8 +2442,19 @@ class ConfigurationFragment @JvmOverloads constructor(
             try {
                 val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
                 test.proxyN = profilesList.size
+                if (profilesList.isEmpty()) {
+                    return@runOnDefaultDispatcher
+                }
+                onMainDispatcher {
+                    if (isAdded && DataStore.isTestTokenActive(testToken)) {
+                        test.binding.progressLinear.max = profilesList.size
+                        test.binding.progressLinear.setProgressCompat(0, false)
+                        test.binding.progress.text = "0 / ${profilesList.size}"
+                    }
+                }
                 val profiles = ConcurrentLinkedQueue(profilesList)
-                repeat(DataStore.connectionTestConcurrent) {
+                val workerCount = minOf(DataStore.connectionTestConcurrent.coerceAtLeast(1), profilesList.size)
+                repeat(workerCount) {
                     testJobs.add(launch(Dispatchers.IO) {
                         val urlTest = UrlTest() // note: this is NOT in bg process
                         while (isActive && DataStore.isTestTokenActive(testToken)) {
@@ -2343,10 +2469,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 throw e
                             } catch (e: PluginManager.PluginNotFoundException) {
                                 profile.status = 2
-                                profile.error = e.readableMessage
+                                profile.error = Protocols.sanitizeErrorMessage(e.readableMessage)
                             } catch (e: Exception) {
                                 profile.status = 3
-                                profile.error = e.readableMessage
+                                profile.error = Protocols.sanitizeErrorMessage(e.readableMessage)
                             }
 
                             test.update(profile)
@@ -2703,6 +2829,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
             if (!::proxyGroup.isInitialized) return
 
+            adapter?.let {
+                ProfileManager.removeListener(it)
+                GroupManager.removeListener(it)
+            }
             configurationListView = view.findViewById(R.id.configuration_list)
             applyLayoutMode()
             adapter = ConfigurationAdapter()
@@ -2712,8 +2842,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             configurationListView.setItemViewCacheSize(20)
 
             if (!select) {
-
-                undoManager = UndoSnackbarManager(activity as MainActivity, adapter!!)
+                val hostActivity = activity as? MainActivity ?: return
+                undoManager = UndoSnackbarManager(hostActivity, adapter!!)
 
                 ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
                     ItemTouchHelper.UP or ItemTouchHelper.DOWN, ItemTouchHelper.START
@@ -2754,6 +2884,17 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             }
 
+        }
+
+        override fun onDestroyView() {
+            adapter?.let {
+                ProfileManager.removeListener(it)
+                GroupManager.removeListener(it)
+            }
+            if (::undoManager.isInitialized) {
+                undoManager.flush()
+            }
+            super.onDestroyView()
         }
 
         override fun onDestroy() {
@@ -2871,10 +3012,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 configurationIdList.clear()
                 val lower = name.lowercase()
-                configurationIdList.addAll(configurationList.filter {
-                    it.value.displayName().lowercase().contains(lower) ||
-                            it.value.displayType().lowercase().contains(lower) ||
-                            it.value.displayAddress().lowercase().contains(lower)
+                val hideAddress = DataStore.hideNodeAddress
+                configurationIdList.addAll(configurationList.filter { (_, entity) ->
+                    if (hideAddress) {
+                        val safeTitle = AddressRedactor.beanTitle(entity.requireBean(), true)
+                        safeTitle.lowercase().contains(lower) ||
+                            entity.displayType().lowercase().contains(lower)
+                    } else {
+                        entity.displayName().lowercase().contains(lower) ||
+                            entity.displayType().lowercase().contains(lower) ||
+                            entity.displayAddress().lowercase().contains(lower)
+                    }
                 }.keys)
                 notifyDataSetChanged()
             }
@@ -3120,7 +3268,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 if (select) {
                     view.setOnClickListener {
-                        (requireActivity() as SelectCallback).returnProfile(proxyEntity.id)
+                        (activity as? SelectCallback)?.returnProfile(proxyEntity.id)
                     }
                 } else {
                     view.setOnClickListener {
@@ -3132,6 +3280,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 lastSelected = DataStore.selectedProxy
                                 DataStore.selectedProxy = proxyEntity.id
                                 onMainDispatcher {
+                                    if (!isAdded) return@onMainDispatcher
                                     if (entity.id == proxyEntity.id) {
                                         selectedView.visibility = View.VISIBLE
                                         cardView?.strokeColor = requireContext().getColorAttr(R.attr.selectedColorPrimary)
@@ -3257,7 +3406,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val baseErr = when {
                         hideAddress -> getString(R.string.unavailable)
                         isDnsError -> getString(R.string.error_dns_lookup_failed)
-                        proxyEntity.status == 2 && rawError.isNotBlank() && rawError.length <= 42 -> rawError
+                        proxyEntity.status == 2 && sanitizedErr.isNotBlank() && sanitizedErr.length <= 42 -> sanitizedErr
                         else -> {
                             val friendly = Protocols.genFriendlyMsg(rawError)
                             if (friendly.isNotBlank() && friendly != sanitizedErr && friendly.length <= 48) {
@@ -3273,7 +3422,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                             null
                         } else {
                             View.OnClickListener {
-                                val builder = MaterialAlertDialogBuilder(requireContext())
+                                val ctx = context ?: return@OnClickListener
+                                val builder = MaterialAlertDialogBuilder(ctx)
                                     .setTitle(R.string.unavailable)
                                     .setMessage(sanitizedErr)
                                     .setPositiveButton(android.R.string.ok, null)
@@ -3324,20 +3474,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val started =
                         selected && DataStore.serviceState.started && DataStore.currentProfile == boundEntityId
                     onMainDispatcher {
-                        // Guard against fast-scroll ViewHolder recycling before mutating state.
-                        if (entity.id != boundEntityId) return@onMainDispatcher
+                        // Guard against fast-scroll ViewHolder recycling or detached Fragment before mutating state.
+                        val ctx = context ?: return@onMainDispatcher
+                        if (!isAdded || entity.id != boundEntityId) return@onMainDispatcher
                         editButton.isEnabled = !started
                         removeButton.isEnabled = !started
                         selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
                         cardView?.strokeColor = if (selected) {
-                            requireContext().getColorAttr(R.attr.selectedColorPrimary)
+                            ctx.getColorAttr(R.attr.selectedColorPrimary)
                         } else {
-                            requireContext().getColour(R.color.card_stroke)
+                            ctx.getColour(R.color.card_stroke)
                         }
                     }
 
                     fun showShare(anchor: View) {
-                        val popup = PopupMenu(requireContext(), anchor)
+                        val ctx = context ?: return
+                        val popup = PopupMenu(ctx, anchor)
                         popup.menuInflater.inflate(R.menu.profile_share_menu, popup.menu)
 
                         when {
@@ -3364,14 +3516,15 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                     if (!(select || proxyEntity.type == ProxyEntity.TYPE_CHAIN)) {
                         onMainDispatcher {
-                            if (entity.id != boundEntityId) return@onMainDispatcher
+                            val ctx = context ?: return@onMainDispatcher
+                            if (!isAdded || entity.id != boundEntityId) return@onMainDispatcher
                             shareLayer.setBackgroundColor(Color.TRANSPARENT)
                             shareButton.setImageResource(R.drawable.ic_social_share)
-                            shareButton.setColorFilter(requireContext().getColour(R.color.card_icon_tint))
+                            shareButton.setColorFilter(ctx.getColour(R.color.card_icon_tint))
                             shareButton.isVisible = true
 
                             shareLayout.setOnClickListener {
-                                if (entity.id == boundEntityId) {
+                                if (isAdded && entity.id == boundEntityId) {
                                     showShare(it)
                                 }
                             }
@@ -3413,8 +3566,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             fun export(link: String) {
                 val success = SagerNet.trySetPrimaryClip(link)
-                (activity as MainActivity).snackbar(if (success) R.string.action_export_msg else R.string.action_export_err)
-                    .show()
+                (activity as? MainActivity)?.snackbar(
+                    if (success) R.string.action_export_msg else R.string.action_export_err
+                )?.show()
             }
 
             /**
@@ -3426,7 +3580,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     onProceed()
                     return
                 }
-                MaterialAlertDialogBuilder(requireContext())
+                val ctx = context ?: return
+                MaterialAlertDialogBuilder(ctx)
                     .setTitle(R.string.action_export_file)
                     .setMessage(R.string.export_config_private_dns_warning)
                     .setPositiveButton(android.R.string.ok) { _, _ -> onProceed() }
@@ -3438,7 +3593,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 try {
                     when (item.itemId) {
                         R.id.action_standard_qr, R.id.action_universal_qr -> {
-                            val name = entity.displayName().orEmpty()
+                            val name = AddressRedactor.beanTitle(
+                                entity.requireBean(),
+                                DataStore.hideNodeAddress,
+                            )
                             val universal = item.itemId == R.id.action_universal_qr
                             exportWithResolvedIp({ profile, ip -> profile.exportLink(universal, ip) }) {
                                 showCode(it, name)
@@ -3456,15 +3614,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                         R.id.action_config_export_file -> exportWithResolvedIp(ProxyEntity::exportConfig) { config ->
                             confirmConfigExportIfPrivateDns(config.first) {
                                 DataStore.serverConfig = config.first
-                                startFilesForResult(
-                                    (parentFragment as ConfigurationFragment).exportConfig, config.second
-                                )
+                                (parentFragment as? ConfigurationFragment)?.let { parent ->
+                                    startFilesForResult(parent.exportConfig, config.second)
+                                }
                             }
                         }
                     }
                 } catch (e: Exception) {
                     Logs.w(e)
-                    (activity as MainActivity).snackbar(e.readableMessage).show()
+                    (activity as? MainActivity)?.snackbar(Protocols.sanitizeErrorMessage(e.readableMessage))?.show()
                     return true
                 }
                 return true
@@ -3476,20 +3634,23 @@ class ConfigurationFragment @JvmOverloads constructor(
     private val exportConfig =
         registerForActivityResult(ActivityResultContracts.CreateDocument()) { data ->
             if (data != null) {
+                val resolver = context?.contentResolver ?: return@registerForActivityResult
                 runOnDefaultDispatcher {
                     try {
-                        (requireActivity() as MainActivity).contentResolver.openOutputStream(data)!!
-                            .bufferedWriter()
-                            .use {
-                                it.write(DataStore.serverConfig)
-                            }
+                        val stream = resolver.openOutputStream(data)
+                            ?: throw java.io.IOException("Failed to open output stream")
+                        stream.bufferedWriter().use {
+                            it.write(DataStore.serverConfig)
+                        }
                         onMainDispatcher {
+                            if (!isAdded) return@onMainDispatcher
                             snackbar(getString(R.string.action_export_msg)).show()
                         }
                     } catch (e: Exception) {
                         Logs.w(e)
                         onMainDispatcher {
-                            snackbar(e.readableMessage).show()
+                            if (!isAdded) return@onMainDispatcher
+                            snackbar(Protocols.sanitizeErrorMessage(e.readableMessage)).show()
                         }
                     }
 

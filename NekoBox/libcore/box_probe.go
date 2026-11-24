@@ -18,6 +18,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/constant"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 )
 
 const (
@@ -28,31 +29,81 @@ const (
 	defaultDNSLookupTimer = 6 * time.Second
 )
 
-// resolveStrictProxyDialer locates the explicit "proxy" outbound or endpoint
-// inside instance and rejects direct/block/dns pseudo-outbounds so node exit
-// and attribution probes can never leak onto the physical network.
+// resolveStrictProxyDialer locates the proxy outbound or endpoint inside instance
+// (preferring explicit "proxy" tag, falling back to Default() only for custom
+// full-config profiles without a "proxy" tag), unwraps adapter.OutboundGroup
+// chains iteratively with cycle detection, and rejects direct/block/dns leaves
+// so node exit probes and speed tests never leak onto the physical network.
 //
 // Parameters:
 //   - instance: Running sing-box instance to inspect.
 //
-// Returns the verified proxy adapter.Outbound or an error if unavailable.
+// Returns the verified leaf proxy adapter.Outbound or an error if unavailable.
 func resolveStrictProxyDialer(instance *box.Box) (adapter.Outbound, error) {
 	if instance == nil {
 		return nil, errors.New("nil sing-box instance")
 	}
 	if proxyOutbound, ok := instance.Outbound().Outbound("proxy"); ok {
-		if isForbiddenProbeOutboundType(proxyOutbound.Type()) {
-			return nil, fmt.Errorf("refusing non-proxy outbound type %q", proxyOutbound.Type())
-		}
-		return proxyOutbound, nil
+		return unwrapStrictProxyLeaf(instance, proxyOutbound)
 	}
 	if proxyEndpoint, ok := instance.Endpoint().Get("proxy"); ok {
-		if isForbiddenProbeOutboundType(proxyEndpoint.Type()) {
-			return nil, fmt.Errorf("refusing non-proxy endpoint type %q", proxyEndpoint.Type())
-		}
-		return proxyEndpoint, nil
+		return unwrapStrictProxyLeaf(instance, proxyEndpoint)
+	}
+	if defaultOutbound := instance.Outbound().Default(); defaultOutbound != nil {
+		return unwrapStrictProxyLeaf(instance, defaultOutbound)
 	}
 	return nil, errors.New("proxy outbound or endpoint not found")
+}
+
+type legacyNowGroup interface {
+	Now() string
+}
+
+func unwrapStrictProxyLeaf(instance *box.Box, root adapter.Outbound) (adapter.Outbound, error) {
+	if root == nil {
+		return nil, errors.New("nil proxy outbound")
+	}
+	visited := make(map[string]struct{})
+	current := root
+	for {
+		if isForbiddenProbeOutboundType(current.Type()) {
+			return nil, fmt.Errorf("refusing non-proxy outbound type %q", current.Type())
+		}
+		if tag := current.Tag(); tag != "" {
+			if _, seen := visited[tag]; seen {
+				return nil, fmt.Errorf("outbound group cycle detected at %q", tag)
+			}
+			visited[tag] = struct{}{}
+		}
+		groupOut, isGroup := current.(adapter.OutboundGroup)
+		if !isGroup {
+			return current, nil
+		}
+		var (
+			next    adapter.Outbound
+			nextTag string
+		)
+		if nowGroup, ok := current.(legacyNowGroup); ok {
+			nextTag = nowGroup.Now()
+		} else if selected := groupOut.Selected(N.NetworkTCP); selected != nil {
+			next = selected
+			nextTag = selected.Tag()
+		}
+		if nextTag != "" && instance != nil {
+			if out, ok := instance.Outbound().Outbound(nextTag); ok {
+				current = out
+				continue
+			}
+			if ep, ok := instance.Endpoint().Get(nextTag); ok {
+				current = ep
+				continue
+			}
+		}
+		if next == nil {
+			return nil, fmt.Errorf("outbound group %q has no selected outbound", current.Tag())
+		}
+		current = next
+	}
 }
 
 func isForbiddenProbeOutboundType(outboundType string) bool {

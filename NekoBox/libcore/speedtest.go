@@ -2,6 +2,7 @@ package libcore
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/Mahdi-zarei/speedtest-go/speedtest"
-	"github.com/sagernet/sing-box/common/dialer"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -27,14 +27,14 @@ const (
 	SpeedTestModeUpload         = "upload"
 	SpeedTestModeSimpleDownload = "simple_download"
 
-	SpeedTestStagePending    = "pending"
-	SpeedTestStageDiscovery  = "discovery"
-	SpeedTestStageLatency    = "latency"
-	SpeedTestStageDownload   = "download"
-	SpeedTestStageUpload     = "upload"
-	SpeedTestStageComplete   = "complete"
-	SpeedTestStageCancelled  = "cancelled"
-	SpeedTestStageError      = "error"
+	SpeedTestStagePending   = "pending"
+	SpeedTestStageDiscovery = "discovery"
+	SpeedTestStageLatency   = "latency"
+	SpeedTestStageDownload  = "download"
+	SpeedTestStageUpload    = "upload"
+	SpeedTestStageComplete  = "complete"
+	SpeedTestStageCancelled = "cancelled"
+	SpeedTestStageError     = "error"
 
 	DefaultSpeedTestTimeoutMs       = int32(10000)
 	DefaultSpeedTestConnections     = 8
@@ -248,23 +248,12 @@ func (s *SpeedTestSession) run() {
 		_ = s.box.Close()
 	}()
 
-	// WHY: WireGuard profiles are registered as sing-box endpoints rather than outbounds;
-	// using Outbound().Default() would silently dial `direct`. resolveStrictProxyDialer
-	// resolves both standard "proxy" outbounds and "proxy" endpoints strictly.
+	// WHY: resolveStrictProxyDialer handles "proxy" outbounds, WireGuard "proxy"
+	// endpoints, custom full-config Default() outbounds, and iterative OutboundGroup
+	// unwrapping while rejecting direct/block/dns leaves.
 	proxyDialer, err := resolveStrictProxyDialer(s.box.Box)
 	if err != nil {
-		// Fall back to explicit default outbound only when a custom full-config profile uses a non-"proxy" tag.
-		outbound := s.box.Outbound().Default()
-		if outbound == nil || isForbiddenProbeOutboundType(outbound.Type()) {
-			s.finish(nil, fmt.Errorf("resolve speed-test proxy outbound: %w", err))
-			return
-		}
-		detour := dialer.NewDetour(s.box.Outbound(), outbound.Tag(), true)
-		dialerFunc := func(ctx context.Context, network string, address string) (net.Conn, error) {
-			return detour.DialContext(ctx, network, M.ParseSocksaddr(address))
-		}
-		outcome, runErr := executeSpeedTest(s.ctx, s.config, dialerFunc, s.updateProgress)
-		s.finish(outcome, runErr)
+		s.finish(nil, fmt.Errorf("resolve speed-test proxy outbound: %w", err))
 		return
 	}
 
@@ -374,8 +363,14 @@ func executeSpeedTest(
 		TLSHandshakeTimeout:   config.timeout,
 		ExpectContinueTimeout: time.Second,
 	}
+	if roots := currentRootCAs(); roots != nil {
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport}
+	client := &http.Client{
+		Transport:     transport,
+		CheckRedirect: validateRedirectPolicy,
+	}
 	outcome := &speedTestOutcome{}
 
 	if config.mode == SpeedTestModeSimpleDownload {
@@ -388,13 +383,13 @@ func executeSpeedTest(
 
 	discoveryCtx, cancelDiscovery := context.WithTimeout(ctx, config.timeout)
 	progress(speedTestProgress{stage: SpeedTestStageDiscovery})
-	servers, err := fetchSpeedTestServers(discoveryCtx, client, config.serverListURL, config.fallbackServerListURL)
+	servers, discoveryURL, err := fetchSpeedTestServers(discoveryCtx, client, config.serverListURL, config.fallbackServerListURL)
 	if err != nil {
 		cancelDiscovery()
 		return outcome, fmt.Errorf("discover speed-test servers: %w", err)
 	}
 	progress(speedTestProgress{stage: SpeedTestStageLatency})
-	selected, latency, err := selectLowestLatencyServer(discoveryCtx, client, servers)
+	selected, latency, err := selectLowestLatencyServer(discoveryCtx, client, servers, discoveryURL)
 	cancelDiscovery()
 	if err != nil {
 		return outcome, fmt.Errorf("select speed-test server: %w", err)
@@ -471,20 +466,20 @@ func fetchSpeedTestServers(
 	client *http.Client,
 	primaryURL string,
 	fallbackURL string,
-) (speedtest.Servers, error) {
+) (speedtest.Servers, string, error) {
 	primaryServers, primaryErr := fetchSpeedTestServerList(ctx, client, primaryURL)
 	if primaryErr == nil && len(primaryServers) > 0 {
-		return primaryServers, nil
+		return primaryServers, primaryURL, nil
 	}
 
 	fallbackServers, fallbackErr := fetchSpeedTestServerList(ctx, client, fallbackURL)
 	if fallbackErr == nil && len(fallbackServers) > 0 {
-		return fallbackServers, nil
+		return fallbackServers, fallbackURL, nil
 	}
 	if primaryErr != nil && fallbackErr != nil {
-		return nil, fmt.Errorf("primary endpoint: %v; fallback endpoint: %v", primaryErr, fallbackErr)
+		return nil, "", fmt.Errorf("primary endpoint: %v; fallback endpoint: %v", primaryErr, fallbackErr)
 	}
-	return nil, speedtest.ErrServerNotFound
+	return nil, "", speedtest.ErrServerNotFound
 }
 
 func fetchSpeedTestServerList(ctx context.Context, client *http.Client, endpoint string) (speedtest.Servers, error) {
@@ -533,10 +528,30 @@ func decodeSpeedTestServers(body []byte) (speedtest.Servers, error) {
 
 const maxSpeedTestProbeServers = 32
 
+func validateSpeedTestCandidateURL(candidateURL string, discoveryURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(candidateURL))
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("%w: invalid candidate server URL", errUnsafeRedirect)
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("%w: candidate server URL must not embed credentials", errUnsafeRedirect)
+	}
+	var via []*http.Request
+	if discoveryURL != "" {
+		if discParsed, parseErr := url.Parse(strings.TrimSpace(discoveryURL)); parseErr == nil && discParsed.Host != "" {
+			via = []*http.Request{{URL: discParsed}}
+		}
+	} else if !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("%w: https to http downgrade", errUnsafeRedirect)
+	}
+	return validateRedirectPolicy(&http.Request{URL: parsed}, via)
+}
+
 func selectLowestLatencyServer(
 	ctx context.Context,
 	client *http.Client,
 	servers speedtest.Servers,
+	discoveryURL string,
 ) (*speedtest.Server, time.Duration, error) {
 	type latencyResult struct {
 		server  *speedtest.Server
@@ -544,9 +559,16 @@ func selectLowestLatencyServer(
 		err     error
 	}
 
+	var firstErr error
 	candidates := make(speedtest.Servers, 0, min(len(servers), maxSpeedTestProbeServers))
 	for _, candidate := range servers {
 		if candidate == nil || candidate.URL == "" {
+			continue
+		}
+		if err := validateSpeedTestCandidateURL(candidate.URL, discoveryURL); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		candidates = append(candidates, candidate)
@@ -581,7 +603,6 @@ func selectLowestLatencyServer(
 
 	var selected *speedtest.Server
 	var lowest time.Duration
-	var firstErr error
 	for result := range results {
 		if result.err != nil {
 			if firstErr == nil {

@@ -345,6 +345,28 @@ class SubscriptionConfigActivity : ThemedActivity() {
         }
     }
 
+    private fun confirmFetchRemoteSubscriptionConfig(preferredUserAgents: List<String>?) {
+        if (isBusy) return
+        lifecycleScope.launch {
+            val hasLocalEdit = hasUnsavedEdits || withContext(Dispatchers.IO) {
+                SubscriptionConfigStore.isLocalEdit(groupId)
+            }
+            if (!hasLocalEdit) {
+                fetchRemoteSubscriptionConfig(preferredUserAgents)
+                return@launch
+            }
+            if (isFinishing || isDestroyed) return@launch
+            MaterialAlertDialogBuilder(this@SubscriptionConfigActivity)
+                .setTitle(R.string.subscription_config_overwrite_title)
+                .setMessage(R.string.subscription_config_overwrite_message)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    fetchRemoteSubscriptionConfig(preferredUserAgents)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
     private fun showUserAgentPickerForFetch() {
         val labels = arrayOf(
             getString(R.string.group_dns_client_flclash),
@@ -357,7 +379,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
             .setTitle(R.string.group_dns_candidates_pick_client)
             .setItems(labels) { _, which ->
                 val chosen = listOfNotNull(agents.getOrNull(which))
-                fetchRemoteSubscriptionConfig(preferredUserAgents = chosen)
+                confirmFetchRemoteSubscriptionConfig(preferredUserAgents = chosen)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -393,11 +415,13 @@ class SubscriptionConfigActivity : ThemedActivity() {
                 throw e
             } catch (e: Exception) {
                 Logs.w(e)
-                MaterialAlertDialogBuilder(this@SubscriptionConfigActivity)
-                    .setTitle(R.string.error_title)
-                    .setMessage(e.readableMessage)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
+                if (!isFinishing && !isDestroyed) {
+                    MaterialAlertDialogBuilder(this@SubscriptionConfigActivity)
+                        .setTitle(R.string.error_title)
+                        .setMessage(e.readableMessage)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
             } finally {
                 isBusy = false
                 if (!isFinishing && !isDestroyed) {
@@ -415,7 +439,7 @@ class SubscriptionConfigActivity : ThemedActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.action_fetch_remote_config -> {
-                fetchRemoteSubscriptionConfig(preferredUserAgents = null)
+                confirmFetchRemoteSubscriptionConfig(preferredUserAgents = null)
                 return true
             }
             R.id.action_switch_fetch_ua -> {

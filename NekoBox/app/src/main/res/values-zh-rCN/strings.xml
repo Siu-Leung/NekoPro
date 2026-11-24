@@ -591,10 +591,16 @@
     <string name="privacy_mask_disabled_toast">已恢复显示节点与拓扑地址</string>
     <string name="stats_direct_tag">直连</string>
     <string name="dashboard_reload">刷新面板</string>
+    <string name="dashboard_use_metacubexd">使用内置 MetaCubeXD 面板（推荐）</string>
+    <string name="dashboard_use_yacd">使用内置 Yacd 面板</string>
+    <string name="dashboard_switched_toast">已切换至内置 %1$s 面板（免密直连）</string>
+    <string name="dashboard_https_or_local_only">外链面板仅支持 https:// 链接，或使用内置本地面板</string>
     <string name="dashboard_copy_api_secret">复制 API 密钥 (Secret)</string>
     <string name="dashboard_api_secret_copied">已复制本地 Clash API 密钥（用于 127.0.0.1:9090）</string>
-    <string name="dashboard_custom_url_secret_hint">提示：连接 127.0.0.1:9090 时请点击右上角 ⋮ →「复制 API 密钥」粘贴到 Secret 栏</string>
+    <string name="dashboard_custom_url_secret_hint">已自动为当前面板注入本地 127.0.0.1:9090 免密连接凭据</string>
     <string name="dashboard_reset_default_url">恢复内置本地面板</string>
+    <string name="subscription_config_overwrite_title">覆盖本地修改？</string>
+    <string name="subscription_config_overwrite_message">当前分组包含你手动编辑并保存的订阅配置，拉取远程配置将覆盖本地修改。是否继续？</string>
     <string name="dashboard_not_connected_title">代理服务尚未启动</string>
     <string name="dashboard_not_connected_message">仪表板需要连接节点启动代理服务后，才能通过本地 Clash API 读取实时连接、规则与流量数据。</string>
     <string name="dashboard_go_connect">去连接节点</string>

@@ -21,8 +21,11 @@ class OutboundPreference
         if (value == "3") {
             val routeOutbound = DataStore.profileCacheStore.getLong(key + "Long") ?: 0
             if (routeOutbound > 0) {
-                ProfileManager.getProfile(routeOutbound)?.displayName()?.let {
-                    return it
+                ProfileManager.getProfile(routeOutbound)?.let { ent ->
+                    return io.nekohasekai.sagernet.ipinfo.AddressRedactor.beanTitle(
+                        ent.requireBean(),
+                        DataStore.hideNodeAddress,
+                    )
                 }
             }
         }

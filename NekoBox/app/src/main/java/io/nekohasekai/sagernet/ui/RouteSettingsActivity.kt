@@ -252,6 +252,9 @@ class RouteSettingsActivity(
                 }
 
                 onMainDispatcher {
+                    if (isFinishing || isDestroyed || supportFragmentManager.isStateSaved) {
+                        return@onMainDispatcher
+                    }
                     supportFragmentManager.beginTransaction()
                         .replace(R.id.settings, MyPreferenceFragmentCompat())
                         .commit()
@@ -272,10 +275,12 @@ class RouteSettingsActivity(
 
         if (DataStore.editingId == 0L && !hasRuleContent()) {
             onMainDispatcher {
-                MaterialAlertDialogBuilder(this@RouteSettingsActivity).setTitle(R.string.empty_route)
-                    .setMessage(R.string.empty_route_notice)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
+                if (!isFinishing && !isDestroyed) {
+                    MaterialAlertDialogBuilder(this@RouteSettingsActivity).setTitle(R.string.empty_route)
+                        .setMessage(R.string.empty_route_notice)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
             }
             return
         }
@@ -304,14 +309,20 @@ class RouteSettingsActivity(
 
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
+    private fun childFragment(): MyPreferenceFragmentCompat? =
+        supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) {
+            return onSupportNavigateUp()
+        }
+        return childFragment()?.onOptionsItemSelected(item) == true || super.onOptionsItemSelected(item)
+    }
 
     override fun onBackPressed() {
         if (needSave()) {
@@ -320,7 +331,11 @@ class RouteSettingsActivity(
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        if (!super.onSupportNavigateUp()) finish()
+        if (needSave()) {
+            UnsavedChangesDialogFragment().apply { key() }.show(supportFragmentManager, null)
+        } else if (!super.onSupportNavigateUp()) {
+            finish()
+        }
         return true
     }
 

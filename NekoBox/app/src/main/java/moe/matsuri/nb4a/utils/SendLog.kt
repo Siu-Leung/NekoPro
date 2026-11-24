@@ -29,10 +29,19 @@ object SendLog {
 
         logFile.writeText(report)
 
+        val hidePrivacy = io.nekohasekai.sagernet.database.DataStore.hideNodeAddress
+        fun sanitizeChunk(raw: String): String {
+            val base = moe.matsuri.nb4a.Protocols.sanitizeErrorMessage(raw)
+            return if (hidePrivacy) io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(base) else base
+        }
+
         try {
             val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d"))
             try {
-                process.inputStream.use(FileOutputStream(logFile, true))
+                val logcatText = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                logFile.appendText(sanitizeChunk(logcatText))
+                process.errorStream.close()
+                process.outputStream.close()
                 process.waitFor()
             } finally {
                 process.destroy()
@@ -50,19 +59,19 @@ object SendLog {
         val nekoLog = File(SagerNet.application.cacheDir, "neko.log")
         if (nekoLog.exists()) {
             try {
-                FileInputStream(nekoLog).use { input ->
-                    FileOutputStream(logFile, true).use { output ->
-                        input.copyTo(output)
-                    }
-                }
+                val nekoText = String(getNekoLog(512 * 1024), Charsets.UTF_8)
+                logFile.appendText(sanitizeChunk(nekoText))
             } catch (e: Exception) {
                 Logs.w(e)
                 logFile.appendText("Export neko.log error: " + CrashHandler.formatThrowable(e))
             }
         }
 
-        context.startActivity(
-            Intent.createChooser(
+        io.nekohasekai.sagernet.ktx.runOnMainDispatcher {
+            if (context is android.app.Activity && (context.isFinishing || context.isDestroyed)) {
+                return@runOnMainDispatcher
+            }
+            val chooser = Intent.createChooser(
                 Intent(Intent.ACTION_SEND).setType("text/x-log")
                     .setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     .putExtra(
@@ -70,8 +79,13 @@ object SendLog {
                             context, BuildConfig.APPLICATION_ID + ".cache", logFile
                         )
                     ), context.getString(R.string.abc_shareactionprovider_share_with)
-            )
-        )
+            ).apply {
+                if (context !is android.app.Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(chooser)
+        }
     }
 
     // Get log bytes from neko.log

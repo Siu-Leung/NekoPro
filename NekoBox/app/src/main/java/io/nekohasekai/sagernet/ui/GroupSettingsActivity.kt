@@ -97,9 +97,12 @@ class GroupSettingsActivity(
         if (isSubscription) {
             subscription = (subscription ?: SubscriptionBean().applyDefaultValues()).apply {
                 if (link != DataStore.subscriptionLink) {
-                    // An adopted resolver belongs to the exact old source, not the group name.
+                    // An adopted resolver and cached raw config belong to the exact old source.
                     adoptedNodeDns = ""
                     subscriptionUserinfo = ""
+                    if (id > 0L) {
+                        io.nekohasekai.sagernet.group.SubscriptionConfigStore.delete(id)
+                    }
                 }
                 link = DataStore.subscriptionLink
                 forceResolve = DataStore.subscriptionForceResolve
@@ -111,8 +114,11 @@ class GroupSettingsActivity(
                 autoAdoptNodeDns = DataStore.subscriptionAutoAdoptNodeDns
             }
         } else {
-            // A basic group has no subscription DNS state; its manual setting still applies.
+            // A basic group has no subscription DNS or cached remote config state.
             subscription = null
+            if (id > 0L) {
+                io.nekohasekai.sagernet.group.SubscriptionConfigStore.delete(id)
+            }
         }
         saveManualNodeDns(DataStore.subscriptionNodeDns)
     }
@@ -584,14 +590,20 @@ class GroupSettingsActivity(
         finish()
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
+    private fun childFragment(): MyPreferenceFragmentCompat? =
+        supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) {
+            return onSupportNavigateUp()
+        }
+        return childFragment()?.onOptionsItemSelected(item) == true || super.onOptionsItemSelected(item)
+    }
 
     override fun onBackPressed() {
         if (needSave()) {
@@ -600,7 +612,11 @@ class GroupSettingsActivity(
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        if (!super.onSupportNavigateUp()) finish()
+        if (needSave()) {
+            UnsavedChangesDialogFragment().apply { key() }.show(supportFragmentManager, null)
+        } else if (!super.onSupportNavigateUp()) {
+            finish()
+        }
         return true
     }
 

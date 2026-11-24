@@ -57,8 +57,12 @@ data class RuleEntity(
             0L -> app.getString(R.string.route_proxy)
             -1L -> app.getString(R.string.route_bypass)
             -2L -> app.getString(R.string.route_block)
-            else -> ProfileManager.getProfile(outbound)?.displayName()
-                ?: app.getString(R.string.error_title)
+            else -> ProfileManager.getProfile(outbound)?.let { profile ->
+                io.nekohasekai.sagernet.ipinfo.AddressRedactor.beanTitle(
+                    profile.requireBean(),
+                    DataStore.hideNodeAddress,
+                )
+            } ?: app.getString(R.string.error_title)
         }
     }
 

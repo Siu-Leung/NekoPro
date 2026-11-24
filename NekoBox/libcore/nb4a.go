@@ -85,6 +85,11 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	}()
 }
 
+const (
+	protectSocketTimeoutSec  = 1
+	protectSocketTimeoutUsec = 500 * 1000
+)
+
 func sendFdToProtect(fd int, path string) error {
 	socketFd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 	if err != nil {
@@ -92,8 +97,10 @@ func sendFdToProtect(fd int, path string) error {
 	}
 	defer unix.Close(socketFd)
 
-	var timeout unix.Timeval
-	timeout.Usec = 100 * 1000
+	timeout := unix.Timeval{
+		Sec:  protectSocketTimeoutSec,
+		Usec: protectSocketTimeoutUsec,
+	}
 
 	_ = unix.SetsockoptTimeval(socketFd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &timeout)
 	_ = unix.SetsockoptTimeval(socketFd, unix.SOL_SOCKET, unix.SO_SNDTIMEO, &timeout)

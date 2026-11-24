@@ -14,6 +14,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/matsuridayo/libneko/protect_server"
@@ -33,6 +34,14 @@ import (
 	"github.com/sagernet/sing/service/pause"
 )
 
+const (
+	boxStateIdle    = 0
+	boxStateStarted = 1
+	boxStateClosed  = 2
+
+	protectSocketPath = "protect_path"
+)
+
 func init() {
 	dialer.DoNotSelectInterface = true
 }
@@ -41,6 +50,13 @@ var (
 	mainInstance       *BoxInstance
 	mainInstanceAccess sync.RWMutex
 )
+
+func hasActiveMainInstance() bool {
+	mainInstanceAccess.RLock()
+	active := mainInstance != nil
+	mainInstanceAccess.RUnlock()
+	return active
+}
 
 func VersionBox() string {
 	version := []string{
@@ -78,6 +94,10 @@ func ResetAllConnections(system bool) {
 		if instance != nil {
 			instance.access.Lock()
 			defer instance.access.Unlock()
+			if instance.state != boxStateStarted || instance.Box == nil {
+				log.Println("Reset all connections skipped (instance not running)")
+				return
+			}
 			instance.Box.Network().ResetNetwork(context.Background())
 			log.Println("Reset all connections done")
 		} else {
@@ -95,7 +115,7 @@ type BoxInstance struct {
 	cancel context.CancelFunc
 	state  int
 
-	statsService        *v2rayapi.StatsService
+	statsService        atomic.Pointer[v2rayapi.StatsService]
 	selector            *group.Selector
 	pauseManager        pause.Manager
 	dnsRouter           adapter.DNSRouter
@@ -207,8 +227,8 @@ func (b *BoxInstance) Start() (err error) {
 
 	defer device.DeferPanicToError("box.Start", func(err_ error) { err = err_ })
 
-	if b.state == 0 {
-		b.state = 1
+	if b.state == boxStateIdle {
+		b.state = boxStateStarted
 		return b.Box.Start()
 	}
 	return errors.New("already started")
@@ -221,10 +241,10 @@ func (b *BoxInstance) Close() (err error) {
 	defer device.DeferPanicToError("box.Close", func(err_ error) { err = err_ })
 
 	// no double close
-	if b.state == 2 {
+	if b.state == boxStateClosed {
 		return nil
 	}
-	b.state = 2
+	b.state = boxStateClosed
 
 	// clear main instance
 	mainInstanceAccess.Lock()
@@ -268,24 +288,32 @@ func (b *BoxInstance) SetAsMain() {
 func (b *BoxInstance) SetV2rayStats(outbounds string) {
 	b.access.Lock()
 	defer b.access.Unlock()
-	if b.statsService != nil {
+	if b.state != boxStateIdle {
+		// WHY: Router.AppendTracker mutates Router.trackers without synchronization;
+		// calling SetV2rayStats after Start() races with active routed connections.
+		log.Println("WARN: SetV2rayStats ignored: SetV2rayStats must be called before Start")
+		return
+	}
+	if b.statsService.Load() != nil {
 		log.Println("duplicate call of SetV2rayStats")
 		return
 	}
-	b.statsService = v2rayapi.NewStatsService(option.V2RayStatsServiceOptions{
+	svc := v2rayapi.NewStatsService(option.V2RayStatsServiceOptions{
 		Enabled:   true,
 		Outbounds: strings.Split(outbounds, "\n"),
 	})
-	if b.statsService != nil {
-		b.Box.Router().AppendTracker(b.statsService)
+	if svc != nil {
+		b.statsService.Store(svc)
+		b.Box.Router().AppendTracker(svc)
 	}
 }
 
 func (b *BoxInstance) QueryStats(tag, direct string) int64 {
-	if b.statsService == nil {
+	svc := b.statsService.Load()
+	if svc == nil {
 		return 0
 	}
-	value, err := b.statsService.GetStats(context.Background(), &v2rayapi.GetStatsRequest{
+	value, err := svc.GetStats(context.Background(), &v2rayapi.GetStatsRequest{
 		Name:   fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", tag, direct),
 		Reset_: true,
 	})
@@ -311,8 +339,8 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 	}
 	// test i
 	if i != nil {
-		if i.statsService != nil {
-			connectionTracker = i.statsService
+		if svc := i.statsService.Load(); svc != nil {
+			connectionTracker = svc
 		}
 		client := createProxyHttpClient(i.Box, connectionTracker, timeoutDur)
 		defer client.CloseIdleConnections()
@@ -328,8 +356,8 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 		return speedtest.UrlTest(client, link, timeout, speedtest.UrlTestStandard_RTT)
 	}
 	// test mainInstance
-	if instance.statsService != nil {
-		connectionTracker = instance.statsService
+	if svc := instance.statsService.Load(); svc != nil {
+		connectionTracker = svc
 	}
 	client := createProxyHttpClient(instance.Box, connectionTracker, timeoutDur)
 	defer client.CloseIdleConnections()
@@ -373,26 +401,60 @@ func createProxyHttpClient(instance *box.Box, tracker adapter.ConnectionTracker,
 }
 
 var (
-	protectMu     sync.Mutex
-	protectCloser io.Closer
+	protectMu           sync.Mutex
+	protectCloser       io.Closer
+	protectServerPinned bool
 )
 
-func goServeProtect(start bool) {
+// StartProtectServer starts the Unix-domain socket protect listener (if not
+// already active) and pins it across BoxInstance.Close() reloads so UI test
+// sockets never see a missing protect_path mid-switch while VPN stays up.
+func StartProtectServer() {
 	protectMu.Lock()
 	defer protectMu.Unlock()
+	protectServerPinned = true
+	ensureProtectServerLocked()
+}
+
+// StopProtectServer unpins and closes the Unix-domain socket protect listener
+// when the Android VpnService tears down.
+func StopProtectServer() {
+	protectMu.Lock()
+	defer protectMu.Unlock()
+	protectServerPinned = false
+	stopProtectServerLocked()
+}
+
+func ensureProtectServerLocked() {
+	if protectCloser != nil {
+		return
+	}
+	closer, err := protect_server.ServeProtect(protectSocketPath, false, 0, func(fd int) error {
+		return intfBox.AutoDetectInterfaceControl(int32(fd))
+	})
+	if err != nil {
+		log.Println("goServeProtect error:", err)
+		return
+	}
+	protectCloser = closer
+}
+
+func stopProtectServerLocked() {
 	if protectCloser != nil {
 		_ = protectCloser.Close()
 		protectCloser = nil
 	}
+}
+
+func goServeProtect(start bool) {
+	protectMu.Lock()
+	defer protectMu.Unlock()
 	if start {
-		closer, err := protect_server.ServeProtect("protect_path", false, 0, func(fd int) error {
-			return intfBox.AutoDetectInterfaceControl(int32(fd))
-		})
-		if err != nil {
-			log.Println("goServeProtect error:", err)
-			return
-		}
-		protectCloser = closer
+		ensureProtectServerLocked()
+		return
+	}
+	if !protectServerPinned {
+		stopProtectServerLocked()
 	}
 }
 

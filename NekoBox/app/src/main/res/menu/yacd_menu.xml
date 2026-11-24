@@ -7,16 +7,20 @@
         android:title="@string/dashboard_reload"
         app:showAsAction="always" />
     <item
-        android:id="@+id/action_copy_api_secret"
-        android:title="@string/dashboard_copy_api_secret"
+        android:id="@+id/action_use_metacubexd"
+        android:title="@string/dashboard_use_metacubexd"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_use_yacd"
+        android:title="@string/dashboard_use_yacd"
         app:showAsAction="never" />
     <item
         android:id="@+id/action_set_url"
         android:title="@string/set_panel_url"
         app:showAsAction="never" />
     <item
-        android:id="@+id/action_reset_default_url"
-        android:title="@string/dashboard_reset_default_url"
+        android:id="@+id/action_copy_api_secret"
+        android:title="@string/dashboard_copy_api_secret"
         app:showAsAction="never" />
     <item
         android:id="@+id/close"

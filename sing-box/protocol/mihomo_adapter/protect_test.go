@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/metacubex/mihomo/component/resolver"
+	C "github.com/metacubex/mihomo/constant"
 	mDNS "github.com/miekg/dns"
 	"github.com/sagernet/sing-box/adapter"
+	boxConstant "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
 )
@@ -291,5 +293,106 @@ func TestNewTargetResolverResolvesForTestInstanceWhenGlobalActiveDNSRouterIsNil(
 	}
 	if router.lastTransportTag != "dns-remote" {
 		t.Fatalf("main instance transport = %q, want dns-remote", router.lastTransportTag)
+	}
+
+	// Test instance with BOTH dns-direct (even as Default()) and dns-remote must strictly use dns-remote.
+	fullTestCtx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.DNSRouter](fullTestCtx, router)
+	service.MustRegister[adapter.DNSTransportManager](fullTestCtx, &stubDNSTransportManager{
+		byTag: map[string]adapter.DNSTransport{"dns-direct": directTr, "dns-remote": remoteTr},
+		def:   directTr,
+	})
+	fullTestCtx = ContextWithTestInstance(fullTestCtx)
+	fullTestResolver := NewTargetResolver(fullTestCtx)
+	addrs, err = fullTestResolver.LookupIP(context.Background(), "cp.cloudflare.com")
+	if err != nil || len(addrs) != 1 {
+		t.Fatalf("full test instance LookupIP = (%v, %v)", addrs, err)
+	}
+	if router.lastTransportTag != "dns-remote" {
+		t.Fatalf("full test instance transport = %q, want dns-remote", router.lastTransportTag)
+	}
+}
+
+func TestInstallProtectHookOnTestInstanceInstallsNilFallbackSingBoxResolvers(t *testing.T) {
+	resolverInstallMu.Lock()
+	resolverInstalled = false
+	resolverInstallMu.Unlock()
+
+	testCtx := ContextWithTestInstance(service.ContextWithDefaultRegistry(context.Background()))
+	release := InstallProtectHook(testCtx)
+	defer release()
+
+	for name, r := range map[string]resolver.Resolver{
+		"DefaultResolver":         resolver.DefaultResolver,
+		"ProxyServerHostResolver": resolver.ProxyServerHostResolver,
+		"DirectHostResolver":      resolver.DirectHostResolver,
+	} {
+		sb, ok := r.(*singBoxResolver)
+		if !ok {
+			t.Fatalf("%s = %T, want *singBoxResolver", name, r)
+		}
+		if sb.fallback != nil {
+			t.Fatalf("%s fallback = %T, want nil (cleartext SystemResolver must never be reachable)", name, sb.fallback)
+		}
+	}
+}
+
+func TestNewOutboundResolverDefaultsToDNSDirectWithoutResolveDialer(t *testing.T) {
+	directTr := &stubDNSTransport{tag: "dns-direct"}
+	remoteTr := &stubDNSTransport{tag: "dns-remote"}
+	tm := &stubDNSTransportManager{
+		byTag: map[string]adapter.DNSTransport{
+			"dns-direct": directTr,
+			"dns-remote": remoteTr,
+		},
+		def: remoteTr,
+	}
+	router := &stubDNSRouter{addrs: []netip.Addr{netip.MustParseAddr("198.51.100.55")}}
+
+	ctx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.DNSRouter](ctx, router)
+	service.MustRegister[adapter.DNSTransportManager](ctx, tm)
+
+	// Simulate IP-literal server with ECH domain SNI (outboundDialer is not ResolveDialer, DomainResolver unset).
+	var opts option.DialerOptions
+	opts.DomainStrategy = option.DomainStrategy(boxConstant.DomainStrategyIPv4Only)
+	outResolver, err := NewOutboundResolver(ctx, opts, nil)
+	if err != nil || outResolver == nil {
+		t.Fatalf("NewOutboundResolver = (%v, %v), want non-nil resolver", outResolver, err)
+	}
+	addrs, err := outResolver.LookupIP(ctx, "cloudflare-ech.com")
+	if err != nil || len(addrs) != 1 || addrs[0] != netip.MustParseAddr("198.51.100.55") {
+		t.Fatalf("LookupIP = (%v, %v)", addrs, err)
+	}
+	if router.lastTransportTag != "dns-direct" {
+		t.Fatalf("transport tag = %q, want dns-direct", router.lastTransportTag)
+	}
+}
+
+func TestMapDomainStrategy(t *testing.T) {
+	cases := []struct {
+		strategy boxConstant.DomainStrategy
+		want     C.DNSPrefer
+	}{
+		{boxConstant.DomainStrategyAsIS, C.DualStack},
+		{boxConstant.DomainStrategyPreferIPv4, C.IPv4Prefer},
+		{boxConstant.DomainStrategyPreferIPv6, C.IPv6Prefer},
+		{boxConstant.DomainStrategyIPv4Only, C.IPv4Only},
+		{boxConstant.DomainStrategyIPv6Only, C.IPv6Only},
+	}
+	for _, tc := range cases {
+		var legacyOpts option.DialerOptions
+		legacyOpts.DomainStrategy = option.DomainStrategy(tc.strategy)
+		if got := MapDomainStrategy(legacyOpts); got != tc.want {
+			t.Fatalf("MapDomainStrategy(legacy=%v) = %v, want %v", tc.strategy, got, tc.want)
+		}
+
+		var resolverOpts option.DialerOptions
+		resolverOpts.DomainResolver = &option.DomainResolveOptions{
+			Strategy: option.DomainStrategy(tc.strategy),
+		}
+		if got := MapDomainStrategy(resolverOpts); got != tc.want {
+			t.Fatalf("MapDomainStrategy(domain_resolver=%v) = %v, want %v", tc.strategy, got, tc.want)
+		}
 	}
 }

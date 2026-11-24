@@ -36,7 +36,10 @@ object LocalResolverImpl : LocalDNSTransport {
         val cached = SagerNet.underlyingNetwork
         if (cached != null) {
             val caps = runCatching { connectivity.getNetworkCapabilities(cached) }.getOrNull()
-            if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+            if (caps != null &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            ) {
                 return cached
             }
         }
@@ -54,7 +57,7 @@ object LocalResolverImpl : LocalDNSTransport {
             }
             if (candidate == null) candidate = net
         }
-        return candidate ?: cached
+        return candidate
     }
 
     override fun raw(): Boolean {

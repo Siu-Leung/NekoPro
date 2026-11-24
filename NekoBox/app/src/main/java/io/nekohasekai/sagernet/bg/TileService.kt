@@ -32,7 +32,11 @@ class TileService : BaseTileService(), SagerConnection.Callback {
 
     override fun cbSelectorUpdate(id: Long) {
         val profile = SagerDatabase.proxyDao.getById(id) ?: return
-        updateTile(BaseService.State.Connected, profile.displayName())
+        val title = io.nekohasekai.sagernet.ipinfo.AddressRedactor.beanTitle(
+            profile.requireBean(),
+            io.nekohasekai.sagernet.database.DataStore.hideNodeAddress,
+        )
+        updateTile(BaseService.State.Connected, title)
     }
 
     override fun onStartListening() {
@@ -61,7 +65,11 @@ class TileService : BaseTileService(), SagerConnection.Callback {
 
                 BaseService.State.Connected -> {
                     icon = iconConnected
-                    label = profileName
+                    label = if (profileName != null && io.nekohasekai.sagernet.database.DataStore.hideNodeAddress) {
+                        io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(profileName)
+                    } else {
+                        profileName
+                    }
                     state = Tile.STATE_ACTIVE
                 }
 

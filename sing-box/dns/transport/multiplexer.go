@@ -59,6 +59,12 @@ type multiplexConn struct {
 	readEpoch atomic.Uint64
 }
 
+// Upstream exposes the underlying net.Conn so common.Cast[*uot.Conn] in
+// UDPTransport.readResponse traverses multiplexConn instead of missing *uot.Conn.
+func (c *multiplexConn) Upstream() any {
+	return c.Conn
+}
+
 type queryMultiplexerReadError struct {
 	cause error
 }

@@ -111,3 +111,79 @@ func testFallbackTransport(t *testing.T, tags []string, members ...*fakeDNSTrans
 	require.True(t, ok)
 	return transport
 }
+
+type deadlineRecordingTransport struct {
+	TransportAdapter
+	budgetSeen time.Duration
+	failErr    error
+	answer     netip.Addr
+}
+
+func (*deadlineRecordingTransport) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (*deadlineRecordingTransport) Reset()                                         {}
+
+func (d *deadlineRecordingTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		d.budgetSeen = time.Until(deadline)
+	}
+	if d.failErr != nil {
+		return nil, d.failErr
+	}
+	return FixedResponse(message.Id, message.Question[0], []netip.Addr{d.answer}, 60), nil
+}
+
+func (d *deadlineRecordingTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(*mDNS.Msg, error)) {
+	callback(d.Exchange(ctx, message))
+}
+
+func TestFallbackTransportBudgetCapsOnlyNonFinalMembers(t *testing.T) {
+	require.Equal(t, 1800*time.Millisecond, fallbackAttemptTimeout)
+
+	answer := netip.MustParseAddr("198.51.100.77")
+	first := &deadlineRecordingTransport{
+		TransportAdapter: NewTransportAdapter("fixture", "first", nil),
+		failErr:          errors.New("primary failed immediately"),
+	}
+	final := &deadlineRecordingTransport{
+		TransportAdapter: NewTransportAdapter("fixture", "final", nil),
+		answer:           answer,
+	}
+
+	registry := NewTransportRegistry()
+	manager := NewTransportManager(registry, nil, "final")
+	ctx := service.ContextWith[adapter.DNSTransportManager](t.Context(), manager)
+	logger := log.NewNOPFactory().Logger()
+	RegisterTransport(registry, "fixture", func(_ context.Context, _ log.ContextLogger, tag string, _ struct{}) (adapter.DNSTransport, error) {
+		switch tag {
+		case "first":
+			return first, nil
+		case "final":
+			return final, nil
+		default:
+			return nil, errors.New("unknown fixture")
+		}
+	})
+	require.NoError(t, manager.Create(ctx, logger, "fallback-pair", C.DNSTypeFallback, &option.FallbackDNSServerOptions{Servers: []string{"first", "final"}}))
+	require.NoError(t, manager.Create(ctx, logger, "first", "fixture", nil))
+	require.NoError(t, manager.Create(ctx, logger, "final", "fixture", nil))
+	scope := adapter.NewScope(ctx, logger)
+	t.Cleanup(func() { require.NoError(t, scope.Close()) })
+	require.NoError(t, manager.Start(adapter.StartStateInitialize, scope))
+	require.NoError(t, manager.Start(adapter.StartStateStart, scope))
+
+	aggregate, ok := manager.Transport("fallback-pair")
+	require.True(t, ok)
+
+	queryCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	resp, err := aggregate.Exchange(queryCtx, new(mDNS.Msg).SetQuestion("budget.example.", mDNS.TypeA))
+	require.NoError(t, err)
+	require.Equal(t, []netip.Addr{answer}, MessageToAddresses(resp))
+
+	// First member (remaining=2) must be capped at fallbackAttemptTimeout (1800ms),
+	// whereas final member (remaining=1) must receive the full remaining ~5s share.
+	require.LessOrEqual(t, first.budgetSeen, fallbackAttemptTimeout+50*time.Millisecond)
+	require.Greater(t, first.budgetSeen, 1500*time.Millisecond)
+	require.Greater(t, final.budgetSeen, 4*time.Second)
+}

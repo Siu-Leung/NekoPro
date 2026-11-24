@@ -77,7 +77,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 
 	mieruOpt := outbound.MieruOption{
 		BasicOption: outbound.BasicOption{
-			DialerForAPI: mihomo_adapter.NewDialer(outboundDialer),
+			IPVersion:      mihomo_adapter.MapDomainStrategy(options.DialerOptions),
+			DialerForAPI:   mihomo_adapter.NewDialer(outboundDialer),
+			TargetResolver: mihomo_adapter.NewTargetResolver(ctx),
 		},
 		Name:           tag,
 		Server:         options.Server,
@@ -121,6 +123,24 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 				router:       dnsRouter,
 				transports:   service.FromContext[adapter.DNSTransportManager](ctx),
 				queryOptions: resolveDialer.QueryOptions(),
+			}
+		}
+	} else if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
+		if transports := service.FromContext[adapter.DNSTransportManager](ctx); transports != nil {
+			serverTag := ""
+			if _, ok := transports.Transport("dns-direct"); ok {
+				serverTag = "dns-direct"
+			} else if _, ok := transports.Transport("dns-local"); ok {
+				serverTag = "dns-local"
+			}
+			mieruOpt.Resolver = &singBoxMieruResolver{
+				router:     dnsRouter,
+				transports: transports,
+				serverTag:  serverTag,
+				queryOptions: adapter.DNSQueryOptions{
+					Strategy:       strategy,
+					LookupStrategy: strategy,
+				},
 			}
 		}
 	}

@@ -86,10 +86,16 @@ object JavaUtil {
     @TargetApi(Build.VERSION_CODES.P)
     private fun tryLockOrRecreateFile(file: File) {
         try {
-            val tryLock = RandomAccessFile(file, "rw").channel.tryLock()
-            if (tryLock != null) {
-                tryLock.close()
-            } else {
+            val locked = RandomAccessFile(file, "rw").use { raf ->
+                val tryLock = raf.channel.tryLock()
+                if (tryLock != null) {
+                    tryLock.close()
+                    true
+                } else {
+                    false
+                }
+            }
+            if (!locked) {
                 createFile(file, file.delete())
             }
         } catch (e: Exception) {

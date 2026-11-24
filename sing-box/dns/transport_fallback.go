@@ -18,9 +18,9 @@ import (
 )
 
 // A private DoH mirror should answer quickly; a stalled one must not consume the
-// whole caller deadline. 1.2s leaves room for the next mirror plus the handshake
-// that follows resolution (URL tests run with a ~5s budget).
-const fallbackAttemptTimeout = 1200 * time.Millisecond
+// whole caller deadline. 1.8s leaves room for the next mirror plus the handshake
+// that follows resolution while accommodating cold proxy TLS/QUIC handshakes.
+const fallbackAttemptTimeout = 1800 * time.Millisecond
 
 // Reported instead of a sub-millisecond budget when the caller's deadline is nearly spent.
 const fallbackMinimumAttempt = 250 * time.Millisecond
@@ -86,18 +86,29 @@ func (t *fallbackTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*m
 			return nil, ctx.Err()
 		}
 		// Reserve time for every remaining member without extending the caller's deadline.
-		budget := fallbackAttemptTimeout
+		remainingMembers := len(*members) - index
+		var (
+			attempt context.Context
+			cancel  context.CancelFunc
+		)
 		if deadline, ok := ctx.Deadline(); ok {
 			remaining := time.Until(deadline)
-			share := remaining / time.Duration(len(*members)-index)
+			share := remaining / time.Duration(remainingMembers)
 			// Keep a floor only while the caller still has that much time left;
 			// otherwise fail fast instead of starting a query that cannot finish.
 			if remaining >= fallbackMinimumAttempt {
 				share = max(share, fallbackMinimumAttempt)
 			}
-			budget = min(budget, share)
+			budget := share
+			if remainingMembers > 1 {
+				budget = min(budget, fallbackAttemptTimeout)
+			}
+			attempt, cancel = context.WithTimeout(ctx, budget)
+		} else if remainingMembers > 1 {
+			attempt, cancel = context.WithTimeout(ctx, fallbackAttemptTimeout)
+		} else {
+			attempt, cancel = context.WithCancel(ctx)
 		}
-		attempt, cancel := context.WithTimeout(ctx, budget)
 		response, err = exchangeFallbackMember(attempt, member, message.Copy())
 		attemptErr := attempt.Err()
 		cancel()

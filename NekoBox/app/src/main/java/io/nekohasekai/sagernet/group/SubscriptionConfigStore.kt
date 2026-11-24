@@ -84,10 +84,18 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
         )
     }
 
+    const val LOCAL_EDIT_USER_AGENT = "local-edit"
+
     /**
      * Returns `true` if a local configuration file exists for [groupId].
      */
     fun exists(groupId: Long): Boolean = groupId > 0L && configFile(groupId).isFile
+
+    /**
+     * Returns `true` if the stored configuration for [groupId] was manually edited by the user.
+     */
+    fun isLocalEdit(groupId: Long): Boolean =
+        groupId > 0L && read(groupId)?.userAgent == LOCAL_EDIT_USER_AGENT
 
     /**
      * Deletes any persisted configuration and metadata files for [groupId].
@@ -96,6 +104,19 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
         if (groupId <= 0L) return
         runCatching { configFile(groupId).delete() }
         runCatching { metaFile(groupId).delete() }
+    }
+
+    /**
+     * Deletes all cached subscription configuration and metadata files across all groups
+     * (used during full database reset / backup restore to prevent group ID cross-contamination).
+     */
+    fun deleteAll() {
+        if (!baseDirectory.isDirectory) return
+        baseDirectory.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.startsWith("group_") || file.name.startsWith(".group_"))) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     private fun configFile(groupId: Long): File = File(baseDirectory, "group_${groupId}.conf")

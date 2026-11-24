@@ -119,6 +119,9 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
                 }
 
                 onMainDispatcher {
+                    if (isFinishing || isDestroyed || supportFragmentManager.isStateSaved) {
+                        return@onMainDispatcher
+                    }
                     supportFragmentManager.beginTransaction()
                         .replace(R.id.settings, MyPreferenceFragmentCompat())
                         .commit()
@@ -166,7 +169,8 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
 
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
+    private fun childFragment(): MyPreferenceFragmentCompat? =
+        supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
@@ -188,7 +192,12 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) {
+            return onSupportNavigateUp()
+        }
+        return childFragment()?.onOptionsItemSelected(item) == true || super.onOptionsItemSelected(item)
+    }
 
     override fun onBackPressed() {
         if (DataStore.dirty) UnsavedChangesDialogFragment().apply { key() }
@@ -196,7 +205,11 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        if (!super.onSupportNavigateUp()) finish()
+        if (DataStore.dirty) {
+            UnsavedChangesDialogFragment().apply { key() }.show(supportFragmentManager, null)
+        } else if (!super.onSupportNavigateUp()) {
+            finish()
+        }
         return true
     }
 

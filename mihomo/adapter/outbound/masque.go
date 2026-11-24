@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/metacubex/http"
 	"github.com/metacubex/quic-go"
 	"github.com/metacubex/tls"
+	"github.com/yosida95/uritemplate/v3"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -114,23 +116,40 @@ func NewMasque(option MasqueOption) (*Masque, error) {
 	if option.HandshakeTimeout < 0 {
 		return nil, errors.New("masque handshake timeout must be non-negative")
 	}
+	if option.URI != "" {
+		tmpl, err := uritemplate.New(option.URI)
+		if err != nil {
+			return nil, fmt.Errorf("invalid masque URI template: %w", err)
+		}
+		if len(tmpl.Varnames()) > 0 {
+			return nil, errors.New("masque URI template variables (IP flow forwarding) are not supported")
+		}
+		if _, err := url.Parse(tmpl.Raw()); err != nil {
+			return nil, fmt.Errorf("invalid masque URI: %w", err)
+		}
+	}
 	option.IPStack.normalize()
 	if err := option.IPStack.validate(); err != nil {
 		return nil, err
 	}
+	targetResolver := option.TargetResolver
+	if targetResolver == nil {
+		targetResolver = option.BasicOption.TargetResolver
+	}
 	outbound := &Masque{
 		Base: NewBase(BaseOption{
-			Name:         option.Name,
-			Addr:         net.JoinHostPort(option.Server, strconv.Itoa(option.Port)),
-			Type:         C.Masque,
-			ProviderName: option.ProviderName,
-			UDP:          option.UDP,
-			Interface:    option.Interface,
-			RoutingMark:  option.RoutingMark,
-			Prefer:       option.IPVersion,
-			Resolver:     option.Resolver,
+			Name:           option.Name,
+			Addr:           net.JoinHostPort(option.Server, strconv.Itoa(option.Port)),
+			Type:           C.Masque,
+			ProviderName:   option.ProviderName,
+			UDP:            option.UDP,
+			Interface:      option.Interface,
+			RoutingMark:    option.RoutingMark,
+			Prefer:         option.IPVersion,
+			Resolver:       option.Resolver,
+			TargetResolver: targetResolver,
 		}),
-		targetResolver: option.TargetResolver,
+		targetResolver: targetResolver,
 		runLock:        semaphore.NewWeighted(1),
 	}
 	outbound.dialer = option.NewDialer(outbound.DialOptions())
@@ -141,23 +160,28 @@ func NewMasque(option MasqueOption) (*Masque, error) {
 
 	privKeyB64, err := base64.StdEncoding.DecodeString(option.PrivateKey)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to decode private key: %v", err)
 	}
 	privKey, err := x509.ParseECPrivateKey(privKeyB64)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to parse private key: %v", err)
 	}
 
 	endpointPubKeyB64, err := base64.StdEncoding.DecodeString(option.PublicKey)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to decode public key: %v", err)
 	}
 	pubKey, err := x509.ParsePKIXPublicKey(endpointPubKeyB64)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to parse public key: %v", err)
 	}
 	ecPubKey, ok := pubKey.(*ecdsa.PublicKey)
 	if !ok {
+		cancel()
 		return nil, fmt.Errorf("failed to assert public key as ECDSA")
 	}
 
@@ -435,6 +459,9 @@ func (w *Masque) startLocked(ctx context.Context) error {
 // Close implements C.ProxyAdapter
 func (w *Masque) Close() error {
 	w.runCancel()
+	if w.h2Transport != nil {
+		w.h2Transport.CloseIdleConnections()
+	}
 	if w.tunDevice != nil {
 		w.tunDevice.Close()
 	}

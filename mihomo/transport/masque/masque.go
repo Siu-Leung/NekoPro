@@ -73,14 +73,12 @@ func PrepareTlsConfig(privKey *ecdsa.PrivateKey, peerPubKey *ecdsa.PublicKey, sn
 		InsecureSkipVerify: true,
 		// we pin to the endpoint public key
 		VerifyConnection: func(cs tls.ConnectionState) error {
-			var err error
-			for _, cert := range cs.PeerCertificates {
-				if er := verfiyCert(cert); er != nil {
-					err = errors.Join(err, er)
-					continue
-				}
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("masque tls: peer presented no certificates")
 			}
-			return err
+			// WHY: Only the leaf certificate (index 0) belongs to the MASQUE endpoint;
+			// intermediate and root CA certificates in the chain carry CA keys.
+			return verfiyCert(cs.PeerCertificates[0])
 		},
 	}
 	if insecure {
@@ -107,6 +105,11 @@ func GenerateCert(privKey *ecdsa.PrivateKey) ([][]byte, error) {
 // Endpoint address is used to check whether the authentication/connection is successful or not.
 // Requires modified connect-ip-go for now to support Cloudflare's non RFC compliant implementation.
 func ConnectTunnel(ctx context.Context, quicConn *quic.Conn, connectUri string) (*http3.Transport, *connectip.Conn, error) {
+	template, err := uritemplate.New(connectUri)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect-ip: invalid connect URI template: %w", err)
+	}
+
 	tr := &http3.Transport{
 		EnableDatagrams: true,
 		AdditionalSettings: map[uint64]uint64{
@@ -125,7 +128,6 @@ func ConnectTunnel(ctx context.Context, quicConn *quic.Conn, connectUri string) 
 		"User-Agent": []string{""},
 	}
 
-	template := uritemplate.MustNew(connectUri)
 	ipConn, rsp, err := dialEx(ctx, hconn, template, "cf-connect-ip", additionalHeaders, true)
 	if err != nil {
 		_ = tr.Close()

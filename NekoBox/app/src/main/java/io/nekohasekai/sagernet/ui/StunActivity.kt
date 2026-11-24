@@ -35,16 +35,17 @@ class StunActivity : ThemedActivity() {
         runOnDefaultDispatcher {
             val result = try {
                 val _result = Libcore.stunTest(binding.natStunServer.text.toString())
-                if (_result!!.success) {
+                if (_result != null && _result.success) {
                     _result.text
                 } else {
-                    throw Exception(_result.text)
+                    throw Exception(_result?.text ?: "STUN test returned empty result")
                 }
             } catch (e: Exception) {
                 onMainDispatcher {
+                    if (isFinishing || isDestroyed) return@onMainDispatcher
                     AlertDialog.Builder(this@StunActivity)
                         .setTitle(R.string.error_title)
-                        .setMessage(e.readableMessage)
+                        .setMessage(moe.matsuri.nb4a.Protocols.sanitizeErrorMessage(e.readableMessage))
                         .setPositiveButton(android.R.string.ok) { _, _ ->
                             finish()
                         }
@@ -56,6 +57,7 @@ class StunActivity : ThemedActivity() {
                 return@runOnDefaultDispatcher
             }
             onMainDispatcher {
+                if (isFinishing || isDestroyed) return@onMainDispatcher
                 binding.waitLayout.isVisible = false
                 binding.natResult.text = result
             }

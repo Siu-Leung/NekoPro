@@ -125,11 +125,13 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
                     .setMessage(R.string.update_all_subscription)
                     .setPositiveButton(R.string.yes) { _, _ ->
-                        SagerDatabase.groupDao.allGroups()
-                            .filter { it.type == GroupType.SUBSCRIPTION }
-                            .forEach {
-                                GroupUpdater.startUpdate(it, true)
-                            }
+                        runOnDefaultDispatcher {
+                            SagerDatabase.groupDao.allGroups()
+                                .filter { it.type == GroupType.SUBSCRIPTION }
+                                .forEach {
+                                    GroupUpdater.startUpdate(it, true)
+                                }
+                        }
                     }
                     .setNegativeButton(R.string.no, null)
                     .show()
@@ -207,7 +209,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         suspend fun reload() {
             val groups = SagerDatabase.groupDao.allGroups().toMutableList()
-            if (groups.size > 1 && SagerDatabase.proxyDao.countByGroup(groups.find { it.ungrouped }!!.id) == 0L) groups.removeAll { it.ungrouped }
+            val ungrouped = groups.find { it.ungrouped }
+            if (groups.size > 1 && ungrouped != null && SagerDatabase.proxyDao.countByGroup(ungrouped.id) == 0L) {
+                groups.removeAll { it.ungrouped }
+            }
             groupList.clear()
             groupList.addAll(groups)
             groupListView.post {
@@ -291,6 +296,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             delay(300L)
 
             onMainDispatcher {
+                if (!isAdded) return@onMainDispatcher
                 undoManager.flush()
                 notifyItemInserted(groupList.size - 1)
 
@@ -303,15 +309,20 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         override suspend fun groupRemoved(groupId: Long) {
             val index = groupList.indexOfFirst { it.id == groupId }
             if (index == -1) return
+            val totalGroups = withContext(Dispatchers.IO) { SagerDatabase.groupDao.allGroups().size }
             onMainDispatcher {
+                if (!isAdded) return@onMainDispatcher
                 undoManager.flush()
-                if (SagerDatabase.groupDao.allGroups().size <= 2) {
+                if (totalGroups <= 2) {
                     runOnDefaultDispatcher {
                         reload()
                     }
                 } else {
-                    groupList.removeAt(index)
-                    notifyItemRemoved(index)
+                    val latestIdx = groupList.indexOfFirst { it.id == groupId }
+                    if (latestIdx != -1) {
+                        groupList.removeAt(latestIdx)
+                        notifyItemRemoved(latestIdx)
+                    }
                 }
             }
         }
@@ -507,29 +518,32 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
 
             val subscription = proxyGroup.subscription
-            if (subscription != null && subscription.bytesUsed!! > 0L) { // SIP008 & Open Online Config
+            val bytesUsed = subscription?.bytesUsed ?: 0L
+            val bytesRemaining = subscription?.bytesRemaining ?: 0L
+            if (subscription != null && bytesUsed > 0L) { // SIP008 & Open Online Config
                 groupTraffic.isVisible = true
-                groupTraffic.text = if (subscription.bytesRemaining!! > 0L) {
+                groupTraffic.text = if (bytesRemaining > 0L) {
                     app.getString(
                         R.string.subscription_traffic, Formatter.formatFileSize(
-                            app, subscription.bytesUsed!!
+                            app, bytesUsed
                         ), Formatter.formatFileSize(
-                            app, subscription.bytesRemaining!!
+                            app, bytesRemaining
                         )
                     )
                 } else {
                     app.getString(
                         R.string.subscription_used, Formatter.formatFileSize(
-                            app, subscription.bytesUsed!!
+                            app, bytesUsed
                         )
                     )
                 }
                 groupStatus.setPadding(0)
             } else if (subscription != null && !subscription.subscriptionUserinfo.isNullOrBlank()) { // Raw
                 var text = ""
+                val userInfo = subscription.subscriptionUserinfo.orEmpty()
 
                 fun get(regex: String): String? {
-                    return regex.toRegex().findAll(subscription.subscriptionUserinfo!!).mapNotNull {
+                    return regex.toRegex().findAll(userInfo).mapNotNull {
                         if (it.groupValues.size > 1) it.groupValues[1] else null
                     }.firstOrNull()
                 }
@@ -546,18 +560,18 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     val remain = total - used
                     if (used > 0 || total > 0) {
                         text += if (remain > 0) {
-                            getString(
+                            app.getString(
                                 R.string.subscription_traffic,
                                 used.toBytesString(),
                                 remain.toBytesString()
                             )
                         } else {
-                            getString(R.string.subscription_used, used.toBytesString())
+                            app.getString(R.string.subscription_used, used.toBytesString())
                         }
                     }
                     get("expire=([0-9]+)")?.apply {
                         text += "\n"
-                        text += getString(
+                        text += app.getString(
                             R.string.subscription_expire,
                             Util.timeStamp2Text(this.toLong() * 1000)
                         )
@@ -578,28 +592,33 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
             groupUser.text = subscription?.username ?: ""
 
+            val boundGroupId = group.id
             runOnDefaultDispatcher {
-                val size = SagerDatabase.proxyDao.countByGroup(group.id)
+                val size = SagerDatabase.proxyDao.countByGroup(boundGroupId)
                 onMainDispatcher {
+                    if (!isAdded || proxyGroup.id != boundGroupId) return@onMainDispatcher
                     @Suppress("DEPRECATION") when (group.type) {
                         GroupType.BASIC -> {
                             if (size == 0L) {
                                 groupStatus.setText(R.string.group_status_empty)
                             } else {
-                                groupStatus.text = getString(R.string.group_status_proxies, size)
+                                groupStatus.text = app.getString(R.string.group_status_proxies, size)
                             }
                         }
 
                         GroupType.SUBSCRIPTION -> {
+                            val lastUpdatedSec = group.subscription?.lastUpdated ?: 0
                             groupStatus.text = if (size == 0L) {
-                                getString(R.string.group_status_empty_subscription)
-                            } else {
-                                val date = Date(group.subscription!!.lastUpdated!! * 1000L)
-                                getString(
+                                app.getString(R.string.group_status_empty_subscription)
+                            } else if (lastUpdatedSec > 0) {
+                                val date = Date(lastUpdatedSec * 1000L)
+                                app.getString(
                                     R.string.group_status_proxies_subscription,
                                     size,
                                     "${date.month + 1} - ${date.date}"
                                 )
+                            } else {
+                                app.getString(R.string.group_status_proxies, size)
                             }
 
                         }

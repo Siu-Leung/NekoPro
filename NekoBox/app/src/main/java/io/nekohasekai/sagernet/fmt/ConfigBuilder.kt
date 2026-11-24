@@ -201,12 +201,14 @@ fun buildConfig(
             if (enableClashApi) clash_api = ClashAPIOptions().apply {
                 external_controller = "127.0.0.1:9090"
                 secret = ClashApiSecret.value
-                external_ui = java.io.File(SagerNet.application.filesDir, "yacd").absolutePath
+                val uiDirName = if (DataStore.dashboardPanel == "yacd") "yacd" else "metacubexd"
+                external_ui = java.io.File(SagerNet.application.filesDir, uiDirName).absolutePath
                 access_control_allow_private_network = true
             }
             if (DataStore.enableCacheFile) cache_file = CacheFile().apply {
                 enabled = true
                 path = "cache.db"
+                cache_id = if (buildSelector) "group-${group!!.id}" else "profile-${proxy.id}"
             }
         }
 
@@ -515,7 +517,7 @@ fun buildConfig(
                             val primaryTag = groupNodeDnsPlan.bind(
                                 proxyEntity.groupId,
                                 groupNodeDnsList,
-                                entryHost,
+                                entryDomainHosts.firstOrNull() ?: entryHost,
                                 forExport = forExport,
                             )
                             entryDomainHosts.drop(1).forEach { extraHost ->
@@ -549,7 +551,7 @@ fun buildConfig(
                         groupNodeDnsPlan.bind(
                             proxyEntity.groupId,
                             groupNodeDnsList,
-                            entryHost,
+                            entryDomainHosts.firstOrNull() ?: entryHost,
                             forExport = forExport,
                         )
                     } catch (_: IllegalArgumentException) {
@@ -630,8 +632,10 @@ fun buildConfig(
 
         // build outbounds
         if (buildSelector) {
-            val list = group.id.let { SagerDatabase.proxyDao.getByGroup(it) }
-            list.forEach {
+            val list = group!!.id.let { SagerDatabase.proxyDao.getByGroup(it) }
+            // WHY: Build standalone members before ChainBeans so any member referenced as a chain hop
+            // registers its human-readable selector display tag in `globalOutbounds` instead of `g-<id>`.
+            list.sortedBy { it.type == ProxyEntity.TYPE_CHAIN }.forEach {
                 if (it.type == TYPE_CONFIG && (it.requireBean() as? ConfigBean)?.type == 0) {
                     return@forEach
                 }
@@ -641,7 +645,7 @@ fun buildConfig(
                 type = "selector"
                 tag = TAG_PROXY
                 default_ = tagMap[proxy.id]
-                outbounds = tagMap.values.toList()
+                outbounds = list.mapNotNull { tagMap[it.id] }
             })
         } else {
             buildChain(0, proxy)
@@ -735,7 +739,7 @@ fun buildConfig(
                         rule.config.isNotBlank()
 
                 if (!hasNonDnsConditions) {
-                    when (rule.outbound) {
+                    when (val outId = rule.outbound) {
                         -1L -> {
                             userDNSRuleList += makeDnsRuleObj().apply { server = "dns-direct" }
                         }
@@ -755,6 +759,17 @@ fun buildConfig(
                             userDNSRuleList += makeDnsRuleObj().apply {
                                 action = "predefined"
                                 rcode = "NOERROR"
+                            }
+                        }
+
+                        else -> if (outId > 0L && (outId == proxy.id || tagMap.containsKey(outId))) {
+                            if (useFakeDns) userDNSRuleList += makeDnsRuleObj().apply {
+                                server = "dns-fake"
+                                inbound = listOf("tun-in")
+                                query_type = listOf("A", "AAAA")
+                            }
+                            userDNSRuleList += makeDnsRuleObj().apply {
+                                server = "dns-remote"
                             }
                         }
                     }
@@ -898,9 +913,13 @@ fun buildConfig(
             }
         }
 
-        if (!forTest) {
-            val remoteDnsAddr = remoteDns.firstOrNull()
-                ?: throw Exception("No remote DNS, check your settings!")
+        val hasProxyTarget = outbounds.any { it.tag == TAG_PROXY || it._hack_config_map["tag"] == TAG_PROXY } ||
+            (endpoints?.any { it._hack_config_map["tag"] == TAG_PROXY } == true)
+        val remoteDnsAddr = remoteDns.firstOrNull()
+        if (!forTest && remoteDnsAddr == null) {
+            throw Exception("No remote DNS, check your settings!")
+        }
+        if (remoteDnsAddr != null && (!forTest || hasProxyTarget)) {
             dns.servers.add(
                 SingBoxDnsServerParser.parse(
                     rawAddress = remoteDnsAddr,

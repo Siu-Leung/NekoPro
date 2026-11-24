@@ -29,17 +29,17 @@ type Mieru struct {
 
 type MieruOption struct {
 	BasicOption
-	Name           string `proxy:"name"`
-	Server         string `proxy:"server"`
-	Port           int    `proxy:"port,omitempty"`
-	PortRange      string `proxy:"port-range,omitempty"`
-	Transport      string `proxy:"transport"`
-	MTU            int32  `proxy:"mtu,omitempty"`
-	UDP            bool   `proxy:"udp,omitempty"`
-	UserName       string `proxy:"username"`
-	Password       string `proxy:"password"`
-	Multiplexing   string `proxy:"multiplexing,omitempty"`
-	HandshakeMode  string `proxy:"handshake-mode,omitempty"`
+	Name           string                  `proxy:"name"`
+	Server         string                  `proxy:"server"`
+	Port           int                     `proxy:"port,omitempty"`
+	PortRange      string                  `proxy:"port-range,omitempty"`
+	Transport      string                  `proxy:"transport"`
+	MTU            int32                   `proxy:"mtu,omitempty"`
+	UDP            bool                    `proxy:"udp,omitempty"`
+	UserName       string                  `proxy:"username"`
+	Password       string                  `proxy:"password"`
+	Multiplexing   string                  `proxy:"multiplexing,omitempty"`
+	HandshakeMode  string                  `proxy:"handshake-mode,omitempty"`
 	TrafficPattern string                  `proxy:"traffic-pattern,omitempty"`
 	Resolver       mierucommon.DNSResolver `proxy:"-"`
 }
@@ -163,16 +163,17 @@ func NewMieru(option MieruOption) (*Mieru, error) {
 	}
 	outbound := &Mieru{
 		Base: NewBase(BaseOption{
-			Name:         option.Name,
-			Addr:         addr,
-			Type:         C.Mieru,
-			ProviderName: option.ProviderName,
-			UDP:          option.UDP,
-			TFO:          option.TFO,
-			MPTCP:        option.MPTCP,
-			Interface:    option.Interface,
-			RoutingMark:  option.RoutingMark,
-			Prefer:       option.IPVersion,
+			Name:           option.Name,
+			Addr:           addr,
+			Type:           C.Mieru,
+			ProviderName:   option.ProviderName,
+			UDP:            option.UDP,
+			TFO:            option.TFO,
+			MPTCP:          option.MPTCP,
+			Interface:      option.Interface,
+			RoutingMark:    option.RoutingMark,
+			Prefer:         option.IPVersion,
+			TargetResolver: option.TargetResolver,
 		}),
 		option: &option,
 		client: c,

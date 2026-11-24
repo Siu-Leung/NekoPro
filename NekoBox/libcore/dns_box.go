@@ -71,12 +71,18 @@ func (p *platformLocalDNSTransport) ExchangeAsync(ctx context.Context, message *
 func (p *platformLocalDNSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
 	if p.raw && rawQueryFunc != nil {
 		// Raw - Android 10 及以上才有
-
+		networkHandle := p.iif.NetworkHandle()
+		if isBgProcess && networkHandle == 0 && hasActiveMainInstance() {
+			// WHY: Passing 0 (NETWORK_UNSPECIFIED) to android_res_nsend while VPN/core
+			// is active binds the query to Android's default network (tun0), causing
+			// recursive DNS loops or leaks when physical network tracking is momentarily 0.
+			return nil, syscall.ENETUNREACH
+		}
 		messageBytes, err := message.Pack()
 		if err != nil {
 			return nil, err
 		}
-		msg, err := rawQueryFunc(ctx, p.iif.NetworkHandle(), messageBytes)
+		msg, err := rawQueryFunc(ctx, networkHandle, messageBytes)
 		if err != nil {
 			return nil, err
 		}

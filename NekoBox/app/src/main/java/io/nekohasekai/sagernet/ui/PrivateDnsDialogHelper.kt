@@ -260,12 +260,18 @@ object PrivateDnsDialogHelper {
                 .count { it.trim().isNotEmpty() }
             statusSummary.text = when {
                 manualCount > 0 -> activity.getString(R.string.private_dns_status_manual, manualCount)
-                isSubscription && autoAdoptSwitch.isChecked && adoptedList.isNotEmpty() ->
+                isSubscription && autoAdoptSwitch.isChecked && adoptedList.isNotEmpty() -> {
+                    val detailText = if (DataStore.hideNodeAddress) {
+                        adoptedList.joinToString(" , ") { io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(it) }
+                    } else {
+                        adoptedList.joinToString(" , ")
+                    }
                     activity.getString(
                         R.string.private_dns_status_adopted_detail,
                         adoptedList.size,
-                        adoptedList.joinToString(" , "),
+                        detailText,
                     )
+                }
                 isSubscription && autoAdoptSwitch.isChecked ->
                     activity.getString(R.string.group_node_dns_waiting)
                 else -> activity.getString(R.string.group_node_dns_default)
@@ -418,8 +424,10 @@ object PrivateDnsDialogHelper {
                 if (DataStore.serviceState.connected) {
                     SagerNet.reloadService()
                 }
-                Toast.makeText(activity, R.string.private_dns_saved_toast, Toast.LENGTH_SHORT).show()
-                onComplete()
+                if (!activity.isFinishing && !activity.isDestroyed) {
+                    Toast.makeText(activity, R.string.private_dns_saved_toast, Toast.LENGTH_SHORT).show()
+                    onComplete()
+                }
             }
         }
     }

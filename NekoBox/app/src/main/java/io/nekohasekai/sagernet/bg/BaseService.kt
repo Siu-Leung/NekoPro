@@ -225,7 +225,8 @@ class BaseService {
                             val ent = withContext(Dispatchers.IO) {
                                 SagerDatabase.proxyDao.getById(reason.profileId)
                             }
-                            if (ent != null && ReloadDecision.shouldSelectOnly(
+                            if (data.state == State.Connected && data.proxy === proxy && proxy.isInitialized() &&
+                                ent != null && ReloadDecision.shouldSelectOnly(
                                     reason,
                                     runningGroupId.toString(),
                                     ent.groupId.toString()
@@ -273,10 +274,11 @@ class BaseService {
 
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
             DataStore.baseService = null
-            DataStore.vpnService = null
 
             if (data.state == State.Stopping) {
-                if (restart) data.pendingRestart = true
+                // WHY: Honor explicit user Stop (`restart = false`) even if a reload had previously
+                // set `pendingRestart = true`.
+                data.pendingRestart = restart
                 return
             }
             data.pendingRestart = restart
@@ -293,6 +295,7 @@ class BaseService {
                 withContext(Dispatchers.IO) {
                     killProcesses()
                 }
+                DataStore.vpnService = null
                 val data = data
                 if (data.closeReceiverRegistered) {
                     unregisterReceiver(data.receiver)
@@ -319,11 +322,15 @@ class BaseService {
         var upstreamInterfaceName: String?
 
         suspend fun preInit() {
-            DefaultNetworkListener.start(this) {
-                SagerNet.connectivity.getLinkProperties(it)?.also { link ->
-                    SagerNet.underlyingNetwork = it
+            DefaultNetworkListener.start(this) { network ->
+                val link = network?.let { SagerNet.connectivity.getLinkProperties(it) }
+                if (network == null || link == null) {
+                    SagerNet.underlyingNetwork = null
+                    upstreamInterfaceName = null
                     DataStore.vpnService?.updateUnderlyingNetwork()
-                    //
+                } else {
+                    SagerNet.underlyingNetwork = network
+                    DataStore.vpnService?.updateUnderlyingNetwork()
                     val oldName = upstreamInterfaceName
                     if (oldName != link.interfaceName) {
                         upstreamInterfaceName = link.interfaceName
@@ -359,11 +366,24 @@ class BaseService {
             DataStore.baseService = this
 
             val data = data
-            if (data.state != State.Stopped) return Service.START_NOT_STICKY
+            if (data.state != State.Stopped) {
+                // WHY: If `startForegroundService()` was called while `State.Stopping` had already
+                // destroyed the previous notification, we MUST call `startForeground()` synchronously
+                // before returning so Android 8+ never throws `ForegroundServiceDidNotStartInTimeException`.
+                if (data.notification == null) {
+                    data.notification = createNotification("").apply { showImmediate() }
+                } else {
+                    data.notification?.showImmediate()
+                }
+                if (data.state == State.Stopping) {
+                    data.pendingRestart = true
+                }
+                return Service.START_NOT_STICKY
+            }
             val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
-                data.notification = createNotification("")
+                data.notification = createNotification("").apply { showImmediate() }
                 stopRunner(false, getString(R.string.profile_empty))
                 return Service.START_NOT_STICKY
             }
@@ -403,10 +423,11 @@ class BaseService {
 
             data.changeState(State.Connecting)
             val startGeneration = ++data.generation
+            data.notification = createNotification(ServiceNotification.genTitle(profile)).apply {
+                showImmediate()
+            }
             val connectingJob = data.serviceScope.launch(start = CoroutineStart.LAZY) {
                 try {
-                    data.notification = createNotification(ServiceNotification.genTitle(profile))
-
                     Executable.killAll()    // clean up old processes
                     preInit()
                     proxy.init()
@@ -414,7 +435,7 @@ class BaseService {
 
                     proxy.processes = GuardedProcessPool {
                         Logs.w(it)
-                        stopRunner(false, it.readableMessage)
+                        stopRunner(false, Protocols.sanitizeErrorMessage(it.readableMessage))
                     }
 
                     startProcesses()
@@ -433,14 +454,15 @@ class BaseService {
                     data.binder.missingPlugin(e.plugin)
                     stopRunner(false, null)
                 } catch (exc: Throwable) {
+                    val sanitized = Protocols.sanitizeErrorMessage(exc.readableMessage)
                     if (exc.javaClass.name.endsWith("proxyerror")) {
                         // error from golang
-                        Logs.w(exc.readableMessage)
+                        Logs.w(sanitized)
                     } else {
                         Logs.w(exc)
                     }
                     stopRunner(
-                        false, "${getString(R.string.service_failed)}: ${exc.readableMessage}"
+                        false, "${getString(R.string.service_failed)}: $sanitized"
                     )
                 } finally {
                     if (data.connectingJob === coroutineContext[Job]) data.connectingJob = null

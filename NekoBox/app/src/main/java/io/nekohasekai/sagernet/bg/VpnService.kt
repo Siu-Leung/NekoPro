@@ -39,6 +39,7 @@ class VpnService : BaseVpnService(),
 
     override suspend fun startProcesses() {
         DataStore.vpnService = this
+        libcore.Libcore.startProtectServer()
         super.startProcesses() // launch proxy instance
     }
 
@@ -55,6 +56,7 @@ class VpnService : BaseVpnService(),
         conn?.close()
         conn = null
         super.killProcesses()
+        libcore.Libcore.stopProtectServer()
     }
 
     override fun onBind(intent: Intent) = when (intent.action) {
@@ -79,7 +81,7 @@ class VpnService : BaseVpnService(),
         }
         // We were started via startForegroundService(): we must call startForeground()
         // before stopping, otherwise Android 8+ crashes the process.
-        if (data.notification == null) data.notification = createNotification("")
+        if (data.notification == null) data.notification = createNotification("").apply { showImmediate() }
         stopRunner()
         return Service.START_NOT_STICKY
     }
@@ -101,26 +103,33 @@ class VpnService : BaseVpnService(),
         val ipv6Mode = DataStore.ipv6Mode
 
         // address
-        builder.addAddress(PRIVATE_VLAN4_CLIENT, 30)
+        if (ipv6Mode != IPv6Mode.ONLY) {
+            builder.addAddress(PRIVATE_VLAN4_CLIENT, 30)
+            builder.addDnsServer(PRIVATE_VLAN4_ROUTER)
+        }
         if (ipv6Mode != IPv6Mode.DISABLE) {
             builder.addAddress(PRIVATE_VLAN6_CLIENT, 126)
+            builder.addDnsServer(PRIVATE_VLAN6_ROUTER)
         }
-        builder.addDnsServer(PRIVATE_VLAN4_ROUTER)
 
         // route
         if (DataStore.bypassLan) {
-            resources.getStringArray(R.array.bypass_private_route).forEach {
-                val subnet = Subnet.fromString(it)!!
-                builder.addRoute(subnet.address.hostAddress!!, subnet.prefixSize)
+            if (ipv6Mode != IPv6Mode.ONLY) {
+                resources.getStringArray(R.array.bypass_private_route).forEach {
+                    val subnet = Subnet.fromString(it)!!
+                    builder.addRoute(subnet.address.hostAddress!!, subnet.prefixSize)
+                }
+                builder.addRoute(PRIVATE_VLAN4_ROUTER, 32)
+                builder.addRoute(FAKEDNS_VLAN4_CLIENT, 15)
             }
-            builder.addRoute(PRIVATE_VLAN4_ROUTER, 32)
-            builder.addRoute(FAKEDNS_VLAN4_CLIENT, 15)
             // https://issuetracker.google.com/issues/149636790
             if (ipv6Mode != IPv6Mode.DISABLE) {
                 builder.addRoute("2000::", 3)
             }
         } else {
-            builder.addRoute("0.0.0.0", 0)
+            if (ipv6Mode != IPv6Mode.ONLY) {
+                builder.addRoute("0.0.0.0", 0)
+            }
             if (ipv6Mode != IPv6Mode.DISABLE) {
                 builder.addRoute("::", 0)
             }
@@ -213,9 +222,11 @@ class VpnService : BaseVpnService(),
 
     fun updateUnderlyingNetwork(builder: Builder? = null) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            SagerNet.underlyingNetwork?.let {
-                builder?.setUnderlyingNetworks(arrayOf(SagerNet.underlyingNetwork))
-                    ?: setUnderlyingNetworks(arrayOf(SagerNet.underlyingNetwork))
+            val nets = SagerNet.underlyingNetwork?.let { arrayOf(it) }
+            if (builder != null) {
+                builder.setUnderlyingNetworks(nets)
+            } else {
+                setUnderlyingNetworks(nets)
             }
         }
     }
@@ -223,6 +234,7 @@ class VpnService : BaseVpnService(),
     override fun onRevoke() = stopRunner()
 
     override fun onDestroy() {
+        libcore.Libcore.stopProtectServer()
         DataStore.vpnService = null
         data.close()
         data.binder.close()

@@ -24,15 +24,28 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 - IPv4 / IPv6 双栈
 - AnyTLS、VMess、VLESS、Trojan、Shadowsocks、ShadowTLS
 - Hysteria 1/2、TUIC、SSH、SOCKS、WireGuard (Endpoint) 等
-- 带本地认证的 Clash API 与内置仪表板
+- 带三层免密认证的 Clash API 与双内置仪表板（默认 **MetaCubeXD `v1.276.0`** + 一键切换 **Yacd-meta**）
 - Android 包名：`moe.nb4a.siu`
 
 ## 当前版本
 
-`Neko-Pro-1.4.7`
+`Neko-Pro-1.4.8-rc1`（预览测试分支，主线最新正式版：`Neko-Pro-1.4.7`）
 
-- [GitHub Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.7)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.7-arm64-v8a.apk`
+- [最新正式版 v1.4.7 Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.7)
+- 测试版 APK：`NekoBox-Neko-Pro-1.4.8-rc1-arm64-v8a.apk`
+
+### v1.4.8-rc1 预览版改动日志 (2026-11-24)
+
+- **三层免密直连 Clash 仪表板 + 内置 MetaCubeXD `v1.276.0` 默认面板**
+  - **内置离线双面板一键切换**：APK 内置打包官方 **MetaCubeXD `v1.276.0`**（默认启用）与 **Yacd-meta**，无外网/首次启动离线秒开，右上角菜单支持一键切换 MetaCubeXD / Yacd 或自定义远程 `https://` 面板（如 Zashboard），未开代理时点击侧栏「仪表板」也会自动启动服务并就绪连接，无需手输后端地址与密钥。
+  - **三层零密码自动认证（Cookie + Document-Start 注入 + 内核同源校验）**：
+    1. **Layer 1（App 私有 WebView `HttpOnly` Cookie）**：进入面板前向 `http://127.0.0.1:9090` 注入 `nekopro_clash_auth=<secret>; Path=/; HttpOnly; SameSite=Strict` 会话 Cookie（对外部浏览器与其他 App 完全隔离）；
+    2. **Layer 2（`WebViewCompat.addDocumentStartJavaScript` 预注入与回环鉴权代理）**：在前端框架挂载前按面板规范预置 `localStorage`（修正 MetaCubeXD VueUse 原始字符串 `selectedEndpoint` 规范），并仅针对本机 `127.0.0.1:9090` 自动补齐 `fetch` / `XHR` `Authorization: Bearer` 与 `WebSocket` `?token=`（兼容第三方自定义 `https://` 面板跨域免密连接本地控制器），同时在资源拦截层屏蔽陈旧 ServiceWorker 缓存；
+    3. **Layer 3（`sing-box` `clashapi` 双栈鉴权与 CSRF 防护）**：保留外部客户端 `Authorization: Bearer` 与 WebSocket `?token=` 常量时间比对，新增 `nekopro_clash_auth` Cookie 兜底鉴权，严格校验 `Sec-Fetch-Site` 与本机端口匹配的 `Origin`/`Referer` 以阻断跨站请求伪造，并彻底修复 `/logs`、`/traffic`、`/connections`、`/memory` WebSocket 协程泄漏与 `external_ui_download_url` 解压路径穿越防护。
+- **全栈 24 项深度审计修复（Android UI / `:bg` 服务 / `libcore` / `sing-box` / `mihomo`）**
+  - **崩溃与生命周期根治（P0）**：修复 `BaseService` 在 `Stopping` 阶段收到启动指令未调 `startForeground()` 触发的 Android 12+ `ForegroundServiceDidNotStartInTimeException`；修复全部二级设置页（分组、节点、路由）左上角 `X` 返回失效、快速连点空指针与未保存变更拦截丢失；消除 `ConfigurationFragment`、`GroupFragment`、`SettingsPreferenceFragment`、`StunActivity`、`SendLog` 脱离宿主或后台线程调用 `getString`/弹窗导致的崩溃，切页时保留 `ConfigurationFragment` 使最小化后台测速跨页面不中断。
+  - **双核协议与 DNS 防泄漏加固（P0/P1）**：修复 `mihomo_adapter` 漏调 `installSingBoxResolverOnce()` 及回退系统 DNS 的隐患，为 VLESS-XHTTP / Mieru / MASQUE 补齐 UDP `TargetResolver` 与 `IPVersion` 策略；封堵 Mihomo MASQUE HTTP/2 Capsule 变长整数无上限内存分配 OOM、`MustNew` 崩溃与中间 CA 误匹配 pin；修复 `multiplexConn` 未实现 `Upstream()` 导致 UoT DNS 异常流无法识别回退 TCP、多上游 DNS 末位超时被强截断 1.2s、`forTest` 测速缺失 `dns-remote`、链式代理落地节点抢占前置入口 DNS 及 `IpInfoStore` 非 HTTPS 组 DNS 解析盲区。
+  - **流量统计、并发与隐私脱敏闭环（P1/P2）**：修复 `SetV2rayStats` 晚于 `box.Start()` 注册的理论数据竞争、分组切换与面板选点跨进程状态漂移、`StatsBar` 直连速率开关失效与测速多行文案溢出；将 `protect_path` 生命周期绑定至 `VpnService` 消除切节点瞬间 UI 测速漏保；为 Android 14+ 代理模式补齐 `specialUse` 前台服务类型；将多进程 Room 线程池迁移至无上限 `Dispatchers.IO` 并为 `extractAssets` 增加 `flock` 跨进程文件锁；保护本地手动编辑的订阅配置不被自动刷新静默覆盖；补全通知栏、磁贴、二维码、路由、日志导出、去重弹窗与节点内联搜索的「隐藏节点地址」全链路脱敏。
 
 ### v1.4.7 正式版改动日志 (2026-11-22)
 

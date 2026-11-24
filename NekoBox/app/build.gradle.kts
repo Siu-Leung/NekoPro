@@ -48,6 +48,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.browser:browser:1.8.0")
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
     implementation("androidx.navigation:navigation-fragment-ktx:2.8.5")
