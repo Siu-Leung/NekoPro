@@ -197,7 +197,8 @@ fun buildConfig(
 
     return MyOptions().apply {
         val enableClashApi = DataStore.enableClashAPI && !forExport
-        if (!forTest && (enableClashApi || DataStore.enableCacheFile)) experimental = ExperimentalOptions().apply {
+        val needCacheFile = !forExport && (DataStore.enableCacheFile || useFakeDns)
+        if (!forTest && (enableClashApi || needCacheFile)) experimental = ExperimentalOptions().apply {
             if (enableClashApi) clash_api = ClashAPIOptions().apply {
                 external_controller = "127.0.0.1:9090"
                 secret = ClashApiSecret.value
@@ -205,10 +206,13 @@ fun buildConfig(
                 external_ui = java.io.File(SagerNet.application.filesDir, uiDirName).absolutePath
                 access_control_allow_private_network = true
             }
-            if (DataStore.enableCacheFile) cache_file = CacheFile().apply {
+            if (needCacheFile) cache_file = CacheFile().apply {
                 enabled = true
+                store_fakeip = useFakeDns
                 path = "cache.db"
-                cache_id = if (buildSelector) "group-${group!!.id}" else "profile-${proxy.id}"
+                // WHY: Keying cache_id by groupId preserves 198.18.0.0/15 FakeIP -> domain records
+                // when switching between standalone profiles in the same group while isolating groups.
+                cache_id = "group-${if (buildSelector) group!!.id else proxy.groupId}"
             }
         }
 
@@ -926,14 +930,25 @@ fun buildConfig(
             throw Exception("No remote DNS, check your settings!")
         }
         if (remoteDnsAddr != null && (!forTest || hasProxyTarget)) {
-            dns.servers.add(
-                SingBoxDnsServerParser.parse(
-                    rawAddress = remoteDnsAddr,
-                    tag = "dns-remote",
-                    defaultDetour = TAG_PROXY,
-                    domainResolver = "dns-direct",
+            if (forTest) {
+                runCatching {
+                    SingBoxDnsServerParser.parse(
+                        rawAddress = remoteDnsAddr,
+                        tag = "dns-remote",
+                        defaultDetour = TAG_PROXY,
+                        domainResolver = "dns-direct",
+                    )
+                }.getOrNull()?.let { dns.servers.add(it) }
+            } else {
+                dns.servers.add(
+                    SingBoxDnsServerParser.parse(
+                        rawAddress = remoteDnsAddr,
+                        tag = "dns-remote",
+                        defaultDetour = TAG_PROXY,
+                        domainResolver = "dns-direct",
+                    )
                 )
-            )
+            }
         }
 
         dns.servers.addAll(groupNodeDnsPlan.servers)

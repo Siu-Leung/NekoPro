@@ -195,7 +195,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private var ipInfoJob: Job? = null
     private var ipInfoDialog: AlertDialog? = null
-    private var lastIpDisplayOptions: Pair<Boolean, Boolean>? = null
+    private var lastHideNodeAddress: Boolean? = null
 
     @Volatile
     internal var probingProxyId: Long? = null
@@ -248,13 +248,6 @@ class ConfigurationFragment @JvmOverloads constructor(
     @SuppressLint("DetachAndAttachSameFragment")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // WHY: Earlier builds omitted app:defaultValue="true" on showNodeIpOwner in global_preferences.xml,
-        // causing SettingsFragment initialization to persist false into PublicDatabase and hide all topology UI.
-        if (!DataStore.topologyDisplayRestoredV1) {
-            DataStore.showNodeIpOwner = true
-            DataStore.topologyDisplayRestoredV1 = true
-        }
 
         // WHY: Pre-rc3 builds could have legacy unverified exitIp strings in SQLite; scrub once
         // so every persisted exitIp/exitProvider is guaranteed to come from strict proxy probing.
@@ -384,7 +377,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     private fun handleSurgeStatusCardClick() {
         val selectedId = DataStore.selectedProxy
-        if (selectedId > 0L && DataStore.showNodeIpOwner) {
+        if (selectedId > 0L) {
             val entity = SagerDatabase.proxyDao.getById(selectedId)
             if (entity != null && supportsCardIpProbe(entity) && shouldOfferHeaderQuickProbe(entity)) {
                 confirmNodeIpInfo(selectedId)
@@ -422,7 +415,6 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         val selectedId = DataStore.selectedProxy
         val hideAddress = DataStore.hideNodeAddress
-        val showIpOwner = DataStore.showNodeIpOwner
         val isProbingSelected = selectedId > 0L && probingProxyId == selectedId
         runOnDefaultDispatcher {
             val entity = if (selectedId > 0L) SagerDatabase.proxyDao.getById(selectedId) else null
@@ -450,7 +442,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
             }
             val headerIpText: CharSequence? = when {
-                !showIpOwner || entity == null || !supportsCardIpProbe(entity) -> null
+                entity == null || !supportsCardIpProbe(entity) -> null
                 isProbingSelected -> ctx.getString(R.string.card_ip_probe_started)
                 else -> formatIpInfoSpannable(ctx, entity, hideAddress)
                     ?: ctx.getString(R.string.surge_ip_tap_to_probe)
@@ -517,9 +509,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     override fun onResume() {
         super.onResume()
-        val displayOptions = DataStore.hideNodeAddress to DataStore.showNodeIpOwner
-        if (lastIpDisplayOptions != displayOptions && ::adapter.isInitialized) {
-            lastIpDisplayOptions = displayOptions
+        val currentHidden = DataStore.hideNodeAddress
+        if (lastHideNodeAddress != currentHidden && ::adapter.isInitialized) {
+            lastHideNodeAddress = currentHidden
             adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
         }
         updatePrivacyMaskMenuItem()
@@ -561,7 +553,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     private fun toggleScreenshotPrivacyMask() {
         val nextHidden = !DataStore.hideNodeAddress
         DataStore.hideNodeAddress = nextHidden
-        lastIpDisplayOptions = nextHidden to DataStore.showNodeIpOwner
+        lastHideNodeAddress = nextHidden
         updatePrivacyMaskMenuItem()
         if (::adapter.isInitialized) {
             adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
@@ -1200,18 +1192,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         a.id == b.id && a.frontProxy == b.frontProxy && a.landingProxy == b.landingProxy &&
             a.effectiveNodeDnsList() == b.effectiveNodeDnsList()
 
-    /**
-     * Ensures topology panels are visible whenever the user explicitly initiates a topology test.
-     */
-    private fun ensureTopologyDisplayEnabled() {
-        if (!DataStore.showNodeIpOwner) {
-            DataStore.showNodeIpOwner = true
-            lastIpDisplayOptions = DataStore.hideNodeAddress to true
-            if (::adapter.isInitialized) {
-                adapter.groupFragments.values.forEach { it.adapter?.notifyDataSetChanged() }
-            }
-        }
-    }
+    private fun ensureTopologyDisplayEnabled() = Unit
 
     private fun applyTopologyOutcomeOnMain(id: Long, outcome: IpCardProbeOutcome?) {
         if (!::adapter.isInitialized) return
@@ -1238,7 +1219,6 @@ class ConfigurationFragment @JvmOverloads constructor(
             snackbar(R.string.card_ip_probe_busy).show()
             return
         }
-        ensureTopologyDisplayEnabled()
         if (DataStore.ipProbeConsentGranted) {
             requestNodeIpInfo(id, isSilent = false)
             return
@@ -1259,7 +1239,7 @@ class ConfigurationFragment @JvmOverloads constructor(
      * the user has already granted one-time probe consent and the node lacks cached telemetry.
      */
     fun onActiveNodeConnectedRefreshIp() {
-        if (select || !isAdded || !DataStore.showNodeIpOwner || !DataStore.ipProbeConsentGranted) return
+        if (select || !isAdded || !DataStore.ipProbeConsentGranted) return
         val selectedId = DataStore.selectedProxy
         if (selectedId <= 0L || ipInfoJob?.isActive == true || DataStore.runningTest) return
         runOnDefaultDispatcher {
@@ -1924,7 +1904,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
                 DataStore.releaseTestToken(testToken)
-                if (isSingle && targetProfile != null && DataStore.showNodeIpOwner && DataStore.ipProbeConsentGranted) {
+                if (isSingle && targetProfile != null && DataStore.ipProbeConsentGranted) {
                     val refreshed = SagerDatabase.proxyDao.getById(targetProfile.id)
                     if (refreshed != null && refreshed.exitIp.isBlank() && supportsCardIpProbe(refreshed)) {
                         onMainDispatcher {
@@ -3345,11 +3325,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 (trafficText.parent as View).isGone = (!showTraffic || proxyEntity.status <= 0) && address.isBlank()
 
                 val canProbeIp = !select && pf.supportsCardIpProbe(proxyEntity)
-                val ipInfoText = if (DataStore.showNodeIpOwner) {
-                    pf.formatIpInfoSpannable(view.context, proxyEntity, hideAddress)
-                } else {
-                    null
-                }
+                val ipInfoText = pf.formatIpInfoSpannable(view.context, proxyEntity, hideAddress)
                 profileIpInfo.text = ipInfoText ?: ""
                 profileIpInfo.isVisible = !ipInfoText.isNullOrBlank()
                 profileIpInfo.setOnClickListener(if (canProbeIp && profileIpInfo.isVisible) View.OnClickListener {

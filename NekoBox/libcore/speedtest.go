@@ -41,6 +41,9 @@ const (
 	DefaultSpeedTestServerListURL   = "https://www.speedtest.net/api/js/servers"
 	FallbackSpeedTestServerListURL  = "https://www.speedtest.net/speedtest-servers-static.php"
 	DefaultSimpleDownloadURL        = "https://speed.cloudflare.com/__down?bytes=200000000"
+	DefaultCloudflareUploadURL      = "https://speed.cloudflare.com/__up"
+	DefaultCloudflareLatencyURL     = "https://speed.cloudflare.com/__down?bytes=0"
+	speedTestBrowserUserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 	speedTestDownloadImageSize      = 1000
 	speedTestUploadPayloadBytes     = int64(999490)
 	speedTestSampleInterval         = 100 * time.Millisecond
@@ -384,14 +387,22 @@ func executeSpeedTest(
 	discoveryCtx, cancelDiscovery := context.WithTimeout(ctx, config.timeout)
 	progress(speedTestProgress{stage: SpeedTestStageDiscovery})
 	servers, discoveryURL, err := fetchSpeedTestServers(discoveryCtx, client, config.serverListURL, config.fallbackServerListURL)
-	if err != nil {
-		cancelDiscovery()
-		return outcome, fmt.Errorf("discover speed-test servers: %w", err)
+	var selected *speedtest.Server
+	var latency time.Duration
+	if err == nil {
+		progress(speedTestProgress{stage: SpeedTestStageLatency})
+		selected, latency, err = selectLowestLatencyServer(discoveryCtx, client, servers, discoveryURL)
 	}
-	progress(speedTestProgress{stage: SpeedTestStageLatency})
-	selected, latency, err := selectLowestLatencyServer(discoveryCtx, client, servers, discoveryURL)
 	cancelDiscovery()
 	if err != nil {
+		// WHY: Datacenter VPS exit IPs frequently trigger Cloudflare/WAF 403s on www.speedtest.net
+		// or block outbound TCP port 8080 used by Ookla servers. When using default Speedtest URLs
+		// and the session itself has not been cancelled, seamlessly fall back to Cloudflare HTTPS (443).
+		if ctx.Err() == nil && config.serverListURL == DefaultSpeedTestServerListURL {
+			if cfOutcome, cfErr := executeCloudflareFallback(ctx, config, client, progress); cfErr == nil {
+				return cfOutcome, nil
+			}
+		}
 		return outcome, fmt.Errorf("select speed-test server: %w", err)
 	}
 	outcome.server = selected
@@ -461,6 +472,80 @@ func executeSpeedTest(
 	return outcome, nil
 }
 
+func executeCloudflareFallback(
+	ctx context.Context,
+	config speedTestConfig,
+	client *http.Client,
+	progress speedTestProgressFunc,
+) (*speedTestOutcome, error) {
+	cfServer := &speedtest.Server{
+		ID:      "cloudflare",
+		Name:    "Cloudflare",
+		Country: "Global",
+		Sponsor: "Cloudflare",
+		URL:     DefaultCloudflareUploadURL,
+	}
+	outcome := &speedTestOutcome{server: cfServer}
+
+	latencyCtx, cancelLatency := context.WithTimeout(ctx, min(config.timeout, 5*time.Second))
+	if req, reqErr := http.NewRequestWithContext(latencyCtx, http.MethodGet, DefaultCloudflareLatencyURL, nil); reqErr == nil {
+		req.Header.Set("User-Agent", speedTestBrowserUserAgent)
+		req.Header.Set("Referer", "https://speed.cloudflare.com/")
+		started := time.Now()
+		if resp, doErr := client.Do(req); doErr == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+				outcome.latencyMs = time.Since(started).Milliseconds()
+			}
+		}
+	}
+	cancelLatency()
+
+	progress(speedTestProgress{
+		stage:     SpeedTestStageLatency,
+		latencyMs: outcome.latencyMs,
+		server:    cfServer,
+	})
+
+	if config.mode == SpeedTestModeDownloadUpload || config.mode == SpeedTestModeDownload {
+		rate, transferred, err := runSimpleDownload(ctx, client, config.simpleDownloadURL, config.timeout, progress)
+		outcome.downloadBitsPerSecond = rate
+		outcome.downloadBytes = transferred
+		if err != nil {
+			return outcome, err
+		}
+	}
+
+	if config.mode == SpeedTestModeDownloadUpload || config.mode == SpeedTestModeUpload {
+		rate, transferred, err := runTransferPhase(
+			ctx,
+			client,
+			SpeedTestStageUpload,
+			config.timeout,
+			min(config.connections, 4),
+			func(requestCtx context.Context, total *atomic.Int64) error {
+				return uploadSpeedTestPayload(requestCtx, client, DefaultCloudflareUploadURL, config.uploadPayloadBytes, total)
+			},
+			func(rate int64, total int64) {
+				progress(speedTestProgress{
+					stage:                 SpeedTestStageUpload,
+					downloadBitsPerSecond: outcome.downloadBitsPerSecond,
+					uploadBitsPerSecond:   rate,
+					downloadBytes:         outcome.downloadBytes,
+					uploadBytes:           total,
+				})
+			},
+		)
+		outcome.uploadBitsPerSecond = rate
+		outcome.uploadBytes = transferred
+		if err != nil {
+			return outcome, err
+		}
+	}
+	return outcome, nil
+}
+
 func fetchSpeedTestServers(
 	ctx context.Context,
 	client *http.Client,
@@ -487,6 +572,8 @@ func fetchSpeedTestServerList(ctx context.Context, client *http.Client, endpoint
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", speedTestBrowserUserAgent)
+	req.Header.Set("Accept", "application/json, text/xml, application/xml, */*;q=0.8")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -528,23 +615,40 @@ func decodeSpeedTestServers(body []byte) (speedtest.Servers, error) {
 
 const maxSpeedTestProbeServers = 32
 
+// validateSpeedTestCandidateURL ensures a discovered speedtest server URL uses
+// http or https without credentials and does not target loopback, RFC1918,
+// CGNAT, FakeIP, or link-local SSRF addresses (unless matching an explicit
+// local test discovery authority).
+//
+// WHY: Ookla's https://www.speedtest.net/api/js/servers directory returns
+// candidate URLs using cleartext http://<host>:8080/speedtest/upload.php, so
+// candidate selection must not treat http:// entries from an https:// directory
+// as an HTTP 3xx redirect downgrade.
 func validateSpeedTestCandidateURL(candidateURL string, discoveryURL string) error {
 	parsed, err := url.Parse(strings.TrimSpace(candidateURL))
 	if err != nil || parsed.Host == "" {
 		return fmt.Errorf("%w: invalid candidate server URL", errUnsafeRedirect)
 	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("%w: unsupported scheme %q", errUnsafeRedirect, scheme)
+	}
 	if parsed.User != nil {
 		return fmt.Errorf("%w: candidate server URL must not embed credentials", errUnsafeRedirect)
 	}
-	var via []*http.Request
-	if discoveryURL != "" {
-		if discParsed, parseErr := url.Parse(strings.TrimSpace(discoveryURL)); parseErr == nil && discParsed.Host != "" {
-			via = []*http.Request{{URL: discParsed}}
+	targetHost := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if isForbiddenRedirectHost(targetHost) {
+		sameDiscoveryAuthority := false
+		if discoveryURL != "" {
+			if discParsed, parseErr := url.Parse(strings.TrimSpace(discoveryURL)); parseErr == nil && discParsed.Host != "" {
+				sameDiscoveryAuthority = strings.EqualFold(discParsed.Host, parsed.Host)
+			}
 		}
-	} else if !strings.EqualFold(parsed.Scheme, "https") {
-		return fmt.Errorf("%w: https to http downgrade", errUnsafeRedirect)
+		if !sameDiscoveryAuthority {
+			return fmt.Errorf("%w: private or local speed-test server target", errUnsafeRedirect)
+		}
 	}
-	return validateRedirectPolicy(&http.Request{URL: parsed}, via)
+	return nil
 }
 
 func selectLowestLatencyServer(
@@ -637,6 +741,7 @@ func measureSpeedTestLatency(ctx context.Context, client *http.Client, uploadURL
 		if err != nil {
 			return 0, err
 		}
+		req.Header.Set("User-Agent", speedTestBrowserUserAgent)
 		started := time.Now()
 		resp, err := client.Do(req)
 		elapsed := time.Since(started)
@@ -790,7 +895,7 @@ func downloadSpeedTestPayload(
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", speedTestBrowserUserAgent)
 	if req.URL != nil && strings.Contains(strings.ToLower(req.URL.Host), "cloudflare.com") {
 		req.Header.Set("Referer", "https://speed.cloudflare.com/")
 	}
@@ -826,6 +931,11 @@ func uploadSpeedTestPayload(
 	}
 	req.ContentLength = payloadBytes
 	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("User-Agent", speedTestBrowserUserAgent)
+	if req.URL != nil && strings.Contains(strings.ToLower(req.URL.Host), "cloudflare.com") {
+		req.Header.Set("Origin", "https://speed.cloudflare.com")
+		req.Header.Set("Referer", "https://speed.cloudflare.com/")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -851,7 +961,7 @@ func runSimpleDownload(
 	if err != nil {
 		return 0, 0, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", speedTestBrowserUserAgent)
 	if req.URL != nil && strings.Contains(strings.ToLower(req.URL.Host), "cloudflare.com") {
 		req.Header.Set("Referer", "https://speed.cloudflare.com/")
 	}

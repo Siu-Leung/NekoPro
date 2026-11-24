@@ -94,6 +94,7 @@ class DashboardUrlTest {
         assertTrue(script.contains("setup/api-list"))
         assertTrue(script.contains("__nekoLoopbackAuthPatched__"))
         assertTrue(script.contains("isLoopbackControllerTarget"))
+        assertTrue(script.contains("api.github.com"))
         assertTrue(script.contains("const isPostFinish = false;"))
     }
 

@@ -10,6 +10,10 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 本项目采用 **AI Coding** 辅助开发：需求分析、代码实现、协议移植、审计与测试流程均有人机协作参与；发布结论以实际编译、单元测试和真机验证为准，而不是仅依赖生成式输出。
 
+> [!WARNING]
+> **请勿使用 `-rc` 预览测试版本！**
+> 带 `-rc`（Pre-release）标记的版本仅用于开发分支内部联调测试，**容易出现未知问题**；日常使用请务必下载带 **`Latest`** 标记的正式版本：[点击下载最新正式版](https://github.com/Siu-Leung/NekoPro/releases/latest)。
+
 ## 主要特性
 
 - sing-box `1.14.4` 加固版主内核（原生 Snell v4–v6 / 原生 AnyTLS / 新版 Typed DNS Schema / 乐观 DNS 缓存 / `quic-go v0.61`）
@@ -29,13 +33,20 @@ NekoPro 是一个面向 Android 的个人代理客户端项目，基于
 
 ## 当前版本
 
-`Neko-Pro-1.4.8-rc1`（预览测试分支，主线最新正式版：`Neko-Pro-1.4.7`）
+`Neko-Pro-1.4.8-rc2`（预览测试分支，主线最新正式版：`Neko-Pro-1.4.7`）
+
+> **注意**：请勿下载使用 `-rc` 版本，容易出现未知问题，日常使用请认准正式版 `v1.4.7`（`Latest`）。
 
 - [最新正式版 v1.4.7 Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.7)
-- 测试版 APK：`NekoBox-Neko-Pro-1.4.8-rc1-arm64-v8a.apk`
+- 测试版 APK：`NekoBox-Neko-Pro-1.4.8-rc2-arm64-v8a.apk`
 
-### v1.4.8-rc1 预览版改动日志 (2026-11-24)
+### v1.4.8-rc2 预览版改动日志 (2026-11-24)
 
+- **真机回归热修（测速 / 状态栏留白 / 拓扑开关收口 / FakeIP 切点保活）**
+  - **修复测速节点全军覆没**：修复 `validateSpeedTestCandidateURL` 将 Ookla `https://www.speedtest.net` 返回的 `http://<host>:8080/speedtest/upload.php` 测速节点误判为 `https → http` 降级重定向的逻辑缺陷（保留防本机/私网/FakeIP SSRF 校验），补齐测速全链路浏览器 `User-Agent`，并在机房出口 IP 被 Ookla 封禁时自动回退 Cloudflare 443 HTTPS 测速。
+  - **修复「设置」等侧栏子页顶栏与状态栏重叠**：在 `ToolbarFragment` 为每个子页自身的 `AppBarLayout` 独立绑定并即时应用 Android 15+ 状态栏高度留白，解决主页 `hide` 常驻后子页面 `paddingTop` 丢失顶到左上角时间的问题，同时加大设置页底部滚动留白。
+  - **移除设置页冗余的「显示节点拓扑」开关**：节点卡片与顶部栏的出入口 IP、地区、ASN 服务商及中转/直连形态默认常驻显示，隐私遮蔽统一交由**主页右上角「眼睛」图标**唯一管控。
+  - **消除仪表板离线 CORS 报错刷屏 & FakeDNS 切点 `missing fakeip record`**：在本地离线面板沙箱静默拦截内置 MetaCubeXD 对 `api.github.com` 的版本更新探测，清零控制台 CORS 报错；开启 FakeDNS 时自动启用按分组隔离共享的 `cache_file (store_fakeip = true, cache_id = group-<id>)`，同组切节点完整保留 `198.18.0.0/15` 域名映射。
 - **三层免密直连 Clash 仪表板 + 内置 MetaCubeXD `v1.276.0` 默认面板**
   - **内置离线双面板一键切换**：APK 内置打包官方 **MetaCubeXD `v1.276.0`**（默认启用）与 **Yacd-meta**，无外网/首次启动离线秒开，右上角菜单支持一键切换 MetaCubeXD / Yacd 或自定义远程 `https://` 面板（如 Zashboard），未开代理时点击侧栏「仪表板」也会自动启动服务并就绪连接，无需手输后端地址与密钥。
   - **三层零密码自动认证（Cookie + Document-Start 注入 + 内核同源校验）**：

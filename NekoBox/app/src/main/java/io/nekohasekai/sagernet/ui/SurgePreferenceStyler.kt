@@ -37,7 +37,7 @@ object SurgePreferenceStyler {
         val context = recyclerView.context
         val horizontalPadding = dp(context, 12f).toInt()
         val topPadding = dp(context, 8f).toInt()
-        val minBottomPadding = dp(context, 48f).toInt()
+        val minBottomPadding = dp(context, 80f).toInt()
 
         recyclerView.setBackgroundColor(ContextCompat.getColor(context, R.color.surge_canvas))
         recyclerView.clipToPadding = false

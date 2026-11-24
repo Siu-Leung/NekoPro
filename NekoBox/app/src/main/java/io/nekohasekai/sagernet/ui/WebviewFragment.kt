@@ -464,6 +464,24 @@ internal fun buildLocalSecretSyncScript(
                                     headers.set('Authorization', 'Bearer ' + activeSecret);
                                     return nativeFetch(input, Object.assign({}, init || {}, { headers: headers }));
                                 }
+                            } else if (isLoopbackControllerTarget(window.location.href)) {
+                                const rawStr = typeof input === 'string'
+                                    ? input
+                                    : (typeof URL !== 'undefined' && input instanceof URL)
+                                        ? input.href
+                                        : (input && typeof input.url === 'string' ? input.url : '');
+                                if (rawStr) {
+                                    const targetUrl = new URL(rawStr, window.location.href);
+                                    // WHY: APK-bundled MetaCubeXD probes api.github.com for frontend/backend releases;
+                                    // short-circuiting cleanly avoids 8 blocked-by-CORS console errors in offline sandbox.
+                                    if (targetUrl.hostname === 'api.github.com' && targetUrl.pathname.includes('/releases')) {
+                                        const isSingle = targetUrl.pathname.endsWith('/latest') || targetUrl.pathname.includes('/tags/');
+                                        return Promise.resolve(new Response(isSingle ? '{}' : '[]', {
+                                            status: 200,
+                                            headers: { 'Content-Type': 'application/json' }
+                                        }));
+                                    }
+                                }
                             }
                         } catch (_) {}
                         return nativeFetch(input, init);

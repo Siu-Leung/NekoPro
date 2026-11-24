@@ -176,18 +176,25 @@ func TestSendFdToProtectAndAutoDetectInterfaceControlFailClosed(t *testing.T) {
 	}
 }
 
-func TestSpeedTestCandidateValidationRejectsSSRFAndDowngrade(t *testing.T) {
-	if err := validateSpeedTestCandidateURL("http://speedtest.isp.example:8080/speedtest/upload.php", DefaultSpeedTestServerListURL); !errors.Is(err, errUnsafeRedirect) {
-		t.Fatalf("expected https->http downgrade error, got %v", err)
+func TestSpeedTestCandidateValidationAllowsOoklaHttpAndRejectsSSRF(t *testing.T) {
+	// Ookla's https://www.speedtest.net/api/js/servers returns http://<host>:8080/speedtest/upload.php entries.
+	if err := validateSpeedTestCandidateURL("http://speedtest.isp.example:8080/speedtest/upload.php", DefaultSpeedTestServerListURL); err != nil {
+		t.Fatalf("expected standard Ookla http:8080 candidate to succeed, got %v", err)
 	}
-	if err := validateSpeedTestCandidateURL("https://127.0.0.1:9090/speedtest/upload.php", DefaultSpeedTestServerListURL); !errors.Is(err, errUnsafeRedirect) {
+	if err := validateSpeedTestCandidateURL("https://speedtest.isp.example:8080/speedtest/upload.php", DefaultSpeedTestServerListURL); err != nil {
+		t.Fatalf("expected valid public https candidate to succeed, got %v", err)
+	}
+	if err := validateSpeedTestCandidateURL("http://127.0.0.1:9090/speedtest/upload.php", DefaultSpeedTestServerListURL); !errors.Is(err, errUnsafeRedirect) {
 		t.Fatalf("expected loopback SSRF candidate rejection, got %v", err)
 	}
 	if err := validateSpeedTestCandidateURL("https://192.168.1.1/speedtest/upload.php", DefaultSpeedTestServerListURL); !errors.Is(err, errUnsafeRedirect) {
 		t.Fatalf("expected RFC1918 SSRF candidate rejection, got %v", err)
 	}
-	if err := validateSpeedTestCandidateURL("https://speedtest.isp.example:8080/speedtest/upload.php", DefaultSpeedTestServerListURL); err != nil {
-		t.Fatalf("expected valid public https candidate to succeed, got %v", err)
+	if err := validateSpeedTestCandidateURL("http://198.18.0.1:8080/speedtest/upload.php", DefaultSpeedTestServerListURL); !errors.Is(err, errUnsafeRedirect) {
+		t.Fatalf("expected FakeIP SSRF candidate rejection, got %v", err)
+	}
+	if err := validateSpeedTestCandidateURL("ftp://speedtest.isp.example/upload.php", DefaultSpeedTestServerListURL); !errors.Is(err, errUnsafeRedirect) {
+		t.Fatalf("expected non-HTTP scheme rejection, got %v", err)
 	}
 
 	_, _, err := selectLowestLatencyServer(
