@@ -3,9 +3,11 @@ package clashapi
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -112,7 +114,7 @@ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options op
 	})
 	chiRouter.Use(cors.Handler)
 	chiRouter.Group(func(r chi.Router) {
-		r.Use(authentication(options.Secret))
+		r.Use(authenticationWithPort(options.Secret, extractControllerPort(options.ExternalController)))
 		r.Get("/", hello(options.ExternalUI != ""))
 		r.Get("/logs", getLogs(s.ctx, logFactory))
 		r.Get("/traffic", traffic(s.ctx, trafficManager))
@@ -181,7 +183,83 @@ func (s *Server) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	return nil
 }
 
+// ClashAuthCookieName is the HttpOnly session cookie injected by Android WebView
+// for same-origin loopback Clash API dashboard authentication without URL secrets.
+const ClashAuthCookieName = "nekopro_clash_auth"
+
+const defaultClashControllerPort = "9090"
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return r != nil && strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
+func secretsMatch(provided, expected string) bool {
+	if expected == "" || provided == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func extractControllerPort(controllerAddr string) string {
+	trimmed := strings.TrimSpace(controllerAddr)
+	if trimmed == "" {
+		return defaultClashControllerPort
+	}
+	_, port, err := net.SplitHostPort(trimmed)
+	if err != nil || port == "" || port == "0" {
+		return defaultClashControllerPort
+	}
+	return port
+}
+
+func isAllowedLoopbackOrigin(rawURL string, expectedPort string, allowPath bool) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.User != nil {
+		return false
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") {
+		return false
+	}
+	if !allowPath && (parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "") {
+		return false
+	}
+	host := parsed.Hostname()
+	if host != "127.0.0.1" && !strings.EqualFold(host, "localhost") {
+		return false
+	}
+	return parsed.Port() == expectedPort
+}
+
+func hasValidSameOriginCookieContext(r *http.Request, controllerPort string) bool {
+	if secFetchSite := strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")); secFetchSite != "" {
+		if !strings.EqualFold(secFetchSite, "same-origin") && !strings.EqualFold(secFetchSite, "none") {
+			return false
+		}
+	}
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	referer := strings.TrimSpace(r.Header.Get("Referer"))
+	requireOrigin := isWebSocketUpgrade(r) || (r.Method != http.MethodGet && r.Method != http.MethodHead)
+
+	if origin != "" {
+		return isAllowedLoopbackOrigin(origin, controllerPort, false)
+	}
+	if requireOrigin {
+		// WHY: Same-origin WebView state-changing requests that omit Origin still
+		// carry a loopback Referer, while cross-origin CSRF or DNS-rebinding requests cannot.
+		return referer != "" && isAllowedLoopbackOrigin(referer, controllerPort, true)
+	}
+	return referer == "" || isAllowedLoopbackOrigin(referer, controllerPort, true)
+}
+
 func authentication(serverSecret string) func(next http.Handler) http.Handler {
+	return authenticationWithPort(serverSecret, defaultClashControllerPort)
+}
+
+func authenticationWithPort(serverSecret string, controllerPort string) func(next http.Handler) http.Handler {
+	if controllerPort == "" {
+		controllerPort = defaultClashControllerPort
+	}
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			if serverSecret == "" {
@@ -189,32 +267,52 @@ func authentication(serverSecret string) func(next http.Handler) http.Handler {
 				return
 			}
 
-			// Browser websocket not support custom header
-			if r.Header.Get("Upgrade") == "websocket" && r.URL.Query().Get("token") != "" {
-				token := r.URL.Query().Get("token")
-				if token != serverSecret {
-					render.Status(r, http.StatusUnauthorized)
-					render.JSON(w, r, ErrUnauthorized)
+			if header := r.Header.Get("Authorization"); header != "" {
+				bearer, token, found := strings.Cut(header, " ")
+				if found && bearer == "Bearer" && secretsMatch(token, serverSecret) {
+					next.ServeHTTP(w, r)
 					return
 				}
-				next.ServeHTTP(w, r)
-				return
 			}
 
-			header := r.Header.Get("Authorization")
-			bearer, token, found := strings.Cut(header, " ")
-
-			hasInvalidHeader := bearer != "Bearer"
-			hasInvalidSecret := !found || token != serverSecret
-			if hasInvalidHeader || hasInvalidSecret {
-				render.Status(r, http.StatusUnauthorized)
-				render.JSON(w, r, ErrUnauthorized)
-				return
+			// Browser WebSocket API does not support custom Authorization headers;
+			// restrict ?token= strictly to GET WebSocket upgrades so REST mutations cannot spoof Upgrade.
+			if r.Method == http.MethodGet && isWebSocketUpgrade(r) {
+				if queryToken := r.URL.Query().Get("token"); queryToken != "" && secretsMatch(queryToken, serverSecret) {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
-			next.ServeHTTP(w, r)
+
+			if cookie, err := r.Cookie(ClashAuthCookieName); err == nil && secretsMatch(cookie.Value, serverSecret) {
+				if hasValidSameOriginCookieContext(r, controllerPort) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			render.Status(r, http.StatusUnauthorized)
+			render.JSON(w, r, ErrUnauthorized)
 		}
 		return http.HandlerFunc(fn)
 	}
+}
+
+// monitorWebSocketClient reads and discards incoming client WebSocket frames until
+// EOF or error, then closes conn and signals clientDone so write-only/idle server
+// streams exit immediately when a WebView tab reloads or closes.
+func monitorWebSocketClient(conn net.Conn) <-chan struct{} {
+	clientDone := make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		defer conn.Close()
+		for {
+			if _, _, err := wsutil.ReadClientData(conn); err != nil {
+				return
+			}
+		}
+	}()
+	return clientDone
 }
 
 func hello(redirect bool) func(w http.ResponseWriter, r *http.Request) {
@@ -235,14 +333,18 @@ type Traffic struct {
 
 func traffic(ctx context.Context, trafficManager *trafficcontrol.Manager) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var conn net.Conn
-		if r.Header.Get("Upgrade") == "websocket" {
+		var (
+			conn       net.Conn
+			clientDone <-chan struct{}
+		)
+		if isWebSocketUpgrade(r) {
 			var err error
 			conn, _, _, err = ws.UpgradeHTTP(r, w)
 			if err != nil {
 				return
 			}
 			defer conn.Close()
+			clientDone = monitorWebSocketClient(conn)
 		}
 
 		if conn == nil {
@@ -258,6 +360,10 @@ func traffic(ctx context.Context, trafficManager *trafficcontrol.Manager) func(w
 			select {
 			case <-ctx.Done():
 				return
+			case <-r.Context().Done():
+				return
+			case <-clientDone:
+				return
 			case <-tick.C:
 			}
 			buf.Reset()
@@ -271,7 +377,9 @@ func traffic(ctx context.Context, trafficManager *trafficcontrol.Manager) func(w
 			}
 			if conn == nil {
 				_, err = w.Write(buf.Bytes())
-				w.(http.Flusher).Flush()
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
 			} else {
 				err = wsutil.WriteServerText(conn, buf.Bytes())
 			}
@@ -311,13 +419,17 @@ func getLogs(ctx context.Context, logFactory log.ObservableFactory) func(w http.
 		}
 		defer logFactory.UnSubscribe(subscription)
 
-		var conn net.Conn
-		if r.Header.Get("Upgrade") == "websocket" {
+		var (
+			conn       net.Conn
+			clientDone <-chan struct{}
+		)
+		if isWebSocketUpgrade(r) {
 			conn, _, _, err = ws.UpgradeHTTP(r, w)
 			if err != nil {
 				return
 			}
 			defer conn.Close()
+			clientDone = monitorWebSocketClient(conn)
 		}
 
 		if conn == nil {
@@ -330,6 +442,10 @@ func getLogs(ctx context.Context, logFactory log.ObservableFactory) func(w http.
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-r.Context().Done():
+				return
+			case <-clientDone:
 				return
 			case <-done:
 				return
@@ -348,7 +464,9 @@ func getLogs(ctx context.Context, logFactory log.ObservableFactory) func(w http.
 			}
 			if conn == nil {
 				_, err = w.Write(buf.Bytes())
-				w.(http.Flusher).Flush()
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
 			} else {
 				err = wsutil.WriteServerText(conn, buf.Bytes())
 			}

@@ -90,12 +90,31 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
     fun exists(groupId: Long): Boolean = groupId > 0L && configFile(groupId).isFile
 
     /**
+     * Returns `true` if the stored configuration for [groupId] was manually edited by the user.
+     */
+    fun isLocalEdit(groupId: Long): Boolean =
+        groupId > 0L && read(groupId)?.userAgent == LOCAL_EDIT_USER_AGENT
+
+    /**
      * Deletes any persisted configuration and metadata files for [groupId].
      */
     fun delete(groupId: Long) {
         if (groupId <= 0L) return
         runCatching { configFile(groupId).delete() }
         runCatching { metaFile(groupId).delete() }
+    }
+
+    /**
+     * Deletes all cached subscription configuration and metadata files across all groups
+     * (used during full database reset / backup restore to prevent group ID cross-contamination).
+     */
+    fun deleteAll() {
+        if (!baseDirectory.isDirectory) return
+        baseDirectory.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.startsWith("group_") || file.name.startsWith(".group_"))) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     private fun configFile(groupId: Long): File = File(baseDirectory, "group_${groupId}.conf")
@@ -141,6 +160,7 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
 
     companion object {
         const val MAX_CONFIG_BYTES = 8 * 1024 * 1024
+        const val LOCAL_EDIT_USER_AGENT = "local-edit"
     }
 }
 
@@ -148,6 +168,8 @@ class SubscriptionConfigFileStore(private val baseDirectory: File) {
  * Process-wide accessor and DNS-section locator for persisted subscription configurations.
  */
 object SubscriptionConfigStore {
+    const val LOCAL_EDIT_USER_AGENT = SubscriptionConfigFileStore.LOCAL_EDIT_USER_AGENT
+
     private val yamlDnsHeaderRegex = Regex("""(?m)^[\t ]*(?:dns|"dns"|'dns')[\t ]*:""")
     private val surgeGeneralRegex = Regex("""(?im)^[\t ]*(?:doh-server|dns-server)[\t ]*=""")
 
@@ -163,8 +185,14 @@ object SubscriptionConfigStore {
 
     fun exists(groupId: Long): Boolean = delegate.exists(groupId)
 
+    fun isLocalEdit(groupId: Long): Boolean = delegate.isLocalEdit(groupId)
+
     fun delete(groupId: Long) {
         delegate.delete(groupId)
+    }
+
+    fun deleteAll() {
+        delegate.deleteAll()
     }
 
     /**

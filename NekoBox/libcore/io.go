@@ -6,11 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
-	"github.com/ulikunitz/xz"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/ulikunitz/xz"
 )
 
 const (
@@ -34,23 +35,30 @@ func Unxz(archive string, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	o, err := os.Create(path)
+	// WHY: Decompress into a PID-scoped sibling temp file and rename atomically
+	// so interrupted extractions never leave a truncated geoip.db/geosite.db.
+	tmpPath := path + ".tmp." + strconv.Itoa(os.Getpid())
+	o, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
 	n, err := io.Copy(o, io.LimitReader(r, maxDecompressFileSize+1))
 	closeErr := o.Close()
 	if err != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	if closeErr != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(tmpPath)
 		return closeErr
 	}
 	if n > maxDecompressFileSize {
-		_ = os.Remove(path)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("unxz output exceeds limit (%d bytes)", maxDecompressFileSize)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
 	}
 	return nil
 }

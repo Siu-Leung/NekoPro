@@ -85,7 +85,13 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
         val mutedColor = ctx.getColour(R.color.surge_text_secondary)
 
         runOnDefaultDispatcher {
-            val cleaned = stripAnsiAndNormalize(String(SendLog.getNekoLog(64 * 1024)))
+            val rawCleaned = stripAnsiAndNormalize(String(SendLog.getNekoLog(64 * 1024)))
+            val sanitized = moe.matsuri.nb4a.Protocols.sanitizeErrorMessage(rawCleaned)
+            val cleaned = if (io.nekohasekai.sagernet.database.DataStore.hideNodeAddress) {
+                io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(sanitized)
+            } else {
+                sanitized
+            }
             val span = SpannableString(cleaned)
             var offset = 0
             for (line in cleaned.split('\n')) {
@@ -117,14 +123,24 @@ class LogcatFragment : ToolbarFragment(R.layout.layout_logcat),
                 runOnDefaultDispatcher {
                     try {
                         Libcore.nekoLogClear()
-                        Runtime.getRuntime().exec("/system/bin/logcat -c")
+                        val proc = Runtime.getRuntime().exec(arrayOf("/system/bin/logcat", "-c"))
+                        try {
+                            proc.inputStream.close()
+                            proc.errorStream.close()
+                            proc.outputStream.close()
+                            proc.waitFor()
+                        } finally {
+                            proc.destroy()
+                        }
                     } catch (e: Exception) {
                         onMainDispatcher {
+                            if (!isAdded) return@onMainDispatcher
                             snackbar(e.readableMessage).show()
                         }
                         return@runOnDefaultDispatcher
                     }
                     onMainDispatcher {
+                        if (!isAdded) return@onMainDispatcher
                         binding.textview.text = ""
                     }
                 }

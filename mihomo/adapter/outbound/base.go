@@ -27,52 +27,55 @@ type ProxyAdapter interface {
 }
 
 type Base struct {
-	name     string
-	addr     string
-	tp       C.AdapterType
-	pdName   string
-	udp      bool
-	xudp     bool
-	tfo      bool
-	mpTcp    bool
-	iface    string
-	rmark    int
-	prefer   C.DNSPrefer
-	resolver resolver.Resolver
-	dialer   C.Dialer
-	id       uuid.UUID
+	name           string
+	addr           string
+	tp             C.AdapterType
+	pdName         string
+	udp            bool
+	xudp           bool
+	tfo            bool
+	mpTcp          bool
+	iface          string
+	rmark          int
+	prefer         C.DNSPrefer
+	resolver       resolver.Resolver
+	TargetResolver resolver.Resolver
+	dialer         C.Dialer
+	id             uuid.UUID
 }
 
 type BaseOption struct {
-	Name         string
-	Addr         string
-	Type         C.AdapterType
-	ProviderName string
-	UDP          bool
-	XUDP         bool
-	TFO          bool
-	MPTCP        bool
-	Interface    string
-	RoutingMark  int
-	Prefer       C.DNSPrefer
-	Resolver     resolver.Resolver
+	Name           string
+	Addr           string
+	Type           C.AdapterType
+	ProviderName   string
+	UDP            bool
+	XUDP           bool
+	TFO            bool
+	MPTCP          bool
+	Interface      string
+	RoutingMark    int
+	Prefer         C.DNSPrefer
+	Resolver       resolver.Resolver
+	TargetResolver resolver.Resolver
 }
 
 func NewBase(opt BaseOption) *Base {
 	return &Base{
-		name:     opt.Name,
-		addr:     opt.Addr,
-		tp:       opt.Type,
-		pdName:   opt.ProviderName,
-		udp:      opt.UDP,
-		xudp:     opt.XUDP,
-		tfo:      opt.TFO,
-		mpTcp:    opt.MPTCP,
-		iface:    opt.Interface,
-		rmark:    opt.RoutingMark,
-		prefer:   opt.Prefer,
-		resolver: opt.Resolver,
-		id:       utils.NewUUIDV4(),
+		name:           opt.Name,
+		addr:           opt.Addr,
+		tp:             opt.Type,
+		pdName:         opt.ProviderName,
+		udp:            opt.UDP,
+		xudp:           opt.XUDP,
+		tfo:            opt.TFO,
+		mpTcp:          opt.MPTCP,
+		iface:          opt.Interface,
+		rmark:          opt.RoutingMark,
+		prefer:         opt.Prefer,
+		resolver:       opt.Resolver,
+		TargetResolver: opt.TargetResolver,
+		id:             utils.NewUUIDV4(),
 	}
 }
 
@@ -182,9 +185,19 @@ func (b *Base) DialOptions() (opts []dialer.Option) {
 	return opts
 }
 
+// SetTargetResolver sets the instance-scoped resolver used by ResolveUDP for
+// proxied target hostnames before falling back to resolver.DefaultResolver.
+func (b *Base) SetTargetResolver(r resolver.Resolver) {
+	b.TargetResolver = r
+}
+
 func (b *Base) ResolveUDP(ctx context.Context, metadata *C.Metadata) error {
 	if !metadata.Resolved() {
-		ip, err := resolveIPWithResolver(ctx, metadata.Host, b.prefer, resolver.DefaultResolver)
+		r := b.TargetResolver
+		if r == nil {
+			r = resolver.DefaultResolver
+		}
+		ip, err := resolveIPWithResolver(ctx, metadata.Host, b.prefer, r)
 		if err != nil {
 			return fmt.Errorf("can't resolve ip: %w", err)
 		}
@@ -208,10 +221,11 @@ type BasicOption struct {
 	//
 	// The following parameters are used internally, assign value by the structure decoder are disallowed
 	//
-	DialerForAPI C.Dialer          `proxy:"-"` // the dialer used for API usage has higher priority than all the above configurations.
-	TunnelForAPI C.Tunnel          `proxy:"-"`
-	ProviderName string            `proxy:"-"`
-	Resolver     resolver.Resolver `proxy:"-"`
+	DialerForAPI   C.Dialer          `proxy:"-"` // the dialer used for API usage has higher priority than all the above configurations.
+	TunnelForAPI   C.Tunnel          `proxy:"-"`
+	ProviderName   string            `proxy:"-"`
+	Resolver       resolver.Resolver `proxy:"-"`
+	TargetResolver resolver.Resolver `proxy:"-"`
 }
 
 func (b *BasicOption) NewDialer(opts []dialer.Option) C.Dialer {

@@ -146,7 +146,7 @@ object RawUpdater : GroupUpdater() {
         }
         if (link.startsWith("content://")) {
             val content = readSubscriptionFile(link)
-            if (groupId > 0L) {
+            if (groupId > 0L && !SubscriptionConfigStore.isLocalEdit(groupId)) {
                 runCatching { SubscriptionConfigStore.save(groupId, content, "content-uri") }
             }
             return ClashDnsCandidates.parseOrScanInteractive(content)
@@ -174,7 +174,7 @@ object RawUpdater : GroupUpdater() {
                 continue
             }
             if (profile.hasDns && profile.rows.any { it.selectable != null }) {
-                if (groupId > 0L && !downloadedBody.isNullOrBlank()) {
+                if (groupId > 0L && !downloadedBody.isNullOrBlank() && !SubscriptionConfigStore.isLocalEdit(groupId)) {
                     runCatching { SubscriptionConfigStore.save(groupId, downloadedBody!!, userAgent) }
                 }
                 return profile
@@ -268,7 +268,7 @@ object RawUpdater : GroupUpdater() {
             emptyList()
         }
         if (proxyGroup.id > 0L) {
-            SubscriptionConfigStore.save(proxyGroup.id, editedText, "local-edit")
+            SubscriptionConfigStore.save(proxyGroup.id, editedText, SubscriptionConfigStore.LOCAL_EDIT_USER_AGENT)
         }
         return commitSubscriptionSnapshot(
             proxyGroup = proxyGroup,
@@ -277,6 +277,7 @@ object RawUpdater : GroupUpdater() {
             adoptedNodeDnsCandidate = adoptedNodeDnsCandidate,
             userInterface = GroupManager.userInterface,
             byUser = byUser,
+            clearAdoptedDnsWhenEmpty = true,
         )
     }
 
@@ -286,6 +287,17 @@ object RawUpdater : GroupUpdater() {
         userInterface: GroupManager.Interface?,
         byUser: Boolean
     ) {
+        if (proxyGroup.id > 0L && SubscriptionConfigStore.isLocalEdit(proxyGroup.id)) {
+            if (!byUser) {
+                Logs.d("Skipping background auto-update for locally edited subscription group ${proxyGroup.id}")
+                return
+            }
+            if (userInterface != null &&
+                !userInterface.confirm(app.getString(R.string.subscription_config_overwrite_message))
+            ) {
+                return
+            }
+        }
         val link = subscription.link.orEmpty()
         val requireAdoptedDns = proxyGroup.requiresNodeDnsAdoption()
         var adoptedNodeDnsCandidate: List<String> = emptyList()
@@ -410,6 +422,7 @@ object RawUpdater : GroupUpdater() {
         adoptedNodeDnsCandidate: List<String>,
         userInterface: GroupManager.Interface?,
         byUser: Boolean,
+        clearAdoptedDnsWhenEmpty: Boolean = false,
     ): Int {
         val savedManualDns = proxyGroup.manualNodeDns()
         val proxiesMap = LinkedHashMap<String, AbstractBean>()
@@ -539,6 +552,8 @@ object RawUpdater : GroupUpdater() {
 
             if (adoptedNodeDnsCandidate.isNotEmpty()) {
                 subscription.adoptedNodeDns = adoptedNodeDnsCandidate.joinToString("\n")
+            } else if (clearAdoptedDnsWhenEmpty && subscription.autoAdoptNodeDns == true && savedManualDns == null) {
+                subscription.adoptedNodeDns = ""
             }
             subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
             SagerDatabase.groupDao.updateGroup(proxyGroup)

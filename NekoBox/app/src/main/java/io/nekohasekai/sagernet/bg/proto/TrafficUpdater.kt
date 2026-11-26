@@ -72,7 +72,7 @@ class TrafficUpdater(
         )
     }
 
-    suspend fun updateAll() {
+    fun updateAll() {
         val updated = mutableMapOf<String, TrafficLooperData>()
         items.forEach { item ->
             if (item.ignore) return@forEach

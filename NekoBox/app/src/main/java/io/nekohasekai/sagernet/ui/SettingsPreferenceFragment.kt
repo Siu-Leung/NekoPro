@@ -48,9 +48,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
     private val importCustomRootCa =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri == null) return@registerForActivityResult
+            val appContext = context?.applicationContext ?: return@registerForActivityResult
             runOnDefaultDispatcher {
                 runCatching {
-                    val bytes = requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                    val bytes = appContext.contentResolver.openInputStream(uri)?.use { input ->
                         val maxBytes = 256 * 1024
                         val buf = input.readBytes()
                         require(buf.isNotEmpty() && buf.size <= maxBytes) {
@@ -67,15 +68,17 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
                     check(tmp.renameTo(target)) { "Failed to save ca.pem" }
                     check(Libcore.updateRootCACerts(bytes)) { "Core rejected PEM certificates" }
                     onMainDispatcher {
+                        if (!isAdded) return@onMainDispatcher
                         updateCustomRootCaSummary()
-                        Toast.makeText(requireContext(), R.string.custom_root_ca_imported, Toast.LENGTH_SHORT).show()
+                        Toast.makeText(appContext, R.string.custom_root_ca_imported, Toast.LENGTH_SHORT).show()
                         needRestart()
                     }
                 }.onFailure { err ->
                     Logs.w(err)
                     onMainDispatcher {
+                        if (!isAdded) return@onMainDispatcher
                         Toast.makeText(
-                            requireContext(),
+                            appContext,
                             getString(R.string.custom_root_ca_invalid, err.readableMessage),
                             Toast.LENGTH_LONG
                         ).show()

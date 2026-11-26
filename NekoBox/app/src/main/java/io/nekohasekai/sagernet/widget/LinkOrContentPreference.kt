@@ -26,6 +26,15 @@ constructor(
 
     init {
         dialogLayoutResource = R.layout.layout_urltest_preference_dialog
+        summaryProvider = SummaryProvider<LinkOrContentPreference> { pref ->
+            val value = pref.text
+            when {
+                value.isNullOrEmpty() -> pref.context.getString(androidx.preference.R.string.not_set)
+                io.nekohasekai.sagernet.database.DataStore.hideNodeAddress ->
+                    io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(value)
+                else -> value
+            }
+        }
 
         setOnBindEditTextListener {
             val linkLayout = it.rootView.findViewById<TextInputLayout>(R.id.input_layout)

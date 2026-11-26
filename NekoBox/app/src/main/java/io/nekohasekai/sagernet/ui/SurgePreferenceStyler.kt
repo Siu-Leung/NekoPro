@@ -37,7 +37,7 @@ object SurgePreferenceStyler {
         val context = recyclerView.context
         val horizontalPadding = dp(context, 12f).toInt()
         val topPadding = dp(context, 8f).toInt()
-        val minBottomPadding = dp(context, 48f).toInt()
+        val minBottomPadding = dp(context, 80f).toInt()
 
         recyclerView.setBackgroundColor(ContextCompat.getColor(context, R.color.surge_canvas))
         recyclerView.clipToPadding = false
@@ -119,11 +119,12 @@ object SurgePreferenceStyler {
             }
             val isFirstInCard = !isCardRow(adapter, position - 1)
             val isLastInCard = !isCardRow(adapter, position + 1)
+            val tailBottomSpace = if (position == adapter.itemCount - 1) dp(parent.context, 40f).toInt() else 0
             outRect.set(
                 rowHorizontalInset,
                 if (isFirstInCard) groupTopSpace else 0,
                 rowHorizontalInset,
-                if (isLastInCard) groupBottomSpace else 0,
+                (if (isLastInCard) groupBottomSpace else 0) + tailBottomSpace,
             )
         }
 

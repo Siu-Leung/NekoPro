@@ -69,10 +69,13 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		}
 	}
 
+	targetResolver := mihomo_adapter.NewTargetResolver(ctx)
 	masqueOpt := outbound.MasqueOption{
 		BasicOption: outbound.BasicOption{
-			DialerForAPI: mihomo_adapter.NewDialer(outboundDialer),
-			Resolver:     outboundResolver,
+			IPVersion:      mihomo_adapter.MapDomainStrategy(options.DialerOptions),
+			DialerForAPI:   mihomo_adapter.NewDialer(outboundDialer),
+			Resolver:       outboundResolver,
+			TargetResolver: targetResolver,
 		},
 		Name:                 tag,
 		Server:               options.Server,
@@ -93,7 +96,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		Dns:                  dnsServers,
 		// Bind proxied target domain resolution to this sing-box instance's own
 		// DNSRouter so temporary test boxes stay isolated from process-global state.
-		TargetResolver: mihomo_adapter.NewTargetResolver(ctx),
+		TargetResolver: targetResolver,
 	}
 
 	release := mihomo_adapter.InstallProtectHook(ctx)

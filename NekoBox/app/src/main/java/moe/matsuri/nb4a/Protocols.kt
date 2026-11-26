@@ -53,7 +53,7 @@ object Protocols {
 
     // Test
 
-    private val SENSITIVE_URL_REGEX = Regex("""(?i)\b(https?|h3|tls|quic)://[^\s"'<>]+""")
+    private val SENSITIVE_URL_REGEX = Regex("""(?i)\b((?:https?|h3|tls|quic)(?:\+local)?)://[^\s"'<>]+""")
 
     /**
      * Strips credentials, paths, and queries from URLs inside runtime error messages

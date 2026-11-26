@@ -94,60 +94,139 @@ func (s *Server) downloadExternalUI() error {
 	return err
 }
 
+const (
+	maxExternalUICompressedBytes int64 = 128 << 20
+	maxExternalUIFileBytes       int64 = 64 << 20
+	maxExternalUITotalBytes      int64 = 128 << 20
+	maxExternalUIZipEntries            = 4096
+)
+
 func (s *Server) downloadZIP(body io.Reader, output string) error {
+	targetRoot := output
+	if strings.TrimSpace(targetRoot) == "" {
+		targetRoot = s.externalUI
+	}
+	baseDir := filepath.Clean(targetRoot)
+	if baseDir == "" || baseDir == "." || baseDir == string(os.PathSeparator) {
+		return E.New("invalid external UI destination directory: ", targetRoot)
+	}
+	baseDirPrefix := baseDir + string(os.PathSeparator)
+
 	tempFile, err := filemanager.CreateTemp(s.ctx, "external-ui.zip")
 	if err != nil {
 		return err
 	}
 	defer filemanager.Remove(s.ctx, tempFile.Name())
-	_, err = io.Copy(tempFile, body)
-	tempFile.Close()
+	copiedCompressed, err := io.Copy(tempFile, io.LimitReader(body, maxExternalUICompressedBytes+1))
+	closeErr := tempFile.Close()
 	if err != nil {
 		return err
 	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if copiedCompressed > maxExternalUICompressedBytes {
+		return E.New("external UI archive exceeds compressed size limit")
+	}
+
 	reader, err := zip.OpenReader(tempFile.Name())
 	if err != nil {
 		return err
 	}
 	defer reader.Close()
+	if len(reader.File) > maxExternalUIZipEntries {
+		return E.New("external UI archive contains too many entries: ", len(reader.File))
+	}
+
 	trimDir := zipIsInSingleDirectory(reader.File)
+	var totalExtracted int64
 	for _, file := range reader.File {
+		// WHY: Reject symlinks before directory checks so a crafted archive cannot
+		// plant a directory symlink inside externalUI and write subsequent files outside baseDir.
+		if file.Mode()&os.ModeSymlink != 0 {
+			return E.New("symlink entry is not allowed in external UI archive: ", file.Name)
+		}
+		normalizedName := strings.ReplaceAll(file.Name, "\\", "/")
+		rawSegments := strings.Split(normalizedName, "/")
+		for _, seg := range rawSegments {
+			if seg == ".." {
+				return E.New("path traversal entry in external UI archive: ", file.Name)
+			}
+		}
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		pathElements := strings.Split(file.Name, "/")
-		if trimDir {
+		pathElements := rawSegments
+		if trimDir && len(pathElements) > 0 {
 			pathElements = pathElements[1:]
 		}
-		saveDirectory := output
-		if len(pathElements) > 1 {
-			saveDirectory = filepath.Join(saveDirectory, filepath.Join(pathElements[:len(pathElements)-1]...))
+		cleanElements := make([]string, 0, len(pathElements))
+		for _, elem := range pathElements {
+			if elem != "" && elem != "." {
+				cleanElements = append(cleanElements, elem)
+			}
+		}
+		if len(cleanElements) == 0 {
+			continue
+		}
+
+		targetPath := filepath.Clean(filepath.Join(append([]string{baseDir}, cleanElements...)...))
+		if !strings.HasPrefix(targetPath, baseDirPrefix) {
+			return E.New("illegal file path in external UI archive: ", file.Name)
+		}
+		if file.UncompressedSize64 > uint64(maxExternalUIFileBytes) {
+			return E.New("external UI entry exceeds file size limit: ", file.Name)
+		}
+
+		remainingTotal := maxExternalUITotalBytes - totalExtracted
+		if remainingTotal <= 0 {
+			return E.New("external UI archive exceeds cumulative extraction limit")
+		}
+		entryLimit := min(maxExternalUIFileBytes, remainingTotal)
+
+		saveDirectory := filepath.Dir(targetPath)
+		if !strings.HasPrefix(saveDirectory+string(os.PathSeparator), baseDirPrefix) {
+			return E.New("illegal directory path in external UI archive: ", file.Name)
 		}
 		err = filemanager.MkdirAll(s.ctx, saveDirectory, 0o755)
 		if err != nil {
 			return err
 		}
-		savePath := filepath.Join(saveDirectory, pathElements[len(pathElements)-1])
-		err = downloadZIPEntry(s.ctx, file, savePath)
+		written, err := downloadZIPEntryBounded(s.ctx, file, targetPath, entryLimit)
 		if err != nil {
 			return err
 		}
+		totalExtracted += written
 	}
 	return nil
 }
 
-func downloadZIPEntry(ctx context.Context, zipFile *zip.File, savePath string) error {
+func downloadZIPEntryBounded(ctx context.Context, zipFile *zip.File, savePath string, maxBytes int64) (int64, error) {
 	saveFile, err := filemanager.Create(ctx, savePath)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer saveFile.Close()
 	reader, err := zipFile.Open()
 	if err != nil {
-		return err
+		_ = saveFile.Close()
+		_ = filemanager.Remove(ctx, savePath)
+		return 0, err
 	}
-	defer reader.Close()
-	return common.Error(io.Copy(saveFile, reader))
+	written, copyErr := io.Copy(saveFile, io.LimitReader(reader, maxBytes+1))
+	closeErr := common.Close(reader, saveFile)
+	if copyErr != nil {
+		_ = filemanager.Remove(ctx, savePath)
+		return 0, copyErr
+	}
+	if closeErr != nil {
+		_ = filemanager.Remove(ctx, savePath)
+		return 0, closeErr
+	}
+	if written > maxBytes {
+		_ = filemanager.Remove(ctx, savePath)
+		return 0, E.New("external UI entry exceeds extraction byte limit: ", zipFile.Name)
+	}
+	return written, nil
 }
 
 func removeAllInDirectory(ctx context.Context, directory string) {

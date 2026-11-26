@@ -21,7 +21,10 @@ import (
 	"github.com/yosida95/uritemplate/v3"
 )
 
-const h2DatagramCapsuleType uint64 = 0
+const (
+	h2DatagramCapsuleType    uint64 = 0
+	maxH2CapsulePayloadBytes uint64 = 65535
+)
 
 const (
 	ipv4HeaderLen = 20
@@ -32,7 +35,10 @@ func ConnectTunnelH2(ctx context.Context, h2Transport *http.Transport, connectUr
 	additionalHeaders := http.Header{
 		"User-Agent": []string{""},
 	}
-	template := uritemplate.MustNew(connectUri)
+	template, err := uritemplate.New(connectUri)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect-ip: invalid connect URI template: %w", err)
+	}
 
 	h2Headers := additionalHeaders.Clone()
 	h2Headers.Set("cf-connect-proto", "cf-connect-ip")
@@ -289,6 +295,11 @@ func (s *h2DatagramStream) ReceiveDatagram(_ context.Context) ([]byte, error) {
 		payloadLen, err := quicvarint.Read(reader)
 		if err != nil {
 			return nil, err
+		}
+		if payloadLen > maxH2CapsulePayloadBytes {
+			// WHY: quicvarint decodes up to 2^62-1; bound capsule allocation to maximum IP
+			// packet size (65535 bytes) so untrusted servers cannot trigger runtime OOM panics.
+			return nil, fmt.Errorf("connect-ip: capsule payload length %d exceeds maximum %d", payloadLen, maxH2CapsulePayloadBytes)
 		}
 		payload := make([]byte, payloadLen)
 		_, err = io.ReadFull(reader, payload)

@@ -7,10 +7,10 @@ import org.junit.Test
 
 class DashboardUrlTest {
     @Test
-    fun localDashboardInjectsControllerAndSecret() {
+    fun localDashboardUrlEncodesSecretAndPreservesFragment() {
         assertEquals(
-            "http://127.0.0.1:9090/ui/?hostname=127.0.0.1&port=9090&secret=a+b/c=&http=true",
-            buildDashboardUrl("http://127.0.0.1:9090/ui/", "a+b/c="),
+            "http://127.0.0.1:9090/ui/?hostname=127.0.0.1&port=9090&secret=a%2Bb%2Fc%3D&http=true#/proxies",
+            buildDashboardUrl("http://127.0.0.1:9090/ui/#/proxies", "a+b/c="),
         )
     }
 
@@ -20,6 +20,37 @@ class DashboardUrlTest {
             "https://example.com/dashboard",
             buildDashboardUrl("https://example.com/dashboard", "secret"),
         )
+    }
+
+    @Test
+    fun allowedDashboardUrlRequiresLocalOrHttps() {
+        assertTrue(isAllowedDashboardUrl("http://127.0.0.1:9090/ui/"))
+        assertTrue(isAllowedDashboardUrl("http://localhost:9090/ui/"))
+        assertTrue(isAllowedDashboardUrl("https://d.metacubex.one/"))
+        assertFalse(isAllowedDashboardUrl("http://yacd.haishan.me/"))
+        assertFalse(isAllowedDashboardUrl("javascript:alert(1)"))
+        assertFalse(isAllowedDashboardUrl("file:///etc/hosts"))
+    }
+
+    @Test
+    fun documentStartOriginRulesIncludeLoopbackAndCustomHttpsOrigin() {
+        assertEquals(
+            setOf("http://127.0.0.1:9090", "http://localhost:9090"),
+            buildDocumentStartOriginRules("http://127.0.0.1:9090/ui/"),
+        )
+        assertEquals(
+            setOf("http://127.0.0.1:9090", "http://localhost:9090", "https://d.metacubex.one:8443"),
+            buildDocumentStartOriginRules("https://D.MetaCubeX.one:8443/#/overview"),
+        )
+    }
+
+    @Test
+    fun serviceWorkerAssetPathsMatchAccurately() {
+        assertTrue(isServiceWorkerAssetPath("/ui/sw.js"))
+        assertTrue(isServiceWorkerAssetPath("/ui/registerSW.js"))
+        assertTrue(isServiceWorkerAssetPath("/ui/workbox-38b98e80.js"))
+        assertFalse(isServiceWorkerAssetPath("/ui/_nuxt/DCrN1QU3.js"))
+        assertFalse(isServiceWorkerAssetPath("/ui/index.html"))
     }
 
     @Test
@@ -52,15 +83,19 @@ class DashboardUrlTest {
     }
 
     @Test
-    fun secretSyncScriptSupportsYacdMetaCubeXdZashboardAndLoopGuard() {
-        val script = buildLocalSecretSyncScript("test-secret")
+    fun secretSyncScriptSeedsEmptyLocalStorageAndWrapsLoopbackFetchAndWebSocket() {
+        val script = buildLocalSecretSyncScript("test-secret", isPostFinishFallback = false)
         assertTrue(script.contains("http://127.0.0.1:9090"))
         assertTrue(script.contains("http://localhost:9090"))
         assertTrue(script.contains("yacd.metacubex.one"))
         assertTrue(script.contains("endpointList"))
+        assertTrue(script.contains("localStorage.setItem('selectedEndpoint', targetId)"))
+        assertFalse(script.contains("JSON.stringify(matchedId)"))
         assertTrue(script.contains("setup/api-list"))
-        assertTrue(script.contains("__neko_secret_synced__"))
-        assertFalse(script.contains("backends[0].secret"))
+        assertTrue(script.contains("__nekoLoopbackAuthPatched__"))
+        assertTrue(script.contains("isLoopbackControllerTarget"))
+        assertTrue(script.contains("api.github.com"))
+        assertTrue(script.contains("const isPostFinish = false;"))
     }
 
     @Test

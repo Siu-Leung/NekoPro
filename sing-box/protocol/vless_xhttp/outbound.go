@@ -151,8 +151,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 
 	vlessOption := &outbound.VlessOption{
 		BasicOption: outbound.BasicOption{
-			DialerForAPI: mihomo_adapter.NewDialer(outboundDialer),
-			Resolver:     outboundResolver,
+			IPVersion:      mihomo_adapter.MapDomainStrategy(options.DialerOptions),
+			DialerForAPI:   mihomo_adapter.NewDialer(outboundDialer),
+			Resolver:       outboundResolver,
+			TargetResolver: mihomo_adapter.NewTargetResolver(ctx),
 		},
 		Name:              tag,
 		Server:            options.Server,

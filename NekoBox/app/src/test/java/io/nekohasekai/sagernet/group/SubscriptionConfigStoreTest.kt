@@ -28,6 +28,7 @@ class SubscriptionConfigStoreTest {
 
         store.save(groupId = 7L, content = sampleYaml, userAgent = "FlClash/v0.9.4", updatedAtMs = 1700000000000L)
         assertTrue(store.exists(7L))
+        assertTrue(!store.isLocalEdit(7L))
 
         val loaded = store.read(7L)
         assertNotNull(loaded)
@@ -35,8 +36,13 @@ class SubscriptionConfigStoreTest {
         assertEquals("FlClash/v0.9.4", loaded.userAgent)
         assertEquals(1700000000000L, loaded.updatedAtMs)
 
-        store.delete(7L)
+        store.save(groupId = 7L, content = sampleYaml, userAgent = SubscriptionConfigFileStore.LOCAL_EDIT_USER_AGENT)
+        assertTrue(store.isLocalEdit(7L))
+
+        store.save(groupId = 8L, content = sampleYaml, userAgent = "clash-meta")
+        store.deleteAll()
         assertNull(store.read(7L))
+        assertNull(store.read(8L))
     }
 
     @Test

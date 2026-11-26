@@ -124,6 +124,10 @@ func InstallProtectHook(ctx context.Context) (release func()) {
 	if ctx == nil {
 		return
 	}
+	// WHY: Replace mihomo's process-global SystemResolver (which queries cleartext
+	// 114.114.114.114:53 / 8.8.8.8:53) immediately even when the first box in the
+	// process is a temporary URLTest/SpeedTest instance (entry.test == true).
+	installSingBoxResolverOnce()
 
 	entry := &hookEntry{test: isTestInstance(ctx)}
 	// A temporary box (URL test, speed test, exit probe) must not publish its DNS
@@ -138,7 +142,6 @@ func InstallProtectHook(ctx context.Context) (release func()) {
 				transportManager: service.FromContext[adapter.DNSTransportManager](ctx),
 				test:             false,
 			}
-			installSingBoxResolverOnce()
 		}
 	}
 	if networkManager := service.FromContext[adapter.NetworkManager](ctx); networkManager != nil {
@@ -218,15 +221,16 @@ func installSingBoxResolverOnce() {
 		return
 	}
 	// Proxied target domains (resolved by mihomo outbounds before being sent
-	// through the tunnel) must not leak to the direct DNS server.
+	// through the tunnel) must not leak to direct or cleartext system DNS.
 	remote := &singBoxResolver{
-		fallback:   resolver.SystemResolver,
+		fallback:   nil,
 		transports: []string{"dns-remote"},
 		strict:     true,
 	}
-	// Proxy server hostnames and direct destinations use direct DNS.
+	// Proxy server hostnames and direct destinations use direct DNS via sing-box
+	// and never fall back to mihomo's cleartext SystemResolver.
 	direct := &singBoxResolver{
-		fallback:   resolver.SystemResolver,
+		fallback:   nil,
 		transports: []string{"dns-direct", "dns-local"},
 	}
 	resolver.DefaultResolver = remote
@@ -267,32 +271,55 @@ func (a *singBoxDialerAdapter) ListenPacket(ctx context.Context, network, addres
 	return pc, nil
 }
 
+func effectiveDomainStrategy(dialOptions option.DialerOptions) boxConstant.DomainStrategy {
+	//nolint:staticcheck
+	strategy := boxConstant.DomainStrategy(dialOptions.DomainStrategy)
+	if dialOptions.DomainResolver != nil && dialOptions.DomainResolver.Strategy != option.DomainStrategy(boxConstant.DomainStrategyAsIS) {
+		strategy = boxConstant.DomainStrategy(dialOptions.DomainResolver.Strategy)
+	}
+	return strategy
+}
+
+// MapDomainStrategy maps sing-box DialerOptions domain strategy
+// (prefer_ipv6, ipv6_only, ipv4_only, prefer_ipv4) onto mihomo's C.DNSPrefer IPVersion.
+func MapDomainStrategy(dialOptions option.DialerOptions) C.DNSPrefer {
+	switch effectiveDomainStrategy(dialOptions) {
+	case boxConstant.DomainStrategyPreferIPv4:
+		return C.IPv4Prefer
+	case boxConstant.DomainStrategyPreferIPv6:
+		return C.IPv6Prefer
+	case boxConstant.DomainStrategyIPv4Only:
+		return C.IPv4Only
+	case boxConstant.DomainStrategyIPv6Only:
+		return C.IPv6Only
+	default:
+		return C.DualStack
+	}
+}
+
 // NewOutboundResolver creates an instance-scoped mihomo resolver.Resolver for
 // QUIC dialers (common.DialQuic) and ECH HTTPS RR lookups so embedded outbounds
 // (MASQUE, VLESS-XHTTP) honor sing-box's per-outbound domain_resolver /
 // domain_strategy instead of bypassing them via global ProxyServerHostResolver.
 func NewOutboundResolver(ctx context.Context, dialOptions option.DialerOptions, outboundDialer N.Dialer) (resolver.Resolver, error) {
-	strategy := boxConstant.DomainStrategy(dialOptions.DomainStrategy)
-	if dialOptions.DomainResolver != nil && dialOptions.DomainResolver.Strategy != option.DomainStrategy(boxConstant.DomainStrategyAsIS) {
-		strategy = boxConstant.DomainStrategy(dialOptions.DomainResolver.Strategy)
-	}
+	strategy := effectiveDomainStrategy(dialOptions)
 	if dialOptions.DomainResolver != nil && dialOptions.DomainResolver.Server != "" {
 		dnsRouter := service.FromContext[adapter.DNSRouter](ctx)
 		transports := service.FromContext[adapter.DNSTransportManager](ctx)
 		if dnsRouter == nil || transports == nil {
 			return nil, errors.New("missing DNS router or transport manager for domain_resolver: " + dialOptions.DomainResolver.Server)
 		}
-		if _, loaded := transports.Transport(dialOptions.DomainResolver.Server); !loaded {
-			return nil, errors.New("domain resolver not found: " + dialOptions.DomainResolver.Server)
+		queryOptions, err := boxDialer.NewDNSQueryOptions(ctx, dialOptions.DomainResolver, false)
+		if err != nil {
+			return nil, err
 		}
+		queryOptions.Strategy = strategy
+		queryOptions.LookupStrategy = strategy
 		return &outboundSingBoxResolver{
-			router:     dnsRouter,
-			transports: transports,
-			serverTag:  dialOptions.DomainResolver.Server,
-			queryOptions: adapter.DNSQueryOptions{
-				Strategy:       strategy,
-				LookupStrategy: strategy,
-			},
+			router:       dnsRouter,
+			transports:   transports,
+			serverTag:    dialOptions.DomainResolver.Server,
+			queryOptions: queryOptions,
 		}, nil
 	}
 	if resolveDialer, ok := outboundDialer.(boxDialer.ResolveDialer); ok {
@@ -304,7 +331,57 @@ func NewOutboundResolver(ctx context.Context, dialOptions option.DialerOptions, 
 			}, nil
 		}
 	}
-	return nil, nil
+	// WHY: When outboundDialer does not implement ResolveDialer (e.g. IP-literal
+	// server with ECH domain SNI, or Detour chain proxy), still build a valid
+	// instance-scoped resolver via NewDNSQueryOptions (defaulting to "dns-direct"
+	// when DomainResolver is empty) so lookups never fall back to global state.
+	dnsRouter := service.FromContext[adapter.DNSRouter](ctx)
+	transports := service.FromContext[adapter.DNSTransportManager](ctx)
+	if dnsRouter == nil || transports == nil {
+		return nil, nil
+	}
+	var (
+		queryOptions adapter.DNSQueryOptions
+		err          error
+	)
+	networkManager := service.FromContext[adapter.NetworkManager](ctx)
+	if networkManager != nil && networkManager.DefaultOptions().DomainResolver != "" {
+		queryOptions, err = boxDialer.NewDNSQueryOptions(ctx, dialOptions.DomainResolver, false)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var fallbackResolver option.DomainResolveOptions
+		if dialOptions.DomainResolver != nil {
+			fallbackResolver = *dialOptions.DomainResolver
+		}
+		if _, ok := transports.Transport("dns-direct"); ok {
+			fallbackResolver.Server = "dns-direct"
+			queryOptions, err = boxDialer.NewDNSQueryOptions(ctx, &fallbackResolver, false)
+			if err != nil {
+				return nil, err
+			}
+		} else if _, ok := transports.Transport("dns-local"); ok {
+			fallbackResolver.Server = "dns-local"
+			queryOptions, err = boxDialer.NewDNSQueryOptions(ctx, &fallbackResolver, false)
+			if err != nil {
+				return nil, err
+			}
+		} else if def := transports.Default(); def != nil {
+			queryOptions = adapter.DNSQueryOptions{Transport: def}
+		} else {
+			return nil, nil
+		}
+	}
+	if strategy != boxConstant.DomainStrategyAsIS {
+		queryOptions.Strategy = strategy
+		queryOptions.LookupStrategy = strategy
+	}
+	return &outboundSingBoxResolver{
+		router:       dnsRouter,
+		transports:   transports,
+		queryOptions: queryOptions,
+	}, nil
 }
 
 // NewTargetResolver creates an instance-scoped mihomo resolver.Resolver for
@@ -613,13 +690,20 @@ func (r *singBoxResolver) defaultTransport(h *dnsRouterHolder) (adapter.DNSTrans
 		}
 	}
 	def := h.transportManager.Default()
-	if r.strict && !h.test {
+	if r.strict {
 		if def == nil {
 			return nil, false
 		}
 		switch def.Tag() {
-		case "dns-direct", "dns-local":
+		case "dns-local":
 			return nil, false
+		case "dns-direct":
+			// WHY: Full main and forTest configs register "dns-remote" and return above.
+			// Only allow Default() == "dns-direct" on minimal unit-test configs where
+			// "dns-remote" is not registered at all; main instances always fail closed.
+			if !h.test {
+				return nil, false
+			}
 		}
 	}
 	return def, def != nil || !r.strict

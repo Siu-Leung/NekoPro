@@ -104,9 +104,25 @@ func (c connectionObject) MarshalJSON() ([]byte, error) {
 	})
 }
 
+const defaultConnectionsIntervalMs = 1000
+
 func getConnections(ctx context.Context, trafficManager *trafficcontrol.Manager) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Upgrade") != "websocket" {
+		interval := defaultConnectionsIntervalMs
+		if intervalStr := r.URL.Query().Get("interval"); intervalStr != "" {
+			// WHY: Validate interval strictly (> 0) BEFORE ws.UpgradeHTTP hijacks the
+			// socket so ?interval=0 never panics time.NewTicker(0) and invalid inputs
+			// never write HTTP error bodies onto a raw hijacked WebSocket connection.
+			parsedInterval, err := strconv.Atoi(intervalStr)
+			if err != nil || parsedInterval <= 0 {
+				render.Status(r, http.StatusBadRequest)
+				render.JSON(w, r, ErrBadRequest)
+				return
+			}
+			interval = parsedInterval
+		}
+
+		if !isWebSocketUpgrade(r) {
 			render.JSON(w, r, connectionsSnapshot(trafficManager))
 			return
 		}
@@ -116,19 +132,7 @@ func getConnections(ctx context.Context, trafficManager *trafficcontrol.Manager)
 			return
 		}
 		defer conn.Close()
-
-		intervalStr := r.URL.Query().Get("interval")
-		interval := 1000
-		if intervalStr != "" {
-			t, err := strconv.Atoi(intervalStr)
-			if err != nil {
-				render.Status(r, http.StatusBadRequest)
-				render.JSON(w, r, ErrBadRequest)
-				return
-			}
-
-			interval = t
-		}
+		clientDone := monitorWebSocketClient(conn)
 
 		buf := &bytes.Buffer{}
 		sendSnapshot := func() error {
@@ -149,6 +153,10 @@ func getConnections(ctx context.Context, trafficManager *trafficcontrol.Manager)
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-r.Context().Done():
+				return
+			case <-clientDone:
 				return
 			case <-tick.C:
 			}

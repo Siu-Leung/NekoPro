@@ -494,18 +494,24 @@ object IpInfoStore {
         val fallbackDohClient by lazy { customCaClient(timeoutSeconds = 6L) }
         return withTimeoutOrNull(14000L) {
             for (endpoint in groupDns.distinct()) {
-                val url = groupDohUrl(endpoint) ?: continue
-                for (type in listOf(1, 28)) {
-                    val question = buildQuery(name, type)
-                    val request = Request.Builder().url(url)
-                        .post(question.toRequestBody("application/dns-message".toMediaType()))
-                        .header("Accept", "application/dns-message")
-                        .header("User-Agent", PROBE_USER_AGENT)
-                        .build()
-                    val answer = dohClient.read(request, MAX_DNS)
-                        ?: (if (boundUnderlying) fallbackDohClient.read(request, MAX_DNS) else null)
-                        ?: continue
-                    parseAnswer(answer, question)?.takeIf(::isUsableEntryIp)?.let {
+                val url = groupDohUrl(endpoint)
+                if (url != null) {
+                    for (type in listOf(1, 28)) {
+                        val question = buildQuery(name, type)
+                        val request = Request.Builder().url(url)
+                            .post(question.toRequestBody("application/dns-message".toMediaType()))
+                            .header("Accept", "application/dns-message")
+                            .header("User-Agent", PROBE_USER_AGENT)
+                            .build()
+                        val answer = dohClient.read(request, MAX_DNS)
+                            ?: (if (boundUnderlying) fallbackDohClient.read(request, MAX_DNS) else null)
+                            ?: continue
+                        parseAnswer(answer, question)?.takeIf(::isUsableEntryIp)?.let {
+                            return@withTimeoutOrNull it
+                        }
+                    }
+                } else {
+                    resolveEntryViaSingBoxDns(name, endpoint)?.let {
                         return@withTimeoutOrNull it
                     }
                 }
@@ -513,6 +519,51 @@ object IpInfoStore {
             null
         }
     }
+
+    /**
+     * Resolves [name] through non-HTTPS group DNS schemes (`h3://`, `tls://`, `quic://`, `tcp://`,
+     * `udp://`) using an ephemeral `sing-box` test DNS instance.
+     */
+    private suspend fun resolveEntryViaSingBoxDns(name: String, endpoint: String): String? =
+        withContext(Dispatchers.IO) {
+            val parsedGroupServer = runCatching {
+                moe.matsuri.nb4a.SingBoxDnsServerParser.parseGroupNodeDns(endpoint, "dns-group")
+            }.getOrNull() ?: return@withContext null
+            val options = moe.matsuri.nb4a.SingBoxOptions.MyOptions().apply {
+                log = moe.matsuri.nb4a.SingBoxOptions.LogOptions().apply { level = "panic" }
+                dns = moe.matsuri.nb4a.SingBoxOptions.DNSOptions().apply {
+                    servers = mutableListOf(
+                        moe.matsuri.nb4a.SingBoxOptions.DNSServerOptions().apply {
+                            type = "local"
+                            tag = "dns-direct"
+                        },
+                        parsedGroupServer,
+                    )
+                    final_ = "dns-group"
+                }
+                outbounds = mutableListOf(
+                    moe.matsuri.nb4a.SingBoxOptions.Outbound().apply {
+                        type = "direct"
+                        tag = "direct"
+                    }
+                )
+            }
+            val configJson = moe.matsuri.nb4a.utils.JavaUtil.gson.toJson(options.asMap())
+            var testBox: libcore.BoxInstance? = null
+            try {
+                testBox = libcore.Libcore.newTestSingBoxInstance(
+                    configJson,
+                    moe.matsuri.nb4a.net.LocalResolverImpl,
+                )
+                testBox.start()
+                val resolved = testBox.lookupDomainWithTag(name, "dns-group", 6000)
+                literal(resolved)?.takeIf(::isUsableEntryIp)
+            } catch (_: Throwable) {
+                null
+            } finally {
+                runCatching { testBox?.close() }
+            }
+        }
 
     internal fun groupDohUrl(endpoint: String): HttpUrl? {
         val raw = endpoint.trim()

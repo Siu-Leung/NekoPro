@@ -7,8 +7,8 @@ import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
+import android.database.SQLException
 import java.io.IOException
-import java.sql.SQLException
 import java.util.*
 
 

@@ -237,6 +237,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var profileTrafficStatistics by configurationStore.boolean(Key.PROFILE_TRAFFIC_STATISTICS) { true }
 
     var yacdURL by configurationStore.string("yacdURL") { "http://127.0.0.1:9090/ui/" }
+    var dashboardPanel by configurationStore.string("dashboardPanel") { "metacubexd" }
+    var dashboardBuiltInMcxdMigrated by configurationStore.boolean("dashboardBuiltInMcxdMigrated") { false }
 
     // protocol
 

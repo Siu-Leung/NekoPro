@@ -15,7 +15,9 @@ import (
 	boxDNS "github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/common/uot"
 
 	mDNS "github.com/miekg/dns"
 )
@@ -549,5 +551,15 @@ func TestMultiplexerSlowQueryKeepsActiveConn(t *testing.T) {
 			return
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+}
+
+func TestMultiplexConnUpstreamUnwrapsUoTConn(t *testing.T) {
+	t.Parallel()
+	uotConn := &uot.Conn{}
+	wrapped := &multiplexConn{Conn: uotConn}
+	casted, ok := common.Cast[*uot.Conn](wrapped)
+	if !ok || casted != uotConn {
+		t.Fatalf("common.Cast[*uot.Conn](&multiplexConn{Conn: &uot.Conn{}}) = (%v, %v), want (%v, true)", casted, ok, uotConn)
 	}
 }

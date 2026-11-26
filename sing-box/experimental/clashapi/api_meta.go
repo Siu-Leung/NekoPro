@@ -47,14 +47,18 @@ func inuseMemory() uint64 {
 
 func memory(ctx context.Context) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var conn net.Conn
-		if r.Header.Get("Upgrade") == "websocket" {
+		var (
+			conn       net.Conn
+			clientDone <-chan struct{}
+		)
+		if isWebSocketUpgrade(r) {
 			var err error
 			conn, _, _, err = ws.UpgradeHTTP(r, w)
 			if err != nil {
 				return
 			}
 			defer conn.Close()
+			clientDone = monitorWebSocketClient(conn)
 		}
 
 		if conn == nil {
@@ -70,6 +74,10 @@ func memory(ctx context.Context) func(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-r.Context().Done():
+				return
+			case <-clientDone:
 				return
 			case <-tick.C:
 			}
@@ -91,7 +99,9 @@ func memory(ctx context.Context) func(w http.ResponseWriter, r *http.Request) {
 			}
 			if conn == nil {
 				_, err = w.Write(buf.Bytes())
-				w.(http.Flusher).Flush()
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
 			} else {
 				err = wsutil.WriteServerText(conn, buf.Bytes())
 			}

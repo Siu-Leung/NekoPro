@@ -75,9 +75,19 @@ object DefaultNetworkListener {
     suspend fun start(key: Any, listener: (Network?) -> Unit) =
         networkActor.send(NetworkMessage.Start(key, listener))
 
-    suspend fun get() = if (fallback) @TargetApi(23) {
-        SagerNet.connectivity.activeNetwork
-            ?: throw UnknownHostException() // failed to listen, return current if available
+    @Suppress("DEPRECATION")
+    suspend fun get() = if (fallback) {
+        val net = if (Build.VERSION.SDK_INT >= 23) {
+            SagerNet.connectivity.activeNetwork
+        } else {
+            SagerNet.connectivity.allNetworks.firstOrNull { candidate ->
+                val caps = SagerNet.connectivity.getNetworkCapabilities(candidate)
+                caps != null &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            }
+        }
+        net ?: throw UnknownHostException() // failed to listen, return current if available
     } else NetworkMessage.Get().run {
         networkActor.send(this)
         response.await()

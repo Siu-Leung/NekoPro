@@ -178,20 +178,13 @@ class StatsBar @JvmOverloads constructor(
     ) {
         if (isSpeedTestActive) return
         ensureViewsBound()
-        val shouldShowDirect = DataStore.showDirectSpeed ||
-            ((txRateDirect + rxRateDirect) >= SIGNIFICANT_DIRECT_RATE_BYTES &&
-                (txRateProxy + rxRateProxy) < IDLE_PROXY_RATE_BYTES)
+        val proxyActive = (txRateProxy + rxRateProxy) >= IDLE_PROXY_RATE_BYTES
+        val directActive = (txRateDirect + rxRateDirect) >= SIGNIFICANT_DIRECT_RATE_BYTES
 
-        if (shouldShowDirect && (txRateDirect > 0L || rxRateDirect > 0L)) {
-            val totalTx = txRateProxy + txRateDirect
-            val totalRx = rxRateProxy + rxRateDirect
-            txText.text = "▲ ${formatBinaryByteRate(totalTx)}"
-            val directHint = if (rxRateProxy < IDLE_PROXY_RATE_BYTES && rxRateDirect >= SIGNIFICANT_DIRECT_RATE_BYTES) {
-                " (${context.getString(R.string.stats_direct_tag)})"
-            } else {
-                ""
-            }
-            rxText.text = "▼ ${formatBinaryByteRate(totalRx)}$directHint"
+        if (DataStore.showDirectSpeed && !proxyActive && directActive) {
+            val directTag = context.getString(R.string.stats_direct_tag)
+            txText.text = "▲ ${formatBinaryByteRate(txRateDirect)}"
+            rxText.text = "▼ ${formatBinaryByteRate(rxRateDirect)} ($directTag)"
         } else {
             txText.text = "▲ ${formatBinaryByteRate(txRateProxy)}"
             rxText.text = "▼ ${formatBinaryByteRate(rxRateProxy)}"

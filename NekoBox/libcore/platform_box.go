@@ -21,6 +21,7 @@ import (
 	tun "github.com/sagernet/sing-tun"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
+	"golang.org/x/sys/unix"
 )
 
 var boxPlatformInterfaceInstance adapter.PlatformInterface = &boxPlatformInterfaceWrapper{}
@@ -41,11 +42,21 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
 	// call protect_path
 	if !isBgProcess {
-		_ = sendFdToProtect(fd, "protect_path")
+		err := sendFdToProtect(fd, protectSocketPath)
+		if err != nil && !isAbsentProtectSocketError(err) {
+			// WHY: Only ignore ENOENT / ECONNREFUSED (no active VPN protect listener).
+			// Propagate timeouts, unexpected EOFs, and explicit rejections so UI test
+			// sockets fail closed instead of routing unprotected traffic into tun0.
+			return err
+		}
 		return nil
 	}
 	// bg process call VPNService
 	return intfBox.AutoDetectInterfaceControl(int32(fd))
+}
+
+func isAbsentProtectSocketError(err error) bool {
+	return errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ECONNREFUSED)
 }
 
 func (w *boxPlatformInterfaceWrapper) UsePlatformInterface() bool {

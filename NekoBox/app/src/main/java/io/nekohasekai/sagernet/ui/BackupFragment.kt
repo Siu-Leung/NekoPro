@@ -372,6 +372,7 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         if (profiles != null || rules != null) {
             SagerDatabase.instance.runInTransaction {
                 if (profiles != null && groups != null) {
+                    io.nekohasekai.sagernet.group.SubscriptionConfigStore.deleteAll()
                     SagerDatabase.proxyDao.reset()
                     SagerDatabase.proxyDao.insert(profiles)
                     SagerDatabase.groupDao.reset()

@@ -35,11 +35,24 @@ class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = 
 
     override suspend fun loadConfig() {
         super.loadConfig()
+        val statsTags = hashSetOf(
+            io.nekohasekai.sagernet.fmt.TAG_PROXY,
+            io.nekohasekai.sagernet.fmt.TAG_BYPASS,
+            io.nekohasekai.sagernet.fmt.TAG_DIRECT,
+        ).apply {
+            addAll(config.trafficMap.keys)
+        }
+        box.setV2rayStats(statsTags.joinToString("\n"))
     }
 
     override fun launch() {
         box.setAsMain()
         super.launch() // start box
+        if (config.selectorGroupId >= 0L) {
+            config.profileTagMap[profile.id]?.takeIf { it.isNotBlank() }?.let { selectedTag ->
+                box.selectOutbound(selectedTag)
+            }
+        }
         runOnDefaultDispatcher {
             looper = service?.let { TrafficLooper(it.data, this) }
             looper?.start()

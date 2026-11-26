@@ -57,13 +57,14 @@ class QRCodeDialog() : DialogFragment() {
             pixelMin = if (height > width) width else height
             pixelMin = (pixelMin * 0.8).roundToInt()
         } catch (e: Exception) {
+            Logs.d("QRCodeDialog fallback size: ${e.message}")
         }
 
         val size = if (pixelMin > 0) pixelMin else resources.getDimensionPixelSize(R.dimen.qrcode_size)
 
         // draw QR Code
-        val url = arguments?.getString(KEY_URL)!!
-        val displayName = arguments?.getString(KEY_NAME)!!
+        val url = arguments?.getString(KEY_URL).orEmpty()
+        val displayName = arguments?.getString(KEY_NAME).orEmpty()
 
         val hints = mutableMapOf<EncodeHintType, Any>()
         if (!iso88591.canEncode(url)) hints[EncodeHintType.CHARACTER_SET] = StandardCharsets.UTF_8.name()
@@ -96,8 +97,8 @@ class QRCodeDialog() : DialogFragment() {
         }
     } catch (e: WriterException) {
         Logs.w(e)
-        (activity as MainActivity).snackbar(e.readableMessage).show()
-        dismiss()
+        (activity as? MainActivity)?.snackbar(e.readableMessage)?.show()
+        dismissAllowingStateLoss()
         null
     }
 }

@@ -83,12 +83,12 @@ class MainActivity : ThemedActivity(),
         if (savedInstanceState == null) {
             displayFragmentWithId(R.id.nav_configuration)
         } else {
-            supportFragmentManager.findFragmentById(R.id.fragment_holder)?.let { current ->
+            activeToolbarFragment()?.let { current ->
                 updateBottomBarVisibility(current)
             }
         }
         onBackPressedDispatcher.addCallback {
-            if (supportFragmentManager.findFragmentById(R.id.fragment_holder) is ConfigurationFragment) {
+            if (activeToolbarFragment() is ConfigurationFragment) {
                 moveTaskToBack(true)
             } else {
                 displayFragmentWithId(R.id.nav_configuration)
@@ -135,9 +135,11 @@ class MainActivity : ThemedActivity(),
         }
     }
 
-    fun refreshNavMenu(clashApi: Boolean) {
+    fun refreshNavMenu(@Suppress("UNUSED_PARAMETER") clashApi: Boolean = true) {
         if (::navigation.isInitialized) {
-            navigation.menu.findItem(R.id.nav_traffic)?.isVisible = clashApi
+            // WHY: Dashboard auto-enables Clash API and reloads the controller on demand, so keep
+            // the drawer entry permanently accessible without requiring a prior Settings toggle.
+            navigation.menu.findItem(R.id.nav_traffic)?.isVisible = true
             val isGlobal = DataStore.routeMode == 1
             val ruleLabel = getString(R.string.route_mode_rule)
             val globalLabel = getString(R.string.route_mode_global)
@@ -201,9 +203,14 @@ class MainActivity : ThemedActivity(),
             }
         }
 
-        val name = group.name.takeIf { !it.isNullOrBlank() } ?: group.subscription?.link
-        ?: group.subscription?.token
-        if (name.isNullOrBlank()) return
+        val rawName = group.name.takeIf { !it.isNullOrBlank() } ?: group.subscription?.link
+            ?: group.subscription?.token
+        if (rawName.isNullOrBlank()) return
+        val displayName = if (DataStore.hideNodeAddress) {
+            io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(rawName)
+        } else {
+            rawName
+        }
 
         group.name = group.name.takeIf { !it.isNullOrBlank() }
             ?: ("Subscription #" + System.currentTimeMillis())
@@ -213,7 +220,7 @@ class MainActivity : ThemedActivity(),
             displayFragmentWithId(R.id.nav_group)
 
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.subscription_import)
-                .setMessage(getString(R.string.subscription_import_message, name))
+                .setMessage(getString(R.string.subscription_import_message, displayName))
                 .setPositiveButton(R.string.yes) { _, _ ->
                     runOnDefaultDispatcher {
                         finishImportSubscription(group)
@@ -241,9 +248,13 @@ class MainActivity : ThemedActivity(),
             return
         }
 
+        val safeTitle = io.nekohasekai.sagernet.ipinfo.AddressRedactor.beanTitle(
+            profile,
+            DataStore.hideNodeAddress,
+        )
         onMainDispatcher {
             MaterialAlertDialogBuilder(this@MainActivity).setTitle(R.string.profile_import)
-                .setMessage(getString(R.string.profile_import_message, profile.displayName()))
+                .setMessage(getString(R.string.profile_import_message, safeTitle))
                 .setPositiveButton(R.string.yes) { _, _ ->
                     runOnDefaultDispatcher {
                         finishImportProfile(profile)
@@ -276,12 +287,16 @@ class MainActivity : ThemedActivity(),
             return
         }
 
-        // official exe
+        val safeName = if (DataStore.hideNodeAddress) {
+            io.nekohasekai.sagernet.ipinfo.AddressRedactor.scrub(profileName)
+        } else {
+            profileName
+        }
 
         MaterialAlertDialogBuilder(this).setTitle(R.string.missing_plugin)
             .setMessage(
                 getString(
-                    R.string.profile_requiring_plugin, profileName, pluginEntity.displayName
+                    R.string.profile_requiring_plugin, safeName, pluginEntity.displayName
                 )
             )
             .setPositiveButton(R.string.action_download) { _, _ ->
@@ -359,9 +374,21 @@ class MainActivity : ThemedActivity(),
         }
     }
 
+    private fun retainedConfigurationFragment(): ConfigurationFragment? {
+        return (supportFragmentManager.findFragmentByTag(TAG_CONFIGURATION_FRAGMENT)
+            ?: supportFragmentManager.findFragmentById(R.id.fragment_holder)) as? ConfigurationFragment
+    }
+
+    private fun activeToolbarFragment(): ToolbarFragment? {
+        val secondary = supportFragmentManager.findFragmentByTag(TAG_SECONDARY_FRAGMENT) as? ToolbarFragment
+        if (secondary != null && !secondary.isHidden) return secondary
+        val config = retainedConfigurationFragment()
+        if (config != null && !config.isHidden) return config
+        return supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+    }
+
     private fun notifyConfigurationSurgeHeader() {
-        (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
-            ?.refreshSurgeStatusHeader()
+        retainedConfigurationFragment()?.refreshSurgeStatusHeader()
     }
 
 
@@ -385,17 +412,42 @@ class MainActivity : ThemedActivity(),
 
     @SuppressLint("CommitTransaction")
     fun displayFragment(fragment: ToolbarFragment) {
-        updateBottomBarVisibility(fragment)
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragment_holder, fragment)
-            .commitAllowingStateLoss()
+        val fm = supportFragmentManager
+        val tx = fm.beginTransaction()
+        val existingConfig = fm.findFragmentByTag(TAG_CONFIGURATION_FRAGMENT) as? ConfigurationFragment
+        val existingSecondary = fm.findFragmentByTag(TAG_SECONDARY_FRAGMENT)
+
+        if (fragment is ConfigurationFragment) {
+            if (existingSecondary != null) {
+                tx.remove(existingSecondary)
+            }
+            val targetConfig = existingConfig ?: fragment
+            updateBottomBarVisibility(targetConfig)
+            if (existingConfig != null) {
+                tx.show(existingConfig)
+            } else {
+                tx.add(R.id.fragment_holder, fragment, TAG_CONFIGURATION_FRAGMENT)
+            }
+            tx.commitAllowingStateLoss()
+            existingConfig?.refreshSurgeStatusHeader()
+        } else {
+            updateBottomBarVisibility(fragment)
+            if (existingConfig != null && !existingConfig.isHidden) {
+                tx.hide(existingConfig)
+            }
+            if (existingSecondary != null) {
+                tx.remove(existingSecondary)
+            }
+            tx.add(R.id.fragment_holder, fragment, TAG_SECONDARY_FRAGMENT)
+            tx.commitAllowingStateLoss()
+        }
         binding.drawerLayout.closeDrawers()
     }
 
     fun displayFragmentWithId(@IdRes id: Int): Boolean {
         when (id) {
             R.id.nav_configuration -> {
-                displayFragment(ConfigurationFragment())
+                displayFragment(retainedConfigurationFragment() ?: ConfigurationFragment())
             }
 
             R.id.nav_group -> displayFragment(GroupFragment())
@@ -423,11 +475,10 @@ class MainActivity : ThemedActivity(),
         binding.fab.changeState(state, previousState, animate)
         binding.stats.changeState(state)
         notifyConfigurationSurgeHeader()
-        (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? WebviewFragment)
+        (activeToolbarFragment() as? WebviewFragment)
             ?.onProxyServiceStateChanged(state)
         if (state == BaseService.State.Connected && previousState != BaseService.State.Connected) {
-            (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
-                ?.onActiveNodeConnectedRefreshIp()
+            retainedConfigurationFragment()?.onActiveNodeConnectedRefreshIp()
         }
         if (msg != null) snackbar(getString(R.string.vpn_error, msg)).show()
     }
@@ -472,8 +523,7 @@ class MainActivity : ThemedActivity(),
             txRateDirect = stats.txRateDirect,
             rxRateDirect = stats.rxRateDirect,
         )
-        (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
-            ?.onLiveSpeedSample(stats)
+        retainedConfigurationFragment()?.onLiveSpeedSample(stats)
     }
 
     override fun cbTrafficUpdate(data: TrafficData) {
@@ -489,8 +539,7 @@ class MainActivity : ThemedActivity(),
         runOnUiThread {
             notifyConfigurationSurgeHeader()
             if (DataStore.serviceState.connected) {
-                (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)
-                    ?.onActiveNodeConnectedRefreshIp()
+                retainedConfigurationFragment()?.onActiveNodeConnectedRefreshIp()
             }
         }
         runOnDefaultDispatcher {
@@ -548,9 +597,13 @@ class MainActivity : ThemedActivity(),
         if (super.onKeyDown(keyCode, event)) return true
         if (binding.drawerLayout.isOpen) return false
 
-        val fragment =
-            supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
+        val fragment = activeToolbarFragment()
         return fragment != null && fragment.onKeyDown(keyCode, event)
+    }
+
+    companion object {
+        private const val TAG_CONFIGURATION_FRAGMENT = "fragment_configuration"
+        private const val TAG_SECONDARY_FRAGMENT = "fragment_secondary"
     }
 
 }

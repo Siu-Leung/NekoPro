@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
 import android.os.Build
 import android.text.format.Formatter
@@ -23,6 +24,7 @@ import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.getColorAttr
 import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.ui.SwitchActivity
+import io.nekohasekai.sagernet.ipinfo.AddressRedactor
 import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -47,16 +49,35 @@ class ServiceNotification(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
         fun genTitle(ent: ProxyEntity): String {
+            val safeName = AddressRedactor.beanTitle(
+                ent.requireBean(),
+                DataStore.hideNodeAddress,
+            )
             val gn = if (DataStore.showGroupInNotification)
                 SagerDatabase.groupDao.getById(ent.groupId)?.displayName() else null
-            return if (gn == null) ent.displayName() else "[$gn] ${ent.displayName()}"
+            return if (gn == null) safeName else "[$gn] $safeName"
         }
     }
 
     var listenPostSpeed = true
 
+    @Volatile
+    private var lastHideNodeAddress = DataStore.hideNodeAddress
+
     suspend fun postNotificationSpeedUpdate(stats: SpeedDisplayData) {
+        val currentHide = DataStore.hideNodeAddress
+        val updatedTitle = if (currentHide != lastHideNodeAddress) {
+            lastHideNodeAddress = currentHide
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                service.data.proxy?.profile?.let { genTitle(it) }
+            }
+        } else {
+            null
+        }
         useBuilder {
+            if (updatedTitle != null) {
+                it.setContentTitle(updatedTitle)
+            }
             if (showDirectSpeed) {
                 val speedDetail = (service as Context).getString(
                     R.string.speed_detail, service.getString(
@@ -185,25 +206,35 @@ class ServiceNotification(
     }
 
 
+    private fun startForegroundCompat(built: android.app.Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                val fgsType = if (service is VpnService) {
+                    FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
+                } else {
+                    FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                }
+                (service as Service).startForeground(notificationId, built, fgsType)
+            } else {
+                (service as Service).startForeground(notificationId, built)
+            }
+        } catch (e: Exception) {
+            Toast.makeText(
+                SagerNet.application,
+                "startForeground: $e",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    /** Synchronously satisfies Android 8+ `startForeground()` contract on the main thread. */
+    fun showImmediate() {
+        startForegroundCompat(builder.build())
+    }
+
     private suspend fun show() =
         useBuilder {
-            try {
-                if (Build.VERSION.SDK_INT >= 34) {
-                    (service as Service).startForeground(
-                        notificationId,
-                        it.build(),
-                        FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
-                    )
-                } else {
-                    (service as Service).startForeground(notificationId, it.build())
-                }
-            } catch (e: Exception) {
-                Toast.makeText(
-                    SagerNet.application,
-                    "startForeground: $e",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+            startForegroundCompat(it.build())
         }
 
     private suspend fun update() = useBuilder {
