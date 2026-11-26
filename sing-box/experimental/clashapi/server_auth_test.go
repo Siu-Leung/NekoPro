@@ -13,10 +13,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/ws"
 )
+
+func newTestPanelRouter(externalUI string) http.Handler {
+	r := chi.NewRouter()
+	mountBuiltInPanels(r, func() string { return externalUI })
+	return r
+}
 
 func newProtectedTestHandler(secret string, controllerPort string) http.Handler {
 	okHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -280,6 +287,98 @@ func TestDownloadZIPRejectsZipSlipAndSymlinks(t *testing.T) {
 
 		if err := srv.downloadZIP(bytes.NewReader(malicious), uiDir); err == nil {
 			t.Fatal("expected error for symlink zip entry")
+		}
+	})
+}
+
+func TestBuiltInPanelRoutesAndServiceWorkerNeutralization(t *testing.T) {
+	filesDir := t.TempDir()
+	mcxdDir := filepath.Join(filesDir, "metacubexd")
+	yacdDir := filepath.Join(filesDir, "yacd")
+	if err := os.MkdirAll(filepath.Join(mcxdDir, "_nuxt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(yacdDir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcxdDir, "index.html"), []byte("<!DOCTYPE html><title>MetaCubeXD</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcxdDir, "_nuxt", "entry.css"), []byte("body{margin:0}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(yacdDir, "index.html"), []byte("<!DOCTYPE html><title>yacd</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Plant an actual legacy Workbox sw.js and registerSW.js on disk inside yacd/ to verify server_fs overrides them.
+	if err := os.WriteFile(filepath.Join(yacdDir, "sw.js"), []byte("/* legacy workbox precache */"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(yacdDir, "registerSW.js"), []byte("navigator.serviceWorker.register('./sw.js')"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	router := newTestPanelRouter(mcxdDir)
+
+	t.Run("serves metacubexd and yacd simultaneously on isolated /panel routes", func(t *testing.T) {
+		mcxdReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9090/panel/metacubexd/", nil)
+		mcxdRec := httptest.NewRecorder()
+		router.ServeHTTP(mcxdRec, mcxdReq)
+		if mcxdRec.Code != http.StatusOK || !strings.Contains(mcxdRec.Body.String(), "MetaCubeXD") {
+			t.Fatalf("metacubexd status=%d body=%q", mcxdRec.Code, mcxdRec.Body.String())
+		}
+		if gotCC := mcxdRec.Header().Get("Cache-Control"); gotCC != "no-store" {
+			t.Fatalf("metacubexd index.html Cache-Control = %q, want no-store", gotCC)
+		}
+
+		cssReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9090/panel/metacubexd/_nuxt/entry.css", nil)
+		cssRec := httptest.NewRecorder()
+		router.ServeHTTP(cssRec, cssReq)
+		if cssRec.Code != http.StatusOK || !strings.HasPrefix(cssRec.Header().Get("Content-Type"), "text/css") {
+			t.Fatalf("metacubexd css status=%d content-type=%q", cssRec.Code, cssRec.Header().Get("Content-Type"))
+		}
+
+		yacdReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9090/panel/yacd/", nil)
+		yacdRec := httptest.NewRecorder()
+		router.ServeHTTP(yacdRec, yacdReq)
+		if yacdRec.Code != http.StatusOK || !strings.Contains(yacdRec.Body.String(), "<title>yacd</title>") {
+			t.Fatalf("yacd status=%d body=%q", yacdRec.Code, yacdRec.Body.String())
+		}
+	})
+
+	t.Run("neutralizes sw.js and registerSW.js across /ui and /panel with 200 OK self-unregister script", func(t *testing.T) {
+		for _, swPath := range []string{
+			"/ui/sw.js",
+			"/ui//sw.js",
+			"/panel/metacubexd/sw.js",
+			"/panel/yacd/sw.js",
+		} {
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9090"+swPath, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want 200", swPath, rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "self.registration.unregister()") || !strings.Contains(body, "caches.delete") {
+				t.Fatalf("%s did not return self-destructing SW script: %q", swPath, body)
+			}
+			if strings.Contains(body, "legacy workbox") {
+				t.Fatalf("%s leaked on-disk legacy sw.js", swPath)
+			}
+		}
+
+		for _, helperPath := range []string{
+			"/ui/registerSW.js",
+			"/panel/yacd/registerSW.js",
+			"/ui/workbox-38b98e80.js",
+		} {
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9090"+helperPath, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "getRegistrations") {
+				t.Fatalf("%s status=%d body=%q", helperPath, rec.Code, rec.Body.String())
+			}
 		}
 	})
 }

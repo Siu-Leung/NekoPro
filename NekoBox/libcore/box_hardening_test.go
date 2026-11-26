@@ -278,3 +278,17 @@ func TestPlatformLocalDNSTransportBlocksZeroNetworkHandleWhenMainActive(t *testi
 		t.Fatal("rawQueryFunc must not be called with networkHandle=0 when VPN mainInstance is active")
 	}
 }
+
+func TestBoxInstanceStartDoesNotNetworkPauseWithInterfaceMonitorStub(t *testing.T) {
+	b, err := NewSingBoxInstance(`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}]}`, nil)
+	if err != nil {
+		t.Fatalf("NewSingBoxInstance: %v", err)
+	}
+	defer b.Close()
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if b.pauseManager != nil && b.pauseManager.IsNetworkPaused() {
+		t.Fatal("pauseManager must not stay NetworkPaused when platform uses interfaceMonitorStub")
+	}
+}

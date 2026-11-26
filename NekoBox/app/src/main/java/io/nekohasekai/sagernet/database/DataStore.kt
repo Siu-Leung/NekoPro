@@ -236,9 +236,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var tunImplementation by configurationStore.stringToInt(Key.TUN_IMPLEMENTATION) { TunImplementation.GVISOR }
     var profileTrafficStatistics by configurationStore.boolean(Key.PROFILE_TRAFFIC_STATISTICS) { true }
 
-    var yacdURL by configurationStore.string("yacdURL") { "http://127.0.0.1:9090/ui/" }
+    var yacdURL by configurationStore.string("yacdURL") { "http://127.0.0.1:9090/panel/metacubexd/" }
     var dashboardPanel by configurationStore.string("dashboardPanel") { "metacubexd" }
     var dashboardBuiltInMcxdMigrated by configurationStore.boolean("dashboardBuiltInMcxdMigrated") { false }
+    var dashboardLegacySwCacheClearedV1 by configurationStore.boolean("dashboardLegacySwCacheClearedV1") { false }
 
     // protocol
 

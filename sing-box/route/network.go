@@ -317,6 +317,9 @@ func (r *NetworkManager) UpdateInterfaces() error {
 }
 
 func (r *NetworkManager) DefaultNetworkInterface() *adapter.NetworkInterface {
+	if r.interfaceMonitor == nil {
+		return nil
+	}
 	iif := r.interfaceMonitor.DefaultInterface()
 	if iif == nil {
 		return nil
@@ -508,6 +511,15 @@ func (r *NetworkManager) notifyInterfaceUpdate(_ *control.Interface, _ int) {
 func (r *NetworkManager) dispatchInterfaceUpdateLocked() {
 	defaultInterface := r.interfaceMonitor.DefaultInterface()
 	if defaultInterface == nil {
+		if r.platformInterface != nil &&
+			r.platformInterface.UsePlatformDefaultInterfaceMonitor() &&
+			!r.platformInterface.UsePlatformNetworkInterfaces() {
+			// WHY: Android VpnService platforms using interfaceMonitorStub protect sockets
+			// per-fd via AutoDetectInterfaceControl rather than tracking a Linux default
+			// interface. Keep pauseManager active and suppress the false error log.
+			r.pauseManager.NetworkWake()
+			return
+		}
 		r.pauseManager.NetworkPause()
 		r.logger.Error("missing default interface")
 		return
