@@ -1,0 +1,68 @@
+# Third-Party Open-Source Notices and Attribution (`NOTICE`)
+
+**NekoPro** (`moe.nb4a.siu`) is an independently maintained open-source Android application distributed under the **GNU General Public License v3.0 or later (`GPL-3.0-or-later`)** (see [`LICENSE`](LICENSE) and [`NekoBox/LICENSE`](NekoBox/LICENSE)).
+
+## Non-Affiliation and Naming Notice
+
+NekoPro is an independent personal derivative project and is **not** an official release of, affiliated with, endorsed by, or associated with **MatsuriDayo/NekoBoxForAndroid**, **nekohasekai / SagerNet (`sing-box`)**, **MetaCubeX (`mihomo`, `metacubexd`, `Yacd-meta`)**, or any other upstream maintainers.
+
+In accordance with Section 7 of the GNU General Public License v3.0 and the additional naming/non-association terms in [`sing-box/LICENSE`](sing-box/LICENSE):
+- This application is published solely under the name **Neko Pro** (`NekoPro`, Android package `moe.nb4a.siu`) and does **not** use `sing-box` as its product or brand name.
+- All references to `SagerNet/sing-box`, `MetaCubeX/mihomo`, `MatsuriDayo/NekoBoxForAndroid`, and other upstream repositories in documentation, source comments, and build metadata are strictly nominative and factual statements describing upstream source origins, protocol compatibility, and local patch boundaries (documented in [`docs/VENDORED_PATCHES.md`](docs/VENDORED_PATCHES.md)).
+
+---
+
+## Primary Upstream & Vendored Components
+
+### 1. MatsuriDayo / NekoBoxForAndroid & `libneko`
+- **Source**: <https://github.com/MatsuriDayo/NekoBoxForAndroid>
+- **Directory**: [`NekoBox/`](NekoBox/), [`libneko/`](libneko/)
+- **Copyright**: Copyright (C) 2021 by nekohasekai (`<contact-sagernet@sekai.icu>`) and NekoBoxForAndroid contributors
+- **License**: `GPL-3.0-or-later` ([`NekoBox/LICENSE`](NekoBox/LICENSE), [`NekoBox/libcore/LICENSE`](NekoBox/libcore/LICENSE))
+
+### 2. SagerNet / `sing-box` and SagerNet Go Libraries
+- **Source**: <https://github.com/SagerNet/sing-box> (vendored from upstream `v1.14.4` with local Android/DNS/ClashAPI/adapter patches tracked in [`docs/VENDORED_PATCHES.md`](docs/VENDORED_PATCHES.md))
+- **Directory**: [`sing-box/`](sing-box/)
+- **Copyright**: Copyright (C) 2022 by nekohasekai (`<contact-sagernet@sekai.icu>`)
+- **License**: `GPL-3.0-or-later` with Section 7 non-association/naming notice ([`sing-box/LICENSE`](sing-box/LICENSE)); subpackage [`sing-box/common/ja3/LICENSE`](sing-box/common/ja3/LICENSE) (`BSD-3-Clause`)
+- **Related upstream Go modules**: `github.com/sagernet/sing`, `github.com/sagernet/sing-tun`, `github.com/sagernet/sing-snell`, `github.com/sagernet/sing-quic`, `github.com/sagernet/sing-mux`, `github.com/sagernet/sing-vmess`, `github.com/sagernet/sing-shadowsocks`, `github.com/sagernet/sing-shadowtls`, `github.com/sagernet/quic-go`, `github.com/sagernet/wireguard-go`, `github.com/sagernet/gvisor`
+
+### 3. MetaCubeX / `mihomo`
+- **Source**: <https://github.com/MetaCubeX/mihomo> (vendored from upstream `v1.19.34` with local outbound resolver and MASQUE/Mieru/XHTTP patches tracked in [`docs/VENDORED_PATCHES.md`](docs/VENDORED_PATCHES.md))
+- **Directory**: [`mihomo/`](mihomo/)
+- **License**: `GPL-3.0-or-later` ([`mihomo/LICENSE`](mihomo/LICENSE)); subpackage [`mihomo/transport/kcptun/LICENSE.md`](mihomo/transport/kcptun/LICENSE.md) (`MIT`)
+
+---
+
+## Bundled Offline Web Dashboard Assets (`NekoBox/app/src/main/assets/`)
+
+### 1. MetaCubeX / `metacubexd` (`v1.276.0`)
+- **Upstream Release**: <https://github.com/MetaCubeX/metacubexd/releases/tag/v1.276.0>
+  - Upstream artifact `compressed-dist.tgz` SHA-256: `8ed5b1e312136a161eb7bbbfc2c4d7dc95217487d0873739668d897ed366af9c`
+- **Bundled Asset**: `NekoBox/app/src/main/assets/metacubexd.zip` (repackaged under `MetaCubeXD-dist/` directory prefix for offline asset extraction; `metacubexd.version.txt` = `127600`)
+  - Bundled `metacubexd.zip` SHA-256: `0c5f75eb7eac9c50b1ef6c729b1066091fbaeccba5341b7776df58e07c6fdff2`
+- **License**: `MIT` (<https://github.com/MetaCubeX/metacubexd/blob/main/LICENSE>)
+
+### 2. MetaCubeX / `Yacd-meta` (derived from `haishanh/yacd`)
+- **Upstream Repository**: <https://github.com/MetaCubeX/Yacd-meta> (`gh-pages` build snapshot `2023-06-14`, archive commit comment `f2876c17419e95622a78c73d1aba10fda1a14a47`, inherited from `MatsuriDayo/NekoBoxForAndroid`; `yacd.version.txt` = `3`)
+- **Bundled Asset**: `NekoBox/app/src/main/assets/yacd.zip`
+  - Bundled `yacd.zip` SHA-256: `5ab53b5c2dbee58d2074b00b71f228b3f7c0e748c9ac34501d33b01ef186b7a7`
+- **License**: `MIT` (Copyright (c) Haishan Bai and Yacd-meta contributors)
+
+---
+
+## Additional Go, Protocol, and Android Open-Source Dependencies
+
+- **Protocol & Core Go Libraries** (full dependency graph in [`NekoBox/libcore/go.mod`](NekoBox/libcore/go.mod)):
+  - [`exclavenetwork/sing-juicity`](https://github.com/exclavenetwork/sing-juicity) (`v0.3.1`, `GPL-3.0`)
+  - [`anytls/sing-anytls`](https://github.com/anytls/sing-anytls) (`v0.0.13`, `MIT`)
+  - [`enfein/mieru`](https://github.com/enfein/mieru) (`v3.39.0`, `GPL-3.0`)
+  - [`Mahdi-zarei/speedtest-go`](https://github.com/Mahdi-zarei/speedtest-go) (`MIT`)
+  - [`miekg/dns`](https://github.com/miekg/dns) (`BSD-3-Clause`), [`oschwald/maxminddb-golang`](https://github.com/oschwald/maxminddb-golang) (`ISC`), [`ulikunitz/xz`](https://github.com/ulikunitz/xz) (`BSD-3-Clause`), [`gofrs/uuid`](https://github.com/gofrs/uuid) (`MIT`), Go `golang.org/x/*` packages (`BSD-3-Clause`)
+- **Android / JVM Libraries** (declared in [`NekoBox/app/build.gradle.kts`](NekoBox/app/build.gradle.kts)):
+  - AndroidX Jetpack Libraries, Material Components for Android, Kotlin Standard Library & Kotlinx Coroutines (`Apache-2.0`)
+  - Square OkHttp & Okio, Google Gson & Guava, SnakeYAML, ZXing-Lite, Blacksquircle EditorKit, Material About Library, Process Phoenix, SimpleCityApps RecyclerView-FastScroll, Ini4j (`Apache-2.0`)
+  - EsotericSoftware Kryo (`BSD-3-Clause`)
+  - Android Core Library Desugaring `desugar_jdk_libs` (`GPL-2.0-only WITH Classpath-exception-2.0`)
+- **Design & Engineering Acknowledgements**:
+  - [`throneproj/ThroneForAndroid`](https://github.com/throneproj/ThroneForAndroid) (`GPL-3.0-or-later`, referenced for speed-test workflow and subscription User-Agent fallback patterns)
