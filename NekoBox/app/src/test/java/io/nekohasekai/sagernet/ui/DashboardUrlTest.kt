@@ -7,10 +7,18 @@ import org.junit.Test
 
 class DashboardUrlTest {
     @Test
-    fun localDashboardUrlEncodesSecretAndPreservesFragment() {
+    fun localDashboardUrlRoutesLegacyUiToIsolatedPanelAndPreservesFragment() {
         assertEquals(
-            "http://127.0.0.1:9090/ui/?hostname=127.0.0.1&port=9090&secret=a%2Bb%2Fc%3D&http=true#/proxies",
+            "http://127.0.0.1:9090/panel/metacubexd/?hostname=127.0.0.1&port=9090&secret=a%2Bb%2Fc%3D&http=true#/proxies",
             buildDashboardUrl("http://127.0.0.1:9090/ui/#/proxies", "a+b/c="),
+        )
+        assertEquals(
+            "http://127.0.0.1:9090/panel/yacd/?hostname=127.0.0.1&port=9090&secret=sec&http=true#/configs",
+            buildDashboardUrl("http://127.0.0.1:9090/ui/#/configs", "sec", panelKey = DASHBOARD_PANEL_YACD),
+        )
+        assertEquals(
+            "http://127.0.0.1:9090/panel/yacd/?hostname=127.0.0.1&port=9090&secret=sec&http=true",
+            buildDashboardUrl("http://127.0.0.1:9090/panel/yacd/", "sec", panelKey = DASHBOARD_PANEL_METACUBEXD),
         )
     }
 
@@ -25,6 +33,8 @@ class DashboardUrlTest {
     @Test
     fun allowedDashboardUrlRequiresLocalOrHttps() {
         assertTrue(isAllowedDashboardUrl("http://127.0.0.1:9090/ui/"))
+        assertTrue(isAllowedDashboardUrl("http://127.0.0.1:9090/panel/metacubexd/"))
+        assertTrue(isAllowedDashboardUrl("http://127.0.0.1:9090/panel/yacd/"))
         assertTrue(isAllowedDashboardUrl("http://localhost:9090/ui/"))
         assertTrue(isAllowedDashboardUrl("https://d.metacubex.one/"))
         assertFalse(isAllowedDashboardUrl("http://yacd.haishan.me/"))
@@ -36,7 +46,7 @@ class DashboardUrlTest {
     fun documentStartOriginRulesIncludeLoopbackAndCustomHttpsOrigin() {
         assertEquals(
             setOf("http://127.0.0.1:9090", "http://localhost:9090"),
-            buildDocumentStartOriginRules("http://127.0.0.1:9090/ui/"),
+            buildDocumentStartOriginRules("http://127.0.0.1:9090/panel/metacubexd/"),
         )
         assertEquals(
             setOf("http://127.0.0.1:9090", "http://localhost:9090", "https://d.metacubex.one:8443"),
@@ -47,15 +57,22 @@ class DashboardUrlTest {
     @Test
     fun serviceWorkerAssetPathsMatchAccurately() {
         assertTrue(isServiceWorkerAssetPath("/ui/sw.js"))
+        assertTrue(isServiceWorkerAssetPath("/ui//sw.js"))
+        assertTrue(isServiceWorkerAssetPath("/panel/metacubexd/sw.js"))
+        assertTrue(isServiceWorkerAssetPath("/panel/yacd//sw.js"))
         assertTrue(isServiceWorkerAssetPath("/ui/registerSW.js"))
+        assertTrue(isServiceWorkerAssetPath("/panel/yacd/registerSW.js"))
         assertTrue(isServiceWorkerAssetPath("/ui/workbox-38b98e80.js"))
-        assertFalse(isServiceWorkerAssetPath("/ui/_nuxt/DCrN1QU3.js"))
-        assertFalse(isServiceWorkerAssetPath("/ui/index.html"))
+        assertFalse(isServiceWorkerAssetPath("/panel/metacubexd/_nuxt/DCrN1QU3.js"))
+        assertFalse(isServiceWorkerAssetPath("/panel/metacubexd/index.html"))
+        assertTrue(serviceWorkerNeutralizationScript("/ui//sw.js").contains("self.registration.unregister()"))
+        assertTrue(serviceWorkerNeutralizationScript("/ui/registerSW.js").contains("getRegistrations"))
     }
 
     @Test
     fun localDashboardOriginChecksMatchStrictly() {
         assertTrue(isSameLocalDashboardOrigin("http://127.0.0.1:9090/ui/#/proxies"))
+        assertTrue(isSameLocalDashboardOrigin("http://127.0.0.1:9090/panel/metacubexd/#/overview"))
         assertTrue(isSameLocalDashboardOrigin("HTTP://127.0.0.1:9090/"))
         assertTrue(isSameLocalDashboardOrigin("http://localhost:9090/ui/"))
         assertTrue(isLocalDashboardUrl("HTTP://LOCALHOST:9090/"))
@@ -68,9 +85,9 @@ class DashboardUrlTest {
     @Test
     fun localDashboardBootstrapQueryDetectsRemoteHijack() {
         assertFalse(
-            hasDisallowedLocalBootstrapParams("http://127.0.0.1:9090/ui/?hostname=127.0.0.1&port=9090&secret=abc&http=true"),
+            hasDisallowedLocalBootstrapParams("http://127.0.0.1:9090/panel/metacubexd/?hostname=127.0.0.1&port=9090&secret=abc&http=true"),
         )
-        assertFalse(hasDisallowedLocalBootstrapParams("http://127.0.0.1:9090/ui/"))
+        assertFalse(hasDisallowedLocalBootstrapParams("http://127.0.0.1:9090/panel/yacd/"))
         assertTrue(
             hasDisallowedLocalBootstrapParams("http://127.0.0.1:9090/ui/?hostname=attacker.example&port=443"),
         )
@@ -95,6 +112,8 @@ class DashboardUrlTest {
         assertTrue(script.contains("__nekoLoopbackAuthPatched__"))
         assertTrue(script.contains("isLoopbackControllerTarget"))
         assertTrue(script.contains("api.github.com"))
+        assertTrue(script.contains("__nekoSwDisabled__"))
+        assertTrue(script.contains("caches.delete"))
         assertTrue(script.contains("const isPostFinish = false;"))
     }
 

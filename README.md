@@ -33,11 +33,21 @@ NekoPro 是一个独立维护、面向 Android 的个人代理客户端开源派
 
 ## 当前版本
 
-`Neko-Pro-1.4.8`（`Latest` 正式版）
+`Neko-Pro-1.4.9-rc1`（预览测试分支，主线最新正式版：`Neko-Pro-1.4.8`）
 
-- [GitHub Release (v1.4.8)](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.8)
-- 核心 APK：`NekoBox-Neko-Pro-1.4.8-arm64-v8a.apk`
+> **注意**：请勿日常使用 `-rc` 预览测试版本，日常使用请下载正式版 [`v1.4.8`（`Latest`）](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.8)。
+
+- [最新正式版 v1.4.8 Release](https://github.com/Siu-Leung/NekoPro/releases/tag/v1.4.8)
+- 测试版 APK：`NekoBox-Neko-Pro-1.4.9-rc1-arm64-v8a.apk`
 - 历史版本完整记录：[`CHANGELOG.md`](CHANGELOG.md)
+
+### v1.4.9-rc1 预览版改动日志 (2026-11-26)
+
+- **彻底根除旧版 Yacd ServiceWorker 缓存劫持 + 双内置面板零重载秒切**
+  - **独立路由跳出旧 `/ui/` 作用域**：`clashapi` 同时挂载独立静态路由 `/panel/metacubexd/` 与 `/panel/yacd/`（兼容保留 `/ui/`），内置面板自动从历史 `/ui/` 迁移至独立子路由，彻底摆脱旧版 `v1.4.7` 驻留于 `/ui/` 作用域的 Workbox ServiceWorker 与 2023 `Last-Modified` 启发式磁盘缓存劫持；在右上角菜单切换 MetaCubeXD / Yacd 直接秒切页面，**不再触发 `:bg` 与整机 VPN 重载断流**。
+  - **服务端 + `ServiceWorkerController` + `DOCUMENT_START` 三重清剿残留 SW**：`server_fs.go` 与 Android API 24+ `ServiceWorkerController` 对所有 `sw.js` / `registerSW.js` / `workbox-*.js`（含 `.//sw.js`）直接返回 `200 OK` 自卸载清缓存脚本（`skipWaiting` + 清空 `CacheStorage` + `unregister`），并在 `DOCUMENT_START` 拦截本地回环 `navigator.serviceWorker.register` 与清理历史磁盘缓存，彻底消除 `sw.js 404`、CSS `text/plain` 与 `<!DOCTYPE` JSON 报错。
+- **修复 Android 启动 `missing default interface` 误报与 `pauseManager` 误挂起**
+  - 在 `sing-box/route/network.go` 识别 Android `VpnService.protect` 托管的 `interfaceMonitorStub` 模式，消除每次启动/重载打印的虚假 `ERROR[0000] network: missing default interface` 日志，并保持 `pauseManager` 处于唤醒态（避免挂起 WireGuard 绑定恢复、URLTest 自动测速组与远程规则集刷新）。
 
 ### v1.4.8 正式版改动日志 (2026-11-26)
 

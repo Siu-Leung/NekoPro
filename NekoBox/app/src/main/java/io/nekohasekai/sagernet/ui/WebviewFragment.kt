@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.view.MenuItem
 import android.view.View
@@ -48,6 +50,8 @@ internal const val LOCAL_DASHBOARD_PORT = 9090
 internal const val LOCAL_DASHBOARD_BASE_URL = "http://$LOCAL_DASHBOARD_HOST_IP:$LOCAL_DASHBOARD_PORT"
 internal const val LOCAL_DASHBOARD_ALT_BASE_URL = "http://$LOCAL_DASHBOARD_HOST_NAME:$LOCAL_DASHBOARD_PORT"
 internal const val LOCAL_DASHBOARD_UI_URL = "$LOCAL_DASHBOARD_BASE_URL/ui/"
+internal const val LOCAL_DASHBOARD_METACUBEXD_URL = "$LOCAL_DASHBOARD_BASE_URL/panel/metacubexd/"
+internal const val LOCAL_DASHBOARD_YACD_URL = "$LOCAL_DASHBOARD_BASE_URL/panel/yacd/"
 internal const val CLASH_AUTH_COOKIE_NAME = "nekopro_clash_auth"
 internal const val DASHBOARD_PANEL_METACUBEXD = "metacubexd"
 internal const val DASHBOARD_PANEL_YACD = "yacd"
@@ -55,7 +59,37 @@ internal const val DASHBOARD_PANEL_YACD = "yacd"
 private const val CONTROLLER_CONNECT_TIMEOUT_MS = 250
 private const val CONTROLLER_STARTUP_POLL_STEP_MS = 150L
 private const val CONTROLLER_STARTUP_MAX_ATTEMPTS = 24
+private const val DUPLICATE_CONNECT_LOAD_GUARD_MS = 1500L
 private val WORKBOX_SCRIPT_REGEX = Regex("""^.*/workbox-[0-9a-zA-Z_-]+\.js$""")
+private val MULTI_SLASH_REGEX = Regex("""/+""")
+
+private const val SELF_DESTRUCT_SW_JS = """self.addEventListener('install', () => { self.skipWaiting(); });
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (_) {}
+    try {
+      await self.registration.unregister();
+    } catch (_) {}
+  })());
+});
+"""
+
+private const val NEUTRALIZE_REGISTER_SW_JS = """(async () => {
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (typeof caches !== 'undefined' && caches.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (_) {}
+})();
+"""
 
 /**
  * Encodes [value] as a safely quoted JavaScript string literal without relying on
@@ -136,14 +170,39 @@ internal fun isAllowedDashboardUrl(url: String): Boolean {
 }
 
 /**
- * Identifies PWA ServiceWorker scripts (`/sw.js`, `/registerSW.js`, `/workbox-*.js`) so WebView
- * can neutralize them and prevent cached HTML from bypassing fresh bootstrap state.
+ * Identifies PWA ServiceWorker scripts (`/sw.js`, `/registerSW.js`, `/workbox-*.js`, including
+ * duplicate-slash variants like `/ui//sw.js`) so WebView can neutralize them and prevent cached
+ * HTML from bypassing fresh bootstrap state.
  */
 internal fun isServiceWorkerAssetPath(path: String?): Boolean {
     if (path.isNullOrBlank()) return false
-    return path.endsWith("/sw.js") ||
-        path.endsWith("/registerSW.js") ||
-        WORKBOX_SCRIPT_REGEX.matches(path)
+    val normalized = path.replace(MULTI_SLASH_REGEX, "/")
+    return normalized.endsWith("/sw.js") ||
+        normalized.endsWith("/registerSW.js") ||
+        WORKBOX_SCRIPT_REGEX.matches(normalized)
+}
+
+internal fun serviceWorkerNeutralizationScript(path: String?): String {
+    val normalized = path.orEmpty().replace(MULTI_SLASH_REGEX, "/")
+    return if (normalized.endsWith("/sw.js")) SELF_DESTRUCT_SW_JS else NEUTRALIZE_REGISTER_SW_JS
+}
+
+internal fun localPanelBaseUrl(panelKey: String): String =
+    if (panelKey == DASHBOARD_PANEL_YACD) LOCAL_DASHBOARD_YACD_URL else LOCAL_DASHBOARD_METACUBEXD_URL
+
+internal fun resolveLocalPanelTargetUrl(
+    configuredUrl: String,
+    panelKey: String = DASHBOARD_PANEL_METACUBEXD,
+): String {
+    val parsedPath = runCatching { URI(configuredUrl.trim()).path.orEmpty() }
+        .getOrDefault("")
+        .replace(MULTI_SLASH_REGEX, "/")
+        .lowercase(Locale.ROOT)
+    return when {
+        parsedPath.startsWith("/panel/yacd") -> LOCAL_DASHBOARD_YACD_URL
+        parsedPath.startsWith("/panel/metacubexd") -> LOCAL_DASHBOARD_METACUBEXD_URL
+        else -> localPanelBaseUrl(panelKey)
+    }
 }
 
 /**
@@ -217,15 +276,21 @@ internal fun hasDisallowedLocalBootstrapParams(targetUrl: String): Boolean {
 
 /**
  * Builds the effective WebView URL for the Clash dashboard.
- * Local dashboard URLs are canonicalized with URL-encoded loopback bootstrap parameters
+ * Local dashboard URLs are routed to isolated `/panel/metacubexd/` or `/panel/yacd/` subpaths
+ * (escaping any legacy `/ui/` ServiceWorker scope) with URL-encoded loopback bootstrap parameters
  * (`hostname`, `port`, `secret`, `http=true`) while preserving hash routes (`#/proxies`).
  */
-internal fun buildDashboardUrl(configuredUrl: String, secret: String): String {
+internal fun buildDashboardUrl(
+    configuredUrl: String,
+    secret: String,
+    panelKey: String = DASHBOARD_PANEL_METACUBEXD,
+): String {
     if (!isLocalDashboardUrl(configuredUrl)) return configuredUrl
     val rawFragment = runCatching { URI(configuredUrl.trim()).rawFragment }.getOrNull()
     val fragmentSuffix = if (!rawFragment.isNullOrEmpty()) "#$rawFragment" else ""
     val encodedSecret = URLEncoder.encode(secret, Charsets.UTF_8.name()).replace("+", "%20")
-    return "${LOCAL_DASHBOARD_UI_URL}?hostname=$LOCAL_DASHBOARD_HOST_IP&port=$LOCAL_DASHBOARD_PORT&secret=$encodedSecret&http=true$fragmentSuffix"
+    val targetBaseUrl = resolveLocalPanelTargetUrl(configuredUrl, panelKey)
+    return "${targetBaseUrl}?hostname=$LOCAL_DASHBOARD_HOST_IP&port=$LOCAL_DASHBOARD_PORT&secret=$encodedSecret&http=true$fragmentSuffix"
 }
 
 /**
@@ -523,7 +588,43 @@ internal fun buildLocalSecretSyncScript(
                 }
             }
 
-            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            if (isLoopbackControllerTarget(window.location.href)) {
+                try {
+                    if (navigator.serviceWorker) {
+                        if (typeof navigator.serviceWorker.register === 'function' && !navigator.serviceWorker.__nekoSwDisabled__) {
+                            navigator.serviceWorker.__nekoSwDisabled__ = true;
+                            navigator.serviceWorker.register = function() {
+                                const baseTarget = typeof EventTarget === 'function' ? new EventTarget() : {
+                                    addEventListener: () => {},
+                                    removeEventListener: () => {},
+                                    dispatchEvent: () => false
+                                };
+                                const noopReg = Object.assign(baseTarget, {
+                                    installing: null,
+                                    waiting: null,
+                                    active: null,
+                                    scope: window.location.origin + '/',
+                                    updateViaCache: 'none',
+                                    onupdatefound: null,
+                                    update: () => Promise.resolve(noopReg),
+                                    unregister: () => Promise.resolve(true)
+                                });
+                                return Promise.resolve(noopReg);
+                            };
+                        }
+                        if (typeof navigator.serviceWorker.getRegistrations === 'function') {
+                            navigator.serviceWorker.getRegistrations().then((regs) => {
+                                regs.forEach((reg) => { try { reg.unregister(); } catch (_) {} });
+                            }).catch(() => {});
+                        }
+                    }
+                    if (typeof caches !== 'undefined' && caches && typeof caches.keys === 'function') {
+                        caches.keys().then((keys) => {
+                            keys.forEach((key) => { try { caches.delete(key); } catch (_) {} });
+                        }).catch(() => {});
+                    }
+                } catch (_) {}
+            } else if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
                 navigator.serviceWorker.getRegistrations().then((regs) => {
                     regs.forEach((reg) => { try { reg.unregister(); } catch (_) {} });
                 }).catch(() => {});
@@ -602,13 +703,20 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
     @Volatile
     private var isPollingControllerReload = false
 
+    @Volatile
+    private var lastControllerLoadDispatchedAtMs = 0L
+
     /**
      * Triggered by [MainActivity] when the background proxy service transitions state so the
      * dashboard automatically loads once the VPN connects without duplicating active poll loads.
      */
     fun onProxyServiceStateChanged(state: BaseService.State) {
         if (!isAdded || viewBinding == null) return
-        if (state == BaseService.State.Connected && !isPollingControllerReload) {
+        val elapsedSinceLastLoad = SystemClock.elapsedRealtime() - lastControllerLoadDispatchedAtMs
+        if (state == BaseService.State.Connected &&
+            !isPollingControllerReload &&
+            elapsedSinceLastLoad > DUPLICATE_CONNECT_LOAD_GUARD_MS
+        ) {
             loadDashboardUrl(DataStore.yacdURL)
         }
     }
@@ -640,11 +748,38 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
             DataStore.dashboardBuiltInMcxdMigrated = true
             if (shouldMigratePublicDemoDashboardUrl(trimmed)) {
                 DataStore.dashboardPanel = DASHBOARD_PANEL_METACUBEXD
-                DataStore.yacdURL = LOCAL_DASHBOARD_UI_URL
-                return LOCAL_DASHBOARD_UI_URL
+                val target = localPanelBaseUrl(DASHBOARD_PANEL_METACUBEXD)
+                DataStore.yacdURL = target
+                return target
+            }
+        }
+        if (isLocalDashboardUrl(trimmed)) {
+            val path = runCatching { URI(trimmed).path.orEmpty() }
+                .getOrDefault("")
+                .replace(MULTI_SLASH_REGEX, "/")
+                .lowercase(Locale.ROOT)
+            if (path.isEmpty() || path == "/" || path == "/ui" || path == "/ui/") {
+                val migratedLocalUrl = localPanelBaseUrl(DataStore.dashboardPanel)
+                DataStore.yacdURL = migratedLocalUrl
+                return migratedLocalUrl
             }
         }
         return trimmed
+    }
+
+    private fun buildServiceWorkerWebResponse(path: String?): WebResourceResponse {
+        val script = serviceWorkerNeutralizationScript(path)
+        return WebResourceResponse(
+            "application/javascript",
+            "utf-8",
+            200,
+            "OK",
+            mapOf(
+                "Cache-Control" to "no-store, no-cache, must-revalidate",
+                "Service-Worker-Allowed" to "/",
+            ),
+            ByteArrayInputStream(script.toByteArray(Charsets.UTF_8)),
+        )
     }
 
     /**
@@ -753,6 +888,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                         }
                     }
                 } finally {
+                    lastControllerLoadDispatchedAtMs = SystemClock.elapsedRealtime()
                     isPollingControllerReload = false
                 }
             }
@@ -778,7 +914,8 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 }
                 seedLocalAuthCookies(secret)
                 installDocumentStartScript(effectiveUrl, secret)
-                mWebView.loadUrl(buildDashboardUrl(effectiveUrl, secret))
+                lastControllerLoadDispatchedAtMs = SystemClock.elapsedRealtime()
+                mWebView.loadUrl(buildDashboardUrl(effectiveUrl, secret, DataStore.dashboardPanel))
             }
         }
     }
@@ -835,6 +972,20 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
         viewBinding = binding
 
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            runCatching {
+                ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
+                    override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
+                        val requestUrl = request.url?.toString().orEmpty()
+                        if (isSameLocalDashboardOrigin(requestUrl) && isServiceWorkerAssetPath(request.url?.path)) {
+                            return buildServiceWorkerWebResponse(request.url?.path)
+                        }
+                        return null
+                    }
+                })
+            }.onFailure { Logs.w(it) }
+        }
+
         mWebView = binding.webview
         mWebView.settings.apply {
             domStorageEnabled = true
@@ -923,14 +1074,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                     return super.shouldInterceptRequest(view, request)
                 }
                 if (isSameLocalDashboardOrigin(requestUrl) && isServiceWorkerAssetPath(request.url?.path)) {
-                    return WebResourceResponse(
-                        "application/javascript",
-                        "utf-8",
-                        200,
-                        "OK",
-                        mapOf("Cache-Control" to "no-store"),
-                        ByteArrayInputStream("/* sw disabled in WebView */".toByteArray(Charsets.UTF_8)),
-                    )
+                    return buildServiceWorkerWebResponse(request.url?.path)
                 }
                 if (!isSameLocalDashboardSubresourceOrigin(requestUrl)) {
                     return WebResourceResponse(
@@ -970,15 +1114,18 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 syncSecretIntoActivePage(view, url, isPostFinishFallback = true)
             }
         }
-        mWebView.clearCache(false)
+        val purgeLegacyDiskCache = !DataStore.dashboardLegacySwCacheClearedV1
+        if (purgeLegacyDiskCache) {
+            DataStore.dashboardLegacySwCacheClearedV1 = true
+        }
+        mWebView.clearCache(purgeLegacyDiskCache)
         loadDashboardUrl(DataStore.yacdURL)
     }
 
     private fun switchBuiltInPanel(panelKey: String, panelDisplayName: String) {
-        val panelChanged = DataStore.dashboardPanel != panelKey
         DataStore.dashboardPanel = panelKey
-        DataStore.yacdURL = LOCAL_DASHBOARD_UI_URL
-        cachedSecret = null
+        val targetUrl = localPanelBaseUrl(panelKey)
+        DataStore.yacdURL = targetUrl
         if (isAdded) {
             Toast.makeText(
                 requireContext(),
@@ -986,7 +1133,9 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 Toast.LENGTH_SHORT,
             ).show()
         }
-        loadDashboardUrl(LOCAL_DASHBOARD_UI_URL, forceControllerReload = panelChanged)
+        // WHY: Both `/panel/metacubexd/` and `/panel/yacd/` are mounted simultaneously by
+        // `clashapi`, so switching panels never needs to restart `:bg` or tear down the VPN.
+        loadDashboardUrl(targetUrl, forceControllerReload = false)
     }
 
     @SuppressLint("CheckResult")
@@ -1034,14 +1183,23 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                             ).show()
                             return@setPositiveButton
                         }
-                        DataStore.yacdURL = newUrl
-                        if (!isLocalDashboardUrl(newUrl)) {
+                        if (isLocalDashboardUrl(newUrl)) {
+                            val lowerPath = runCatching { URI(newUrl).path.orEmpty() }
+                                .getOrDefault("")
+                                .lowercase(Locale.ROOT)
+                            if (lowerPath.startsWith("/panel/yacd")) {
+                                DataStore.dashboardPanel = DASHBOARD_PANEL_YACD
+                            } else if (lowerPath.startsWith("/panel/metacubexd")) {
+                                DataStore.dashboardPanel = DASHBOARD_PANEL_METACUBEXD
+                            }
+                        } else {
                             Toast.makeText(
                                 requireContext(),
                                 R.string.dashboard_custom_url_secret_hint,
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
+                        DataStore.yacdURL = newUrl
                         loadDashboardUrl(newUrl)
                     }
                     .setNegativeButton(android.R.string.cancel, null)
@@ -1057,6 +1215,9 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
     override fun onDestroyView() {
         loadJob?.cancel()
         loadJob = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            runCatching { ServiceWorkerController.getInstance().setServiceWorkerClient(null) }
+        }
         runCatching { documentStartScriptHandler?.remove() }
         documentStartScriptHandler = null
         viewBinding = null

@@ -8,10 +8,13 @@ NekoPro vendors upstream `SagerNet/sing-box` (`v1.14.4`) and `MetaCubeX/mihomo` 
   - Implements `Upstream()` on `multiplexConn` so UoT UDP DNS stream desync errors are unwrapped and fall back cleanly to DNS-over-TCP.
 - `common/tls/`:
   - Backports leaf-certificate SHA-256 pinning from `SagerNet/sing-box v1.15.0-alpha.13` (`option.OutboundTLSOptions.certificate_sha256`, padded Base64), distinct from SPKI `certificate_public_key_sha256`; pin verification runs even when `insecure` is set, and conflicts or unsupported TLS engines fail closed.
-- `experimental/clashapi/` (`server.go`, `server_resources.go`, `connections.go`, `api_meta.go`):
+- `experimental/clashapi/` (`server.go`, `server_fs.go`, `server_resources.go`, `connections.go`, `api_meta.go`):
   - Constant-time `subtle.ConstantTimeCompare` secret verification for `Authorization: Bearer` and WebSocket `?token=`.
   - Loopback same-origin session cookie fallback (`nekopro_clash_auth`) with `Sec-Fetch-Site` and port-matched `Origin`/`Referer` CSRF validation for the built-in Android WebView dashboard.
+  - Simultaneous isolated `/panel/metacubexd/` and `/panel/yacd/` static mounts (escaping legacy `/ui/` ServiceWorker scope and enabling zero-reload panel switching), `200 OK` self-unregistering ServiceWorker/CacheStorage neutralization for `sw.js` / `registerSW.js` / `workbox-*.js`, and `Cache-Control: no-store` on HTML/config entrypoints.
   - Fixes WebSocket goroutine/subscription leaks across `/logs`, `/traffic`, `/connections`, and `/memory` (`log/observable.go` non-blocking/closed subscriber cleanup), plus Zip-Slip path traversal hardening in `downloadZIP`.
+- `route/network.go`:
+  - Guards nil `interfaceMonitor` in `DefaultNetworkInterface()` and keeps `pauseManager` awake without logging a false `missing default interface` error when the host platform uses a per-fd `AutoDetectInterfaceControl` stub monitor (`interfaceMonitorStub` on Android `VpnService`).
 - `protocol/mihomo_adapter/`:
   - Process-global Android VPN socket protection (`InstallProtectHook`), `installSingBoxResolverOnce()` wiring, strict DNS router bridge (`activeDNSRouter`, `strict: true` fail-closed lookup/exchange blocking both `SystemResolver` and non-test `dns-direct`/`dns-local` fallback), per-outbound `NewOutboundResolver` bridge for QUIC/ECH server resolution, per-instance `NewTargetResolver` for UDP/MASQUE target resolution (`IPVersion` honored), init-only `resolver.DisableIPv6 = false`, and UDP resolved packet wrapper.
 - `protocol/vless_xhttp/`:

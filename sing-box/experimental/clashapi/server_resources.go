@@ -27,6 +27,8 @@ func (s *Server) checkAndDownloadExternalUI() {
 	// Fallback check for Android relative paths: if s.externalUI doesn't exist, check common fallback paths
 	if _, err := os.Stat(s.externalUI); err != nil {
 		fallbacks := []string{
+			"metacubexd",
+			"../files/metacubexd",
 			"yacd",
 			"../files/yacd",
 		}
@@ -44,6 +46,32 @@ func (s *Server) checkAndDownloadExternalUI() {
 	if len(entries) == 0 {
 		s.logger.Warn("external ui folder empty at: ", s.externalUI)
 	}
+}
+
+// resolveBuiltInPanelDir locates an extracted built-in dashboard directory (`metacubexd` or `yacd`)
+// adjacent to `externalUI` (e.g. `<filesDir>/metacubexd` and `<filesDir>/yacd`) so both panels can
+// be served simultaneously on isolated routes without restarting the core or colliding on `/ui/` SW scope.
+func resolveBuiltInPanelDir(externalUI string, panelName string) string {
+	if panelName == "" || strings.ContainsAny(panelName, `/\`) || panelName == "." || panelName == ".." {
+		return ""
+	}
+	var candidates []string
+	if trimmed := strings.TrimSpace(externalUI); trimmed != "" {
+		cleaned := filepath.Clean(trimmed)
+		if filepath.Base(cleaned) == panelName {
+			candidates = append(candidates, cleaned)
+		}
+		if parent := filepath.Dir(cleaned); parent != "" {
+			candidates = append(candidates, filepath.Join(parent, panelName))
+		}
+	}
+	candidates = append(candidates, panelName, filepath.Join("../files", panelName))
+	for _, candidate := range candidates {
+		if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (s *Server) downloadExternalUI() error {

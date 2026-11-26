@@ -138,10 +138,7 @@ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options op
 		if err != nil && !os.IsNotExist(err) {
 			return nil, E.Cause(err, "read external UI directory")
 		}
-		chiRouter.Group(func(r chi.Router) {
-			r.Get("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently).ServeHTTP)
-			r.Handle("/ui/*", http.StripPrefix("/ui/", fileServerWithMime(s.externalUI)))
-		})
+		mountBuiltInPanels(chiRouter, func() string { return s.externalUI })
 	}
 	return s, nil
 }
